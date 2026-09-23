@@ -6,6 +6,7 @@ on:
   pull_request:
     paths: ["ios/**", ".github/workflows/ios.yml", ".github/scripts/xcodebuild.sh"]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:

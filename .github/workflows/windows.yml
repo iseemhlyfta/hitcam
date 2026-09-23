@@ -6,6 +6,7 @@ on:
   pull_request:
     paths: ["windows/**", "docs/protocol.md", ".github/workflows/windows.yml"]
   workflow_dispatch:
+  workflow_call:
 
 jobs:
   build:

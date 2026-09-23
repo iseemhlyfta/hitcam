@@ -58,6 +58,9 @@ dotnet run --project HitCam.FakePhone -- 127.0.0.1 47800
 ```
 
 iOS собирается в GitHub Actions (`.github/workflows/ios.yml`): артефакт `HitCam-unsigned.ipa`.
+
+Релиз: `git tag v0.1.0 && git push origin v0.1.0` — workflow **Release** собирает приложение для Windows и IPA
+и публикует их на странице Releases.
 Установка на iPhone без Mac — см. [docs/install-ios.md](docs/install-ios.md).
 
 ## Лицензия / License

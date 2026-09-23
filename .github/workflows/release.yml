@@ -1,0 +1,51 @@
+name: Release
+
+# Push a tag like v0.1.0 to build both apps and publish them as a GitHub release.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    uses: ./.github/workflows/windows.yml
+
+  ios:
+    uses: ./.github/workflows/ios.yml
+
+  publish:
+    needs: [windows, ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: HitCam-windows-x64
+          path: HitCam
+      - uses: actions/download-artifact@v4
+        with:
+          name: HitCam-ios-unsigned-ipa
+          path: ios
+
+      - name: Package
+        run: |
+          test -f HitCam/HitCam.exe && test -f HitCam/HitCamVCam.dll
+          (cd HitCam && zip -r ../HitCam-windows-x64.zip .)
+          cp ios/HitCam-unsigned.ipa HitCam-ios-unsigned.ipa
+          ls -la *.zip *.ipa
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          cat > notes.md <<'EOF'
+          **Windows 11:** распакуйте `HitCam-windows-x64.zip` и запустите `HitCam.exe`. При первом запуске нажмите
+          «Установить камеру» — после этого камера **HitCam** появится в Zoom, Discord, Teams, OBS и браузерах.
+
+          **iPhone:** установите `HitCam-ios-unsigned.ipa` через Sideloadly —
+          см. [docs/install-ios.md](https://github.com/${{ github.repository }}/blob/main/docs/install-ios.md).
+          EOF
+          gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa \
+            --repo "${{ github.repository }}" --title "HitCam $TAG" --notes-file notes.md --generate-notes
