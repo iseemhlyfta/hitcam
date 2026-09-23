@@ -1,0 +1,46 @@
+name: iOS
+
+on:
+  push:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  pull_request:
+    paths: ["ios/**", ".github/workflows/ios.yml"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: ios
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Unit tests (simulator)
+        run: |
+          SIM=$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
+          echo "Simulator: $SIM"
+          xcodebuild test -project HitCam.xcodeproj -scheme HitCam -destination "id=$SIM" CODE_SIGNING_ALLOWED=NO | xcpretty || exit ${PIPESTATUS[0]}
+
+      - name: Build unsigned app
+        run: |
+          xcodebuild build -project HitCam.xcodeproj -scheme HitCam -configuration Release \
+            -destination 'generic/platform=iOS' -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | xcpretty || exit ${PIPESTATUS[0]}
+
+      # Sideloadly (or AltStore/SideStore) re-signs this IPA with your Apple ID when installing.
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/Build/Products/Release-iphoneos/HitCam.app Payload/
+          zip -qr HitCam-unsigned.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HitCam-ios-unsigned-ipa
+          path: ios/HitCam-unsigned.ipa

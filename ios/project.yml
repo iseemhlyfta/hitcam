@@ -1,0 +1,65 @@
+# XcodeGen spec: `xcodegen generate` creates HitCam.xcodeproj (not committed).
+name: HitCam
+options:
+  bundleIdPrefix: io.github.hitnes
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+targets:
+  HitCam:
+    type: application
+    platform: iOS
+    sources:
+      - path: HitCam
+    info:
+      path: HitCam/Info.plist
+      properties:
+        CFBundleDisplayName: HitCam
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        LSRequiresIPhoneOS: true
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        UIRequiredDeviceCapabilities: [arm64]
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UIStatusBarHidden: false
+        CFBundleDevelopmentRegion: en
+        CFBundleLocalizations: [en, ru]
+        NSCameraUsageDescription: HitCam streams the camera to your PC over the local network. / HitCam передаёт изображение камеры на ваш ПК по локальной сети.
+        NSLocalNetworkUsageDescription: HitCam connects directly to the HitCam app on your PC in the same Wi-Fi network. / HitCam подключается напрямую к HitCam на ПК в той же Wi-Fi сети.
+        NSBonjourServices: [_hitcam._tcp]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.hitnes.hitcam
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: false
+        ENABLE_PREVIEWS: true
+  HitCamTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: HitCamTests
+    dependencies:
+      - target: HitCam
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: true
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.hitnes.hitcam.tests
+schemes:
+  HitCam:
+    build:
+      targets:
+        HitCam: all
+        HitCamTests: [test]
+    test:
+      targets: [HitCamTests]

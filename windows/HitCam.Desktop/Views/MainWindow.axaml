@@ -1,0 +1,77 @@
+<Window
+    x:Class="HitCam.Desktop.Views.MainWindow"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    Title="HitCam"
+    Width="720"
+    Height="520"
+    MinWidth="560"
+    MinHeight="440"
+    x:DataType="vm:MainViewModel"
+    WindowStartupLocation="CenterScreen">
+
+    <Grid Margin="24" RowDefinitions="*,Auto">
+
+        <!--  Waiting for a phone: QR code and addresses  -->
+        <Grid ColumnDefinitions="Auto,*" IsVisible="{Binding IsWaiting}">
+            <Border
+                Width="232"
+                Height="232"
+                Padding="8"
+                VerticalAlignment="Top"
+                Background="White"
+                CornerRadius="12">
+                <Image Source="{Binding QrCode}" RenderOptions.BitmapInterpolationMode="None" />
+            </Border>
+            <StackPanel Grid.Column="1" Margin="24,0,0,0" Spacing="12">
+                <TextBlock Classes="H3" Text="{x:Static svc:Loc.WaitingTitle}" Theme="{StaticResource TitleTextBlock}" />
+                <TextBlock Text="{x:Static svc:Loc.WaitingHint}" TextWrapping="Wrap" />
+                <SelectableTextBlock
+                    FontFamily="Consolas,monospace"
+                    FontSize="22"
+                    FontWeight="SemiBold"
+                    Text="{Binding Addresses}" />
+            </StackPanel>
+        </Grid>
+
+        <!--  Streaming: stats  -->
+        <StackPanel IsVisible="{Binding IsConnected}" Spacing="16">
+            <TextBlock Classes="H3" Text="{Binding StatusText}" Theme="{StaticResource TitleTextBlock}" />
+            <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="16">
+                <TextBlock Text="{x:Static svc:Loc.Stream}" Opacity="0.7" />
+                <TextBlock Grid.Column="1" Text="{Binding StreamText}" />
+                <TextBlock Grid.Row="1" Text="{x:Static svc:Loc.Received}" Opacity="0.7" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Text="{Binding ReceivedText}" />
+                <TextBlock Grid.Row="2" Text="{x:Static svc:Loc.Latency}" Opacity="0.7" />
+                <TextBlock Grid.Row="2" Grid.Column="1" Text="{Binding LatencyText}" />
+                <TextBlock Grid.Row="3" Text="{x:Static svc:Loc.Phone}" Opacity="0.7" />
+                <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding PhoneText}" />
+            </Grid>
+            <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.PreviewPending}" TextWrapping="Wrap" />
+            <Button HorizontalAlignment="Left" Command="{Binding DisconnectCommand}" Content="{x:Static svc:Loc.Disconnect}" />
+        </StackPanel>
+
+        <!--  Pairing overlay  -->
+        <Border
+            Grid.RowSpan="2"
+            Margin="-24"
+            Background="{DynamicResource SemiColorBackground0}"
+            IsVisible="{Binding IsPairing}">
+            <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
+                <TextBlock HorizontalAlignment="Center" Text="{Binding PinDevice}" Opacity="0.7" />
+                <TextBlock HorizontalAlignment="Center" Classes="H3" Text="{x:Static svc:Loc.PairingTitle}" Theme="{StaticResource TitleTextBlock}" />
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    FontFamily="Consolas,monospace"
+                    FontSize="56"
+                    FontWeight="Bold"
+                    LetterSpacing="8"
+                    Text="{Binding Pin}" />
+            </StackPanel>
+        </Border>
+
+        <TextBlock Grid.Row="1" Margin="0,12,0,0" Opacity="0.6" Text="{Binding StatusText}" IsVisible="{Binding IsWaiting}" />
+    </Grid>
+</Window>

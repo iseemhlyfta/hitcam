@@ -1,0 +1,11 @@
+<Application
+    x:Class="HitCam.Desktop.App"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:semi="https://irihi.tech/semi"
+    Name="HitCam"
+    RequestedThemeVariant="Default">
+    <Application.Styles>
+        <semi:SemiTheme />
+    </Application.Styles>
+</Application>
