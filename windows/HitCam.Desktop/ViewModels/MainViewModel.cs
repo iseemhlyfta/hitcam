@@ -60,6 +60,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
         });
         _server.Disconnected += (_, _) => _pipeline.ClearSignal();
+
+        Controls = new CameraControlsViewModel(control => _server.SendControlAsync(control));
+        _server.CapabilitiesReceived += c => Dispatcher.UIThread.Post(() => Controls.ApplyCapabilities(c));
+        _server.CameraStateReceived += s => Dispatcher.UIThread.Post(() => Controls.ApplyState(s));
+        _server.Disconnected += (_, _) => Dispatcher.UIThread.Post(Controls.Reset);
         _pipeline.KeyframeNeeded += () => _ = _server.RequestKeyframeAsync();
         _server.StreamConfigReceived += c => Dispatcher.UIThread.Post(() =>
             StreamText = $"{c.Codec.ToUpperInvariant()} {c.Width}×{c.Height} @ {c.Fps} fps, {c.BitrateKbps / 1000.0:0.#} Mbit/s");
@@ -82,6 +87,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     public ReactiveCommand<Unit, Unit> DisconnectCommand { get; }
 
     public ReactiveCommand<Unit, Unit> InstallCameraCommand { get; }
+
+    /// <summary>Phone camera settings, editable from the PC.</summary>
+    public CameraControlsViewModel Controls { get; }
 
     public string CameraText { get => _cameraText; private set => this.RaiseAndSetIfChanged(ref _cameraText, value); }
 

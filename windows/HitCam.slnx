@@ -2,5 +2,6 @@
   <Project Path="HitCam.Core/HitCam.Core.csproj" />
   <Project Path="HitCam.Core.Tests/HitCam.Core.Tests.csproj" />
   <Project Path="HitCam.Desktop/HitCam.Desktop.csproj" />
+  <Project Path="HitCam.Desktop.Tests/HitCam.Desktop.Tests.csproj" />
   <Project Path="HitCam.FakePhone/HitCam.FakePhone.csproj" />
 </Solution>

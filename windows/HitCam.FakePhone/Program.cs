@@ -68,7 +68,20 @@ else if (ack.Status != HelloStatus.Accepted)
 await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", 1920, 1080, 30, 8000), ProtocolJson.Default.StreamConfig, Now()));
 await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", 30, 8000, 0), ProtocolJson.Default.Status, Now()));
 
-// Answer pings and print controls in the background.
+// Cameras and state like an iPhone with three back lenses, so the PC's camera settings can be exercised.
+var capabilities = new Capabilities(
+    [
+        new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true),
+        new CameraInfo("back-ultrawide", "Ultra Wide", "back", 1, 10, true, false),
+        new CameraInfo("back-tele", "Telephoto", "back", 1, 10, true, true),
+        new CameraInfo("front", "Front", "front", 1, 5, false, false),
+    ],
+    [new VideoPreset(1280, 720, [30, 60]), new VideoPreset(1920, 1080, [30, 60])]);
+var cameraState = new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000);
+await stream.WriteAsync(Message.Json(MessageType.Capabilities, capabilities, ProtocolJson.Default.Capabilities, Now()));
+await stream.WriteAsync(Message.Json(MessageType.CameraState, cameraState, ProtocolJson.Default.CameraState, Now()));
+
+// Answer pings, apply controls and report the new state in the background.
 _ = Task.Run(async () =>
 {
     try
@@ -78,7 +91,11 @@ _ = Task.Run(async () =>
             if (message.Type == MessageType.Ping)
                 await stream.WriteAsync(Message.Pong(message.Header.Timestamp, Now()));
             else if (message.Type == MessageType.Control)
+            {
                 Console.WriteLine($"Control: {System.Text.Encoding.UTF8.GetString(message.Payload)}");
+                cameraState = Apply(cameraState, message.ReadJson(ProtocolJson.Default.Control));
+                await stream.WriteAsync(Message.Json(MessageType.CameraState, cameraState, ProtocolJson.Default.CameraState, Now()));
+            }
             else if (message.Type == MessageType.RequestKeyframe)
                 Console.WriteLine("Keyframe requested");
         }
@@ -126,4 +143,25 @@ string? Option(string name)
 {
     var index = Array.IndexOf(args, name);
     return index >= 0 && index + 1 < args.Length ? args[index + 1] : null;
+}
+
+// Mirrors the phone: only the fields present in the control change; a lens switch resets zoom and focus.
+static CameraState Apply(CameraState state, Control control)
+{
+    var next = state with
+    {
+        CameraId = control.CameraId ?? state.CameraId,
+        Zoom = control.Zoom ?? state.Zoom,
+        Torch = control.Torch ?? state.Torch,
+        FocusMode = control.FocusMode ?? state.FocusMode,
+        LensPosition = control.LensPosition ?? state.LensPosition,
+        ExposureBias = control.ExposureBias ?? state.ExposureBias,
+        Mirror = control.Mirror ?? state.Mirror,
+        Rotation = control.Rotation ?? state.Rotation,
+        Width = control.Width ?? state.Width,
+        Height = control.Height ?? state.Height,
+        Fps = control.Fps ?? state.Fps,
+        BitrateKbps = control.BitrateKbps ?? state.BitrateKbps,
+    };
+    return next.CameraId != state.CameraId ? next with { Zoom = 1, Torch = false, FocusMode = "continuous" } : next;
 }

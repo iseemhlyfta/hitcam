@@ -41,6 +41,17 @@ public static class Loc
     public static string UpdateCamera => Russian ? "Обновить камеру" : "Update camera";
     public static string ReinstallCamera => Russian ? "Переустановить" : "Reinstall";
     public static string Decoded => Russian ? "декодировано" : "decoded";
+    public static string CameraSettings => Russian ? "Настройки камеры" : "Camera settings";
+    public static string WaitingForPhoneSettings => Russian ? "Ждём настройки от телефона…" : "Waiting for the phone's settings…";
+    public static string Lens => Russian ? "Объектив" : "Lens";
+    public static string Quality => Russian ? "Качество" : "Quality";
+    public static string Zoom => Russian ? "Зум" : "Zoom";
+    public static string Exposure => Russian ? "Экспозиция" : "Exposure";
+    public static string Focus => Russian ? "Фокус" : "Focus";
+    public static string AutoFocus => Russian ? "Автофокус" : "Autofocus";
+    public static string Torch => Russian ? "Фонарик" : "Torch";
+    public static string Mirror => Russian ? "Зеркало" : "Mirror";
+    public static string Rotate => Russian ? "Повернуть" : "Rotate";
     public static string Stream => Russian ? "Поток" : "Stream";
     public static string Received => Russian ? "Принято" : "Received";
     public static string Latency => Russian ? "Задержка" : "Latency";

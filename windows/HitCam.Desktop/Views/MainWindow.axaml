@@ -5,10 +5,10 @@
     xmlns:svc="clr-namespace:HitCam.Desktop.Services"
     xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
     Title="HitCam"
-    Width="720"
-    Height="520"
-    MinWidth="560"
-    MinHeight="440"
+    Width="900"
+    Height="560"
+    MinWidth="760"
+    MinHeight="480"
     x:DataType="vm:MainViewModel"
     WindowStartupLocation="CenterScreen">
 
@@ -36,9 +36,10 @@
             </StackPanel>
         </Grid>
 
-        <!--  Streaming: stats  -->
-        <StackPanel IsVisible="{Binding IsConnected}" Spacing="16">
-            <TextBlock Classes="H3" Text="{Binding StatusText}" Theme="{StaticResource TitleTextBlock}" />
+        <!--  Streaming: stats on the left, camera settings on the right  -->
+        <Grid ColumnDefinitions="*,24,340" IsVisible="{Binding IsConnected}">
+        <StackPanel Spacing="16">
+            <TextBlock Classes="H3" Text="{Binding StatusText}" Theme="{StaticResource TitleTextBlock}" TextWrapping="Wrap" />
             <Grid ColumnDefinitions="Auto,*" RowDefinitions="Auto,Auto,Auto,Auto" RowSpacing="8" ColumnSpacing="16">
                 <TextBlock Text="{x:Static svc:Loc.Stream}" Opacity="0.7" />
                 <TextBlock Grid.Column="1" Text="{Binding StreamText}" />
@@ -52,6 +53,68 @@
             <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.CameraHint}" TextWrapping="Wrap" />
             <Button HorizontalAlignment="Left" Command="{Binding DisconnectCommand}" Content="{x:Static svc:Loc.Disconnect}" />
         </StackPanel>
+
+        <Border
+            Grid.Column="2"
+            Padding="16"
+            Background="{DynamicResource SemiColorFill0}"
+            CornerRadius="12">
+            <ScrollViewer>
+                <StackPanel DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel" Spacing="10">
+                    <TextBlock FontWeight="SemiBold" Text="{x:Static svc:Loc.CameraSettings}" />
+                    <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.WaitingForPhoneSettings}" IsVisible="{Binding !IsAvailable}" />
+
+                    <StackPanel IsEnabled="{Binding IsAvailable}" Spacing="10">
+                        <Grid ColumnDefinitions="100,*" RowDefinitions="Auto,Auto" RowSpacing="8">
+                            <TextBlock VerticalAlignment="Center" Opacity="0.7" Text="{x:Static svc:Loc.Lens}" />
+                            <ComboBox Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Cameras}" SelectedItem="{Binding SelectedCamera}" />
+                            <TextBlock Grid.Row="1" VerticalAlignment="Center" Opacity="0.7" Text="{x:Static svc:Loc.Quality}" />
+                            <ComboBox Grid.Row="1" Grid.Column="1" HorizontalAlignment="Stretch" ItemsSource="{Binding Qualities}" SelectedItem="{Binding SelectedQuality}" />
+                        </Grid>
+
+                        <StackPanel IsVisible="{Binding CanZoom}">
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding ZoomText}" />
+                                <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.Zoom}" />
+                            </DockPanel>
+                            <Slider Maximum="{Binding MaxZoom}" Minimum="{Binding MinZoom}" Value="{Binding Zoom}" />
+                        </StackPanel>
+
+                        <StackPanel>
+                            <DockPanel>
+                                <TextBlock DockPanel.Dock="Right" Text="{Binding ExposureText}" />
+                                <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.Exposure}" />
+                            </DockPanel>
+                            <Slider Maximum="2" Minimum="-2" Value="{Binding ExposureBias}" />
+                        </StackPanel>
+
+                        <StackPanel IsVisible="{Binding SupportsFocus}">
+                            <DockPanel>
+                                <ToggleButton
+                                    DockPanel.Dock="Right"
+                                    Command="{Binding AutoFocusCommand}"
+                                    Content="{x:Static svc:Loc.AutoFocus}"
+                                    IsChecked="{Binding IsAutoFocus, Mode=OneWay}" />
+                                <TextBlock VerticalAlignment="Center" Opacity="0.7" Text="{x:Static svc:Loc.Focus}" />
+                            </DockPanel>
+                            <Slider Maximum="1" Minimum="0" Value="{Binding LensPosition}" />
+                        </StackPanel>
+
+                        <WrapPanel ItemSpacing="8" LineSpacing="8">
+                            <ToggleButton Content="{x:Static svc:Loc.Torch}" IsChecked="{Binding Torch}" IsVisible="{Binding HasTorch}" />
+                            <ToggleButton Content="{x:Static svc:Loc.Mirror}" IsChecked="{Binding Mirror}" />
+                            <Button Command="{Binding RotateCommand}">
+                                <StackPanel Orientation="Horizontal" Spacing="6">
+                                    <TextBlock Text="{x:Static svc:Loc.Rotate}" />
+                                    <TextBlock Opacity="0.7" Text="{Binding RotationText}" />
+                                </StackPanel>
+                            </Button>
+                        </WrapPanel>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+        </Border>
+        </Grid>
 
         <!--  Pairing overlay  -->
         <Border

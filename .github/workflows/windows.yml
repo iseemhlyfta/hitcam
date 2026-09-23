@@ -19,7 +19,9 @@ jobs:
         with:
           dotnet-version: 10.0.x
       - name: Test
-        run: dotnet test HitCam.Core.Tests -c Release
+        run: |
+          dotnet test HitCam.Core.Tests -c Release
+          dotnet test HitCam.Desktop.Tests -c Release
       # Also builds the C++ virtual camera (HitCam.VCam) through build.ps1.
       - name: Publish desktop app
         run: dotnet publish HitCam.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ../out/HitCam
