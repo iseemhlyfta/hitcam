@@ -15,7 +15,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly AppSettings _settings = AppSettings.Load();
     private readonly HitCamServer _server;
     private readonly DispatcherTimer _statsTimer;
+    private readonly VideoPipeline _pipeline = new();
+    private readonly VirtualCamera _camera = new();
     private long _framesInWindow;
+    private long _lastDecodedFrames;
     private long _bytesInWindow;
     private long _lastLatencyMicros = -1;
 
@@ -29,6 +32,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private string _receivedText = "—";
     private string _latencyText = "—";
     private string _phoneText = "—";
+    private string _cameraText = "";
+    private string _installCameraLabel = "";
+    private bool _canInstallCamera;
 
     public MainViewModel()
     {
@@ -53,6 +59,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             StatusText = Loc.Disconnected(reason);
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
         });
+        _server.Disconnected += (_, _) => _pipeline.ClearSignal();
+        _pipeline.KeyframeNeeded += () => _ = _server.RequestKeyframeAsync();
         _server.StreamConfigReceived += c => Dispatcher.UIThread.Post(() =>
             StreamText = $"{c.Codec.ToUpperInvariant()} {c.Width}×{c.Height} @ {c.Fps} fps, {c.BitrateKbps / 1000.0:0.#} Mbit/s");
         _server.StatusReceived += s => Dispatcher.UIThread.Post(() =>
@@ -63,13 +71,23 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             Interlocked.Add(ref _bytesInWindow, f.Data.Length);
             if (f.LatencyMicros is { } latency)
                 Interlocked.Exchange(ref _lastLatencyMicros, latency);
+            _pipeline.Push(f);
         };
 
         DisconnectCommand = ReactiveCommand.Create(() => _server.Kick());
+        InstallCameraCommand = ReactiveCommand.CreateFromTask(InstallCameraAsync);
         _statsTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStats());
     }
 
     public ReactiveCommand<Unit, Unit> DisconnectCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> InstallCameraCommand { get; }
+
+    public string CameraText { get => _cameraText; private set => this.RaiseAndSetIfChanged(ref _cameraText, value); }
+
+    public string InstallCameraLabel { get => _installCameraLabel; private set => this.RaiseAndSetIfChanged(ref _installCameraLabel, value); }
+
+    public bool CanInstallCamera { get => _canInstallCamera; private set => this.RaiseAndSetIfChanged(ref _canInstallCamera, value); }
 
     public string StatusText { get => _statusText; private set => this.RaiseAndSetIfChanged(ref _statusText, value); }
 
@@ -125,6 +143,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         }
 
         RefreshAddresses();
+        RefreshCamera();
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) =>
             Dispatcher.UIThread.Post(RefreshAddresses);
         _statsTimer.Start();
@@ -145,14 +164,54 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         QrCode = QrImage.Create($"{ProtocolInfo.UriScheme}://{addresses[0]}:{_server.Port}?id={_settings.ServerId}&name={name}");
     }
 
+    private void RefreshCamera()
+    {
+        var setup = VirtualCamera.GetSetup();
+        if (setup is CameraSetup.Unavailable)
+        {
+            CameraText = Loc.CameraUnavailable;
+            CanInstallCamera = false;
+            return;
+        }
+        if (setup is CameraSetup.NotInstalled)
+        {
+            CameraText = Loc.CameraNotInstalled;
+            InstallCameraLabel = Loc.InstallCamera;
+            CanInstallCamera = true;
+            return;
+        }
+
+        var hr = _camera.Start();
+        InstallCameraLabel = setup is CameraSetup.Outdated ? Loc.UpdateCamera : Loc.ReinstallCamera;
+        CanInstallCamera = setup is CameraSetup.Outdated || hr < 0;
+        CameraText = hr < 0 ? Loc.CameraFailed($"0x{hr:X8}")
+            : setup is CameraSetup.Outdated ? Loc.CameraOutdated
+            : Loc.CameraReady(VirtualCamera.FriendlyName);
+    }
+
+    private async Task InstallCameraAsync()
+    {
+        _camera.Stop();
+        CameraText = Loc.CameraInstalling;
+        var installed = await VirtualCamera.InstallAsync();
+        RefreshCamera();
+        if (!installed && !_camera.IsRunning)
+            CameraText = Loc.CameraInstallFailed;
+    }
+
     private void UpdateStats()
     {
+        if (_pipeline.Error is { } error)
+            CameraText = Loc.DecoderFailed(error);
+
         if (!IsConnected)
             return;
 
         var frames = Interlocked.Exchange(ref _framesInWindow, 0);
         var bytes = Interlocked.Exchange(ref _bytesInWindow, 0);
-        ReceivedText = $"{frames} fps, {bytes * 8 / 1_000_000.0:0.0} Mbit/s";
+        var decoded = _pipeline.DecodedFrames;
+        ReceivedText = $"{frames} fps, {bytes * 8 / 1_000_000.0:0.0} Mbit/s · {Loc.Decoded} {decoded - _lastDecodedFrames} fps";
+        _lastDecodedFrames = decoded;
 
         var latency = Interlocked.Read(ref _lastLatencyMicros);
         var rtt = _server.RoundTripMicros;
@@ -164,5 +223,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     {
         _statsTimer.Stop();
         await _server.DisposeAsync();
+        _pipeline.Dispose();
+        _camera.Dispose();
     }
 }

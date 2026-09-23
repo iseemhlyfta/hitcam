@@ -20,4 +20,25 @@
   <ItemGroup>
     <ProjectReference Include="..\HitCam.Core\HitCam.Core.csproj" />
   </ItemGroup>
+
+  <!--
+    The virtual camera (C++, windows/HitCam.VCam) needs Visual Studio with "Desktop development with C++".
+    Build with -p:SkipVirtualCamera=true to skip it; the app then runs without the camera.
+  -->
+  <PropertyGroup>
+    <VCamDir>$(MSBuildThisFileDirectory)..\HitCam.VCam\</VCamDir>
+    <VCamDll>$(VCamDir)build\Release\HitCamVCam.dll</VCamDll>
+  </PropertyGroup>
+  <ItemGroup>
+    <VCamSource Include="$(VCamDir)src\**;$(VCamDir)CMakeLists.txt" />
+  </ItemGroup>
+  <Target Name="BuildVirtualCamera" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT' And '$(SkipVirtualCamera)' != 'true'"
+          Inputs="@(VCamSource)" Outputs="$(VCamDll)">
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -File &quot;$(VCamDir)build.ps1&quot;" />
+  </Target>
+  <Target Name="CopyVirtualCamera" AfterTargets="BuildVirtualCamera" BeforeTargets="BeforeBuild" Condition="Exists('$(VCamDll)')">
+    <ItemGroup>
+      <None Include="$(VCamDll)" Link="HitCamVCam.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    </ItemGroup>
+  </Target>
 </Project>

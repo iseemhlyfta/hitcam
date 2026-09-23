@@ -14,8 +14,9 @@
 |---|---|
 | Протокол (`docs/protocol.md`) | ✅ v1 |
 | ПК: сервер, сопряжение, приём потока, статистика | ✅ работает, 23 теста |
-| ПК: декодирование и превью | ⏳ фаза 3 |
-| ПК: виртуальная камера (MF, Windows 11) | ⏳ фаза 0/4 — нужен MSVC + Windows SDK |
+| ПК: декодирование H.264 | 🧪 написано (Media Foundation) |
+| ПК: виртуальная камера (MF, Windows 11) | 🧪 написано (`MFCreateVirtualCamera`) |
+| ПК: превью в окне | ⏳ |
 | iOS: захват, H.264, подключение, PIN, QR, управление | 🧪 написано, сборка только в CI (нет Mac) |
 | Автопоиск в сети (Bonjour) | ⏳ фаза 6 |
 | Установщик | ⏳ фаза 8 |
@@ -30,9 +31,21 @@ iPhone ──(Wi-Fi, TCP 47800, H.264)──▶ HitCam для ПК ──(общ
 - `windows/HitCam.Core` — протокол, сопряжение, TCP-сервер (.NET 10).
 - `windows/HitCam.Desktop` — приложение для ПК (Avalonia).
 - `windows/HitCam.FakePhone` — эмулятор телефона для разработки без iPhone.
-- `windows/HitCam.VCam` — виртуальная камера (C++, Media Foundation) — в работе.
+- `windows/HitCam.VCam` — виртуальная камера и декодер (C++, Media Foundation). Источник камеры загружает служба
+  «Windows Camera Frame Server»; кадры приходят к нему из HitCam через общую память `Global\HitCamVirtualCameraFrames`.
+
+## Виртуальная камера
+
+При первом запуске HitCam для ПК нажмите **«Установить камеру»** и подтвердите запрос администратора:
+`HitCamVCam.dll` копируется в `C:\Program Files\HitCam` и регистрируется. Дальше камера **HitCam** появляется
+в Zoom, Discord, Teams, OBS и браузерах, пока открыт HitCam для ПК. Без телефона камера показывает тёмно-серый кадр.
+
+Удаление: `regsvr32 /u "C:\Program Files\HitCam\HitCamVCam.dll"` (от администратора), затем удалить папку.
 
 ## Разработка
+
+Нужны .NET 10 SDK и Visual Studio с «Разработкой классических приложений на C++» (MSVC, Windows 11 SDK):
+сборка `HitCam.Desktop` сама собирает `HitCam.VCam` через CMake. Без C++: `-p:SkipVirtualCamera=true`.
 
 ```powershell
 cd windows

@@ -49,7 +49,7 @@
                 <TextBlock Grid.Row="3" Text="{x:Static svc:Loc.Phone}" Opacity="0.7" />
                 <TextBlock Grid.Row="3" Grid.Column="1" Text="{Binding PhoneText}" />
             </Grid>
-            <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.PreviewPending}" TextWrapping="Wrap" />
+            <TextBlock Opacity="0.7" Text="{x:Static svc:Loc.CameraHint}" TextWrapping="Wrap" />
             <Button HorizontalAlignment="Left" Command="{Binding DisconnectCommand}" Content="{x:Static svc:Loc.Disconnect}" />
         </StackPanel>
 
@@ -72,6 +72,17 @@
             </StackPanel>
         </Border>
 
-        <TextBlock Grid.Row="1" Margin="0,12,0,0" Opacity="0.6" Text="{Binding StatusText}" IsVisible="{Binding IsWaiting}" />
+        <StackPanel Grid.Row="1" Margin="0,12,0,0" Spacing="8">
+            <!--  Virtual camera status, shown in every state  -->
+            <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+                <TextBlock VerticalAlignment="Center" Text="{Binding CameraText}" TextWrapping="Wrap" />
+                <Button
+                    Grid.Column="1"
+                    Command="{Binding InstallCameraCommand}"
+                    Content="{Binding InstallCameraLabel}"
+                    IsVisible="{Binding CanInstallCamera}" />
+            </Grid>
+            <TextBlock Opacity="0.6" Text="{Binding StatusText}" IsVisible="{Binding IsWaiting}" />
+        </StackPanel>
     </Grid>
 </Window>
