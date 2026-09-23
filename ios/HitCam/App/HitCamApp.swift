@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 @main
 struct HitCamApp: App {
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @StateObject private var session = StreamSession()
 
     var body: some Scene {

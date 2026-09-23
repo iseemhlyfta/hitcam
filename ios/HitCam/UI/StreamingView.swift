@@ -14,15 +14,22 @@ struct StreamingView: View {
         ZStack {
             Color.black.ignoresSafeArea()
 
-            CameraPreview(session: session.camera.session) { point in
+            CameraPreview(camera: session.camera) { point in
                 session.apply(Control(focusPoint: NormalizedPoint(x: point.x, y: point.y)))
             }
             .ignoresSafeArea()
 
+            // The screen is landscape-only, so the controls sit in a column on the right instead of covering the preview.
             VStack(spacing: 0) {
                 topBar
-                Spacer()
-                if showControls { controls }
+                HStack(spacing: 0) {
+                    Spacer()
+                    if showControls {
+                        ScrollView { controls }
+                            .frame(width: 380)
+                            .background(.ultraThinMaterial)
+                    }
+                }
             }
 
             if dimmed {
@@ -33,7 +40,11 @@ struct StreamingView: View {
             }
         }
         .statusBarHidden(dimmed)
-        .onDisappear { setDimmed(false) }
+        .onAppear { OrientationLock.set(.landscape) }
+        .onDisappear {
+            setDimmed(false)
+            OrientationLock.set(.allButUpsideDown)
+        }
     }
 
     private var topBar: some View {
@@ -126,7 +137,6 @@ struct StreamingView: View {
             Text(L10n.keepAppOpen).font(.caption2).foregroundStyle(.secondary)
         }
         .padding(12)
-        .background(.ultraThinMaterial)
     }
 
     private var qualityOptions: [(label: String, width: Int, height: Int, fps: Int, bitrate: Int)] {

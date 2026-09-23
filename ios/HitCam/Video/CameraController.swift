@@ -15,6 +15,13 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     private var input: AVCaptureDeviceInput?
     private var device: AVCaptureDevice?
 
+    /// Keeps the stream level with the horizon; only landscape angles (0/180) are used so the frame size never changes.
+    private var rotationCoordinator: AVCaptureDevice.RotationCoordinator?
+    private var rotationObservation: NSKeyValueObservation?
+    private var landscapeAngle = 0
+    /// Set on the main thread by the preview view; its rotation follows `landscapeAngle`.
+    private weak var previewLayer: AVCaptureVideoPreviewLayer?
+
     /// Called on the video queue for every captured frame.
     var onFrame: ((CMSampleBuffer) -> Void)?
 
@@ -120,6 +127,12 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         return rotated ? (Int32(state.height), Int32(state.width)) : (Int32(state.width), Int32(state.height))
     }
 
+    /// Attaches the on-screen preview (main thread).
+    func attachPreview(_ layer: AVCaptureVideoPreviewLayer) {
+        previewLayer = layer
+        sessionQueue.async { self.applyPreviewAngle() }
+    }
+
     // MARK: Configuration (session queue)
 
     private func configureSession() throws {
@@ -148,6 +161,7 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
 
         try selectFormat(device: device)
+        observeRotation(of: device)
         configureConnection()
         state.zoom = Double(device.videoZoomFactor)
         state.torch = false
@@ -186,13 +200,45 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         state.exposureBias = 0
     }
 
+    private func observeRotation(of device: AVCaptureDevice) {
+        let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
+        rotationCoordinator = coordinator
+        updateLandscapeAngle(coordinator.videoRotationAngleForHorizonLevelCapture)
+        rotationObservation = coordinator.observe(\.videoRotationAngleForHorizonLevelCapture, options: [.new]) { [weak self] coordinator, _ in
+            let angle = coordinator.videoRotationAngleForHorizonLevelCapture
+            self?.sessionQueue.async {
+                guard let self, self.rotationCoordinator === coordinator, self.updateLandscapeAngle(angle) else { return }
+                self.configureConnection()
+            }
+        }
+    }
+
+    /// Accepts only landscape angles: in portrait or lying flat the last landscape orientation is kept.
+    @discardableResult
+    private func updateLandscapeAngle(_ angle: CGFloat) -> Bool {
+        let rounded = (Int(angle.rounded()) % 360 + 360) % 360
+        guard rounded == 0 || rounded == 180, rounded != landscapeAngle else { return false }
+        landscapeAngle = rounded
+        return true
+    }
+
     private func configureConnection() {
+        applyPreviewAngle()
         guard let connection = output.connection(with: .video) else { return }
-        let angle = CGFloat(state.rotation)
+        let angle = CGFloat((landscapeAngle + state.rotation) % 360)
         if connection.isVideoRotationAngleSupported(angle) { connection.videoRotationAngle = angle }
         if connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = state.mirror
+        }
+    }
+
+    /// The preview is shown on a landscape-only screen, so it uses the same horizon-level angle as the stream.
+    private func applyPreviewAngle() {
+        let angle = CGFloat(landscapeAngle)
+        DispatchQueue.main.async { [weak self] in
+            guard let connection = self?.previewLayer?.connection, connection.isVideoRotationAngleSupported(angle) else { return }
+            connection.videoRotationAngle = angle
         }
     }
 

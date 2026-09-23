@@ -4,13 +4,14 @@ import UIKit
 
 /// Live preview of the capture session that is being streamed.
 struct CameraPreview: UIViewRepresentable {
-    let session: AVCaptureSession
+    let camera: CameraController
     var onTap: ((CGPoint) -> Void)?
 
     func makeUIView(context: Context) -> PreviewView {
         let view = PreviewView()
-        view.previewLayer.session = session
+        view.previewLayer.session = camera.session
         view.previewLayer.videoGravity = .resizeAspect
+        camera.attachPreview(view.previewLayer)
         view.onTap = onTap
         return view
     }
