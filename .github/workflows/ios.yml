@@ -12,6 +12,7 @@ jobs:
     runs-on: macos-latest
     defaults:
       run:
+        shell: bash   # implies -eo pipefail, so xcodebuild failures are never masked
         working-directory: ios
     steps:
       - uses: actions/checkout@v4
@@ -20,27 +21,41 @@ jobs:
         run: |
           brew install xcodegen
           xcodegen generate
+          xcodebuild -version
 
       - name: Unit tests (simulator)
         run: |
           SIM=$(xcrun simctl list devices available -j | jq -r '[.devices[][] | select(.name | startswith("iPhone"))][0].udid')
           echo "Simulator: $SIM"
-          xcodebuild test -project HitCam.xcodeproj -scheme HitCam -destination "id=$SIM" CODE_SIGNING_ALLOWED=NO | xcpretty || exit ${PIPESTATUS[0]}
+          xcodebuild test -project HitCam.xcodeproj -scheme HitCam -destination "id=$SIM" \
+            -resultBundlePath TestResults.xcresult CODE_SIGNING_ALLOWED=NO -quiet
 
       - name: Build unsigned app
         run: |
           xcodebuild build -project HitCam.xcodeproj -scheme HitCam -configuration Release \
             -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" | xcpretty || exit ${PIPESTATUS[0]}
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" -quiet
 
       # Sideloadly (or AltStore/SideStore) re-signs this IPA with your Apple ID when installing.
       - name: Package IPA
         run: |
+          APP=build/Build/Products/Release-iphoneos/HitCam.app
+          test -f "$APP/HitCam" || { echo "::error::$APP/HitCam executable is missing"; ls -la "$APP"; exit 1; }
           mkdir -p Payload
-          cp -R build/Build/Products/Release-iphoneos/HitCam.app Payload/
-          zip -qr HitCam-unsigned.ipa Payload
+          ditto "$APP" Payload/HitCam.app
+          ditto -c -k --keepParent Payload HitCam-unsigned.ipa
+          SIZE=$(du -h HitCam-unsigned.ipa | cut -f1)
+          echo "IPA size: $SIZE"
+          echo "### HitCam-unsigned.ipa: $SIZE" >> "$GITHUB_STEP_SUMMARY"
+          unzip -l HitCam-unsigned.ipa | tail -n 15
 
       - uses: actions/upload-artifact@v4
         with:
           name: HitCam-ios-unsigned-ipa
           path: ios/HitCam-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results
+          path: ios/TestResults.xcresult
