@@ -82,14 +82,33 @@ class LocalStore(context: Context) {
             prefs.edit().putString("deviceId", it).apply()
         }
 
+    /**
+     * Recently used PCs. A stored serverId is trusted (its token may be sent to that address), so the session only
+     * remembers an id that came from a QR code or was confirmed by pairing, never one a PC merely claimed.
+     */
     var recentServers: List<ServerAddress>
-        get() = prefs.getString("recentServers", null)?.let {
-            runCatching { ProtocolJson.decodeFromString<List<ServerAddress>>(it) }.getOrNull()
-        } ?: emptyList()
+        get() {
+            val stored = prefs.getString("recentServers", null)?.let {
+                runCatching { ProtocolJson.decodeFromString<List<ServerAddress>>(it) }.getOrNull()
+            } ?: emptyList()
+            if (prefs.getBoolean("recentServersTrusted", false)) return stored
+            // Older versions also stored the id a typed address's PC claimed about itself; it can't be told apart
+            // from a scanned one, so drop them all once. Tokens are still found by host:port; a QR scan restores the id.
+            val cleaned = stored.map { it.copy(serverId = null) }
+            prefs.edit()
+                .putString("recentServers", ProtocolJson.encodeToString(cleaned))
+                .putBoolean("recentServersTrusted", true)
+                .apply()
+            return cleaned
+        }
         set(value) {
-            prefs.edit().putString("recentServers", ProtocolJson.encodeToString(value.take(5))).apply()
+            prefs.edit()
+                .putString("recentServers", ProtocolJson.encodeToString(value.take(5)))
+                .putBoolean("recentServersTrusted", true)
+                .apply()
         }
 
+    /** [server] must carry only a trusted serverId (see [recentServers]). */
     fun remember(server: ServerAddress) {
         recentServers = listOf(server) + recentServers.filter { it.host != server.host || it.port != server.port }
     }

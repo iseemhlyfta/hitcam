@@ -115,6 +115,53 @@ class StreamSessionTest {
     }
 
     @Test
+    fun aServerIdClaimedByATypedAddressIsNotTrusted() {
+        // The real PC "pc-1" is paired; someone else at a typed address claims to be it.
+        environment.tokens["pc-1"] = "secret"
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
+        pc.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Impostor", "pc-1"))
+        pc.expect(MessageType.StreamConfig)
+        waitFor { session.phase.value is Phase.Streaming }
+        pc.close()
+
+        waitFor { session.phase.value is Phase.Reconnecting }
+        val again = FakePc(server.accept())
+        assertNull(again.expectJson<Hello>(MessageType.Hello).token)
+        again.close()
+        assertTrue(environment.remembered.isNotEmpty())
+        assertTrue(environment.remembered.none { it.serverId == "pc-1" })
+        assertEquals("Impostor", environment.remembered.last().name)
+    }
+
+    @Test
+    fun pairingThroughATypedAddressTrustsThePairedServer() {
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
+        pc.sendJson(MessageType.HelloAck, HelloAck(1, "pairingRequired", "Test PC", "pc-3"))
+        waitFor { session.phase.value is Phase.Pairing }
+        session.submitPin("123456")
+        pc.expect(MessageType.PairRequest)
+        pc.sendJson(MessageType.PairResult, PairResult(ok = true, token = "fresh", attemptsLeft = 5))
+        pc.expect(MessageType.StreamConfig)
+        waitFor { session.phase.value is Phase.Streaming }
+        assertEquals("fresh", environment.tokens["pc-3"])
+        assertEquals("fresh", environment.tokens["127.0.0.1:${server.localPort}"])
+        assertEquals(address.copy(serverId = "pc-3", name = "Test PC"), environment.remembered.last())
+        pc.close()
+
+        waitFor { session.phase.value is Phase.Reconnecting }
+        val again = FakePc(server.accept())
+        assertEquals("fresh", again.expectJson<Hello>(MessageType.Hello).token)
+        // The paired id is now expected: another PC at this address is refused.
+        again.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Other", "someone-else"))
+        waitFor { session.phase.value == Phase.Failed(SessionError.OtherPc) }
+        again.close()
+    }
+
+    @Test
     fun pingIsAnsweredWithTheEchoedTimestamp() {
         session.connect(address)
         val pc = FakePc(server.accept())

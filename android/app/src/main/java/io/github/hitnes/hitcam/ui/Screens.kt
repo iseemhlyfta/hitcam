@@ -159,7 +159,8 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
             inputError = invalidAddress
             return
         }
-        // Reuse the id/name remembered from an earlier QR scan of the same PC, so its token is found.
+        // Reuse the id/name remembered for the same address, so its token is found and another PC there is refused.
+        // Recents only hold an id from a QR scan or a successful pairing, never one a PC merely claimed.
         start(recent.firstOrNull { it.host == address.host && it.port == address.port } ?: address)
     }
 

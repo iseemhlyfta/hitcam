@@ -76,7 +76,12 @@ class StreamSession(
     // Owned by `queue`.
     private var connection: FramedConnection? = null
     private var connectionId = 0
+    // `address.serverId` is trusted: it came with the address the user chose (QR code or a recents entry stored
+    // under this rule) or this session paired with that server. Only a trusted id is used to look up a token.
     private var address: ServerAddress? = null
+    // What the PC on the other end said about itself in HelloAck. Anyone can claim any id, so it is never used
+    // to look up a token; it becomes trusted only when pairing with that PC succeeds.
+    private var claimedServerId: String? = null
     private var timers = mutableListOf<ScheduledFuture<*>>()
     private var reconnect: ScheduledFuture<*>? = null
     private var lastReceived = 0L
@@ -167,6 +172,7 @@ class StreamSession(
 
         // Events from an older, cancelled connection must not tear down this one.
         val id = ++connectionId
+        claimedServerId = null
         val connection = FramedConnection(address.host, address.port, queue) { event ->
             if (connectionId == id) handle(event)
         }
@@ -214,6 +220,7 @@ class StreamSession(
         }, reconnectDelayMs, TimeUnit.MILLISECONDS)
     }
 
+    /** Where this PC's token is stored: its trusted id (never [claimedServerId]) and its address. */
     private fun tokenKeys(): List<String> {
         val address = address ?: return emptyList()
         return listOfNotNull(address.serverId, "${address.host}:${address.port}")
@@ -240,9 +247,9 @@ class StreamSession(
                 val expected = address?.serverId
                 // The QR code (or an earlier session) named another PC: stop here and send nothing more.
                 if (expected != null && expected != ack.serverId) return fail(SessionError.OtherPc)
-                address = address?.let {
-                    it.copy(serverId = it.serverId ?: ack.serverId, name = it.name ?: ack.serverName)
-                }
+                // The name is only shown to the user; the claimed id stays untrusted until pairing succeeds.
+                claimedServerId = ack.serverId
+                address = address?.let { it.copy(name = it.name ?: ack.serverName) }
                 when (ack.status) {
                     HelloStatus.ACCEPTED -> startStreaming(ack.serverName)
                     HelloStatus.PAIRING_REQUIRED -> {
@@ -261,8 +268,11 @@ class StreamSession(
                 val token = result.token
                 when {
                     result.ok && token != null -> {
+                        // This PC proved itself by pairing: from now on its id is trusted (used for tokens, remembered).
+                        val paired = address.copy(serverId = address.serverId ?: claimedServerId)
+                        this.address = paired
                         tokenKeys().forEach { environment.saveToken(token, it) }
-                        startStreaming(address.name ?: address.host)
+                        startStreaming(paired.name ?: paired.host)
                     }
                     result.attemptsLeft > 0 -> setPhase(Phase.Pairing(address, result.attemptsLeft, wrongPin = true))
                     else -> fail(SessionError.PairingLocked)
