@@ -27,8 +27,11 @@ if ($Uninstall) {
     Remove-Item $uninstallKey -Recurse -ErrorAction SilentlyContinue
     # This script may run from the install folder itself: delete the folder once it has exited.
     Start-Process cmd.exe -ArgumentList "/c timeout /t 2 >nul & rmdir /s /q `"$installDir`"" -WindowStyle Hidden
-    Write-Host "HitCam removed. The virtual camera stays registered; to remove it too (as admin):"
-    Write-Host "  regsvr32 /u `"$env:ProgramFiles\HitCam\HitCamVCam.dll`""
+    $cameraDir = Join-Path $env:ProgramFiles "HitCam"
+    Write-Host "HitCam removed. The virtual camera stays registered; to remove it too (as admin), in $cameraDir"
+    Write-Host "  Windows 11: regsvr32 /u HitCamVCam-<hash>.dll"
+    Write-Host "  Windows 10: regsvr32 /u HitCamDShow-<hash>.dll and $env:WINDIR\SysWOW64\regsvr32 /u HitCamDShow32-<hash>.dll"
+    Write-Host "then delete the folder."
     return
 }
 
