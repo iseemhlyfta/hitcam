@@ -37,7 +37,11 @@ if (-not (Test-Path $project)) { throw "Run this script from the repository (win
 
 Stop-InstalledApp
 Write-Host "Building HitCam..."
-& dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $installDir --nologo -v q
+# A separate build folder: HitCam copies started from the repository's bin\ folders lock their files and must not
+# break the installation.
+$buildDir = Join-Path $env:TEMP "HitCam-install-build"
+& dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $installDir `
+    --artifacts-path $buildDir --nologo -v q
 if ($LASTEXITCODE) { throw "dotnet publish failed ($LASTEXITCODE)" }
 Copy-Item $PSCommandPath (Join-Path $installDir "install.ps1") -Force
 
