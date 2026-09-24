@@ -127,13 +127,13 @@ object CameraCatalog {
         }
     }
 
-    /** A colour camera that can stream at least 1080p to a SurfaceTexture (skips depth, macro and mono sensors). */
+    /** A colour camera that can stream at least 720p to a SurfaceTexture (skips depth, macro and mono sensors). */
     private fun isUsable(characteristics: CameraCharacteristics): Boolean {
         val capabilities = characteristics.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES)?.toSet().orEmpty()
         if (CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE !in capabilities) return false
         val map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP) ?: return false
         val sizes = map.getOutputSizes(SurfaceTexture::class.java) ?: return false
-        return sizes.any { it.width >= 1920 && it.height >= 1080 || it.width >= 1080 && it.height >= 1920 }
+        return sizes.any { it.width >= 1280 && it.height >= 720 }
     }
 
     /** Focal length relative to the sensor width: proportional to the 35 mm equivalent focal length. */

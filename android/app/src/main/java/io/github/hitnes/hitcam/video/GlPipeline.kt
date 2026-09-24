@@ -12,6 +12,7 @@ import android.opengl.GLES20
 import android.opengl.Matrix
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.SystemClock
 import android.view.Surface
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -35,8 +36,6 @@ data class FrameGeometry(
     val frontFacing: Boolean = false,
     /** Sensor orientation of the camera, used to know the buffer's aspect ratio after rotation. */
     val sensorOrientation: Int = 90,
-    /** Added to camera timestamps to bring them to System.nanoTime (camera clocks may count time in deep sleep). */
-    val clockOffsetNanos: Long = 0,
 )
 
 /**
@@ -66,6 +65,7 @@ class GlPipeline {
     private var preview: Target? = null
     @Volatile private var geometry = FrameGeometry()
 
+    private var lastTimestamp = 0L
     private val stMatrix = FloatArray(16)
     private val frameMatrix = FloatArray(16)
     // Output (encoded picture) texture coordinates → camera buffer texture coordinates, for focus taps.
@@ -184,7 +184,7 @@ class GlPipeline {
         surfaceTexture.updateTexImage()
         surfaceTexture.getTransformMatrix(stMatrix)
         val geometry = geometry
-        val timestamp = surfaceTexture.timestamp + geometry.clockOffsetNanos
+        val timestamp = protocolTimestamp(surfaceTexture.timestamp)
 
         encoder?.let { target ->
             computeFrameMatrix(geometry, target.width, target.height)
@@ -203,6 +203,23 @@ class GlPipeline {
             draw(target, (target.width - width) / 2, (target.height - height) / 2, width, height)
             EGL14.eglSwapBuffers(display, target.surface)
         }
+    }
+
+    /**
+     * The camera timestamp on the protocol clock (System.nanoTime). Cameras count either from boot including deep
+     * sleep or without it, and some report the wrong one, so the clock is picked by which one the frame fits: a frame
+     * is a little older than now. If neither fits, the time it arrived is used. Always increasing, as the encoder needs.
+     */
+    private fun protocolTimestamp(raw: Long): Long {
+        val now = System.nanoTime()
+        val boot = SystemClock.elapsedRealtimeNanos()
+        val candidate = when {
+            now - raw in 0..MAX_FRAME_AGE_NANOS -> raw
+            boot - raw in 0..MAX_FRAME_AGE_NANOS -> raw + (now - boot)
+            else -> now
+        }
+        lastTimestamp = maxOf(candidate, lastTimestamp + 1_000)
+        return lastTimestamp
     }
 
     /** Output texture coordinates → SurfaceTexture coordinates: crop to aspect, mirror, rotate, then the camera's own transform. */
@@ -278,6 +295,7 @@ class GlPipeline {
 
     private companion object {
         const val EGL_RECORDABLE_ANDROID = 0x3142
+        const val MAX_FRAME_AGE_NANOS = 2_000_000_000L
 
         val positions: FloatBuffer = floatBuffer(-1f, -1f, 1f, -1f, -1f, 1f, 1f, 1f)
         val texCoords: FloatBuffer = floatBuffer(0f, 0f, 1f, 0f, 0f, 1f, 1f, 1f)

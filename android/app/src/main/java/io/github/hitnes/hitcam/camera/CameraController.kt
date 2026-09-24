@@ -328,10 +328,6 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
 
     private fun updateGeometry() {
         val spec = spec ?: return
-        // Camera timestamps count from boot (including deep sleep) on most phones; the protocol clock is System.nanoTime.
-        val realtime = spec.deviceCharacteristics.get(CameraCharacteristics.SENSOR_INFO_TIMESTAMP_SOURCE) ==
-            CameraMetadata.SENSOR_INFO_TIMESTAMP_SOURCE_REALTIME
-        val offset = if (realtime) System.nanoTime() - SystemClock.elapsedRealtimeNanos() else 0L
         gl.setGeometry(
             FrameGeometry(
                 displayRotation = displayRotation,
@@ -339,7 +335,6 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
                 mirror = state.mirror,
                 frontFacing = spec.isFront,
                 sensorOrientation = spec.sensorOrientation,
-                clockOffsetNanos = offset,
             ),
         )
     }

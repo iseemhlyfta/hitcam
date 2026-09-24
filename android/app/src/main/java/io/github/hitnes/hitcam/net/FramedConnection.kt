@@ -51,6 +51,9 @@ class FramedConnection(
         try {
             socket.tcpNoDelay = true
             socket.keepAlive = true
+            // A small kernel buffer makes congestion visible as frames in flight, so they are dropped instead of
+            // queueing seconds of video in the socket (the default buffer grows to megabytes).
+            socket.sendBufferSize = SEND_BUFFER_BYTES
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
         } catch (e: Exception) {
             finish(e)
@@ -159,6 +162,7 @@ class FramedConnection(
 
     private companion object {
         const val CONNECT_TIMEOUT_MS = 5_000
+        const val SEND_BUFFER_BYTES = 128 * 1024
         val EMPTY = ByteArray(0)
     }
 }
