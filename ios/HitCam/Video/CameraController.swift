@@ -48,7 +48,9 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                 minZoom: Double(device.minAvailableVideoZoomFactor),
                 maxZoom: Double(min(device.maxAvailableVideoZoomFactor, 10)),
                 hasTorch: device.hasTorch,
-                supportsFocus: device.isFocusModeSupported(.locked) && device.isLockingFocusWithCustomLensPositionSupported)
+                supportsFocus: device.isFocusModeSupported(.locked) && device.isLockingFocusWithCustomLensPositionSupported,
+                supportsWhiteBalance: device.isWhiteBalanceModeSupported(.locked) && device.isLockingWhiteBalanceWithCustomDeviceGainsSupported,
+                supportsExposureLock: device.isExposureModeSupported(.locked))
         }
     }
 
@@ -94,15 +96,25 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             if let bitrate = control.bitrateKbps { next.bitrateKbps = max(500, min(bitrate, 50_000)) }
             if let mirror = control.mirror { next.mirror = mirror }
             if let rotation = control.rotation, [0, 90, 180, 270].contains(rotation) { next.rotation = rotation }
+            if let stabilization = control.stabilization, (before.stabilizationModes ?? ["off"]).contains(stabilization) {
+                next.stabilization = stabilization
+            }
 
             let needsReconfigure = next.cameraId != before.cameraId || next.width != before.width
                 || next.height != before.height || next.fps != before.fps
             self.state = next
             if needsReconfigure {
                 try? self.configureSession()
-            } else if next.mirror != before.mirror || next.rotation != before.rotation {
+            } else if next.mirror != before.mirror || next.rotation != before.rotation || next.stabilization != before.stabilization {
                 self.configureConnection()
             }
+
+            if control.whiteBalanceMode != nil || control.whiteBalanceTemperature != nil || control.whiteBalanceTint != nil {
+                // A temperature or tint alone means "lock at this value".
+                self.setWhiteBalance(mode: control.whiteBalanceMode ?? "locked",
+                                     temperature: control.whiteBalanceTemperature, tint: control.whiteBalanceTint)
+            }
+            if let mode = control.exposureMode { self.setExposureMode(mode) }
 
             if let zoom = control.zoom { self.setZoom(zoom) }
             if let torch = control.torch { self.setTorch(torch) }
@@ -195,10 +207,29 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         device.activeVideoMaxFrameDuration = duration
         if device.isFocusModeSupported(.continuousAutoFocus) { device.focusMode = .continuousAutoFocus }
         if device.isExposureModeSupported(.continuousAutoExposure) { device.exposureMode = .continuousAutoExposure }
+        if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) { device.whiteBalanceMode = .continuousAutoWhiteBalance }
         state.fps = fps
         state.focusMode = "continuous"
         state.exposureBias = 0
+        state.exposureMode = "auto"
+        state.whiteBalanceMode = "auto"
+        let current = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+        state.whiteBalanceTemperature = Double(current.temperature).rounded()
+        state.whiteBalanceTint = Double(current.tint).rounded()
+
+        // Stabilization depends on the format; keep the requested mode only if this one supports it.
+        let modes = Self.stabilizationModes.filter { $0.id == "off" || format.isVideoStabilizationModeSupported($0.mode) }
+        state.stabilizationModes = modes.map(\.id)
+        if !(state.stabilizationModes ?? []).contains(state.stabilization ?? "off") { state.stabilization = "off" }
+        if state.stabilization == nil { state.stabilization = "off" }
     }
+
+    // Standard adds little latency; cinematic smooths more but delays frames noticeably.
+    private static let stabilizationModes: [(id: String, mode: AVCaptureVideoStabilizationMode)] = [
+        ("off", .off),
+        ("standard", .standard),
+        ("cinematic", .cinematic),
+    ]
 
     private func observeRotation(of device: AVCaptureDevice) {
         let coordinator = AVCaptureDevice.RotationCoordinator(device: device, previewLayer: nil)
@@ -230,6 +261,10 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         if connection.isVideoMirroringSupported {
             connection.automaticallyAdjustsVideoMirroring = false
             connection.isVideoMirrored = state.mirror
+        }
+        if connection.isVideoStabilizationSupported {
+            let mode = Self.stabilizationModes.first { $0.id == state.stabilization }?.mode ?? .off
+            connection.preferredVideoStabilizationMode = mode
         }
     }
 
@@ -273,6 +308,48 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
     }
 
+    /// "locked": fixed gains for the given temperature/tint (missing values keep the current ones); otherwise continuous auto.
+    private func setWhiteBalance(mode: String, temperature: Double?, tint: Double?) {
+        withDevice { device in
+            if mode == "locked" {
+                guard device.isWhiteBalanceModeSupported(.locked), device.isLockingWhiteBalanceWithCustomDeviceGainsSupported else { return }
+                let current = device.temperatureAndTintValues(for: device.deviceWhiteBalanceGains)
+                let values = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                    temperature: Float(max(2000, min(temperature ?? Double(current.temperature), 10_000))),
+                    tint: Float(max(-150, min(tint ?? Double(current.tint), 150))))
+                var gains = device.deviceWhiteBalanceGains(for: values)
+                // Gains outside [1, max] throw; clamping keeps the closest achievable color.
+                let maxGain = device.maxWhiteBalanceGain
+                gains.redGain = max(1, min(gains.redGain, maxGain))
+                gains.greenGain = max(1, min(gains.greenGain, maxGain))
+                gains.blueGain = max(1, min(gains.blueGain, maxGain))
+                device.setWhiteBalanceModeLocked(with: gains, completionHandler: nil)
+                state.whiteBalanceMode = "locked"
+                state.whiteBalanceTemperature = Double(values.temperature).rounded()
+                state.whiteBalanceTint = Double(values.tint).rounded()
+            } else {
+                guard device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) else { return }
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+                state.whiteBalanceMode = "auto"
+            }
+        }
+    }
+
+    /// "locked" freezes the current exposure (bias no longer applies); otherwise continuous auto.
+    private func setExposureMode(_ mode: String) {
+        withDevice { device in
+            if mode == "locked" {
+                guard device.isExposureModeSupported(.locked) else { return }
+                device.exposureMode = .locked
+                state.exposureMode = "locked"
+            } else {
+                guard device.isExposureModeSupported(.continuousAutoExposure) else { return }
+                device.exposureMode = .continuousAutoExposure
+                state.exposureMode = "auto"
+            }
+        }
+    }
+
     private func setFocus(mode: String, lensPosition: Double?) {
         withDevice { device in
             switch mode {
@@ -303,6 +380,7 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
             if device.isExposurePointOfInterestSupported, device.isExposureModeSupported(.autoExpose) {
                 device.exposurePointOfInterest = target
                 device.exposureMode = .autoExpose
+                state.exposureMode = "auto"
             }
         }
     }

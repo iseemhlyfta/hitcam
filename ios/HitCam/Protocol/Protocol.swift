@@ -147,6 +147,9 @@ struct CameraInfo: Codable, Equatable {
     var maxZoom: Double
     var hasTorch: Bool
     var supportsFocus: Bool
+    // Added in 0.2; optional so older PCs and stored states still decode.
+    var supportsWhiteBalance: Bool? = nil
+    var supportsExposureLock: Bool? = nil
 }
 
 struct VideoPreset: Codable, Equatable {
@@ -178,6 +181,15 @@ struct CameraState: Codable, Equatable {
     var height: Int
     var fps: Int
     var bitrateKbps: Int
+    // Added in 0.2: "auto" | "locked"; temperature in kelvin, tint in device units.
+    var whiteBalanceMode: String? = nil
+    var whiteBalanceTemperature: Double? = nil
+    var whiteBalanceTint: Double? = nil
+    // "auto" | "locked"
+    var exposureMode: String? = nil
+    // "off" | "standard" | "cinematic"; `stabilizationModes` are those the active format supports.
+    var stabilization: String? = nil
+    var stabilizationModes: [String]? = nil
 }
 
 /// Only non-nil fields are applied.
@@ -195,6 +207,11 @@ struct Control: Codable, Equatable {
     var height: Int?
     var fps: Int?
     var bitrateKbps: Int?
+    var whiteBalanceMode: String?
+    var whiteBalanceTemperature: Double?
+    var whiteBalanceTint: Double?
+    var exposureMode: String?
+    var stabilization: String?
 }
 
 struct DeviceStatus: Codable {

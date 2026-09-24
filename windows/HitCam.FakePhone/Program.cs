@@ -71,13 +71,15 @@ await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "
 // Cameras and state like an iPhone with three back lenses, so the PC's camera settings can be exercised.
 var capabilities = new Capabilities(
     [
-        new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true),
-        new CameraInfo("back-ultrawide", "Ultra Wide", "back", 1, 10, true, false),
-        new CameraInfo("back-tele", "Telephoto", "back", 1, 10, true, true),
-        new CameraInfo("front", "Front", "front", 1, 5, false, false),
+        new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true, true, true),
+        new CameraInfo("back-ultrawide", "Ultra Wide", "back", 1, 10, true, false, true, true),
+        new CameraInfo("back-tele", "Telephoto", "back", 1, 10, true, true, true, true),
+        new CameraInfo("front", "Front", "front", 1, 5, false, false, true, true),
     ],
     [new VideoPreset(1280, 720, [30, 60]), new VideoPreset(1920, 1080, [30, 60])]);
-var cameraState = new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000);
+var cameraState = new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000,
+    WhiteBalanceModes.Auto, 5200, 0, ExposureModes.Auto, StabilizationModes.Off,
+    [StabilizationModes.Off, StabilizationModes.Standard, StabilizationModes.Cinematic]);
 await stream.WriteAsync(Message.Json(MessageType.Capabilities, capabilities, ProtocolJson.Default.Capabilities, Now()));
 await stream.WriteAsync(Message.Json(MessageType.CameraState, cameraState, ProtocolJson.Default.CameraState, Now()));
 
@@ -162,6 +164,11 @@ static CameraState Apply(CameraState state, Control control)
         Height = control.Height ?? state.Height,
         Fps = control.Fps ?? state.Fps,
         BitrateKbps = control.BitrateKbps ?? state.BitrateKbps,
+        WhiteBalanceMode = control.WhiteBalanceMode ?? (control.WhiteBalanceTemperature is not null || control.WhiteBalanceTint is not null ? WhiteBalanceModes.Locked : state.WhiteBalanceMode),
+        WhiteBalanceTemperature = control.WhiteBalanceTemperature ?? state.WhiteBalanceTemperature,
+        WhiteBalanceTint = control.WhiteBalanceTint ?? state.WhiteBalanceTint,
+        ExposureMode = control.ExposureMode ?? state.ExposureMode,
+        Stabilization = control.Stabilization ?? state.Stabilization,
     };
     return next.CameraId != state.CameraId ? next with { Zoom = 1, Torch = false, FocusMode = "continuous" } : next;
 }

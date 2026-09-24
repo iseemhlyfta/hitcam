@@ -32,6 +32,19 @@ public sealed record QualityOption(int Width, int Height, int Fps, int BitrateKb
     public override string ToString() => $"{Height}p · {Fps} fps";
 }
 
+public sealed record StabilizationOption(string Id, string Label)
+{
+    public override string ToString() => Label;
+
+    public static StabilizationOption For(string id) => new(id, id switch
+    {
+        StabilizationModes.Off => Loc.StabilizationOff,
+        StabilizationModes.Standard => Loc.StabilizationStandard,
+        StabilizationModes.Cinematic => Loc.StabilizationCinematic,
+        _ => id,
+    });
+}
+
 /// <summary>
 /// Camera settings on the PC. Edits are sent to the phone as <see cref="Control"/>; the phone answers with a full
 /// <see cref="CameraState"/>, which is mirrored back here. Must be used on the UI thread.
@@ -64,6 +77,14 @@ public sealed class CameraControlsViewModel : ReactiveObject
     private bool _torch;
     private bool _mirror;
     private int _rotation;
+    private bool _supportsWhiteBalance;
+    private bool _isAutoWhiteBalance = true;
+    private double _whiteBalanceTemperature = 5000;
+    private double _whiteBalanceTint;
+    private bool _supportsExposureLock;
+    private bool _isExposureLocked;
+    private IReadOnlyList<StabilizationOption> _stabilizationOptions = [];
+    private StabilizationOption? _selectedStabilization;
     private IReadOnlyList<CameraInfo> _cameraInfos = [];
 
     public CameraControlsViewModel(Func<Control, Task> send)
@@ -80,14 +101,113 @@ public sealed class CameraControlsViewModel : ReactiveObject
         this.WhenAnyValue(x => x.LensPosition).Skip(1).Where(_ => !_fromPhone).Do(_ => MarkLocalEdit())
             .Throttle(TimeSpan.FromMilliseconds(80), _ui)
             .Subscribe(value => Send(new Control { FocusMode = "locked", LensPosition = value }));
+        // Moving either white balance slider locks it at the chosen temperature and tint.
+        this.WhenAnyValue(x => x.WhiteBalanceTemperature, x => x.WhiteBalanceTint).Skip(1).Where(_ => !_fromPhone).Do(_ => MarkLocalEdit())
+            .Throttle(TimeSpan.FromMilliseconds(80), _ui)
+            .Subscribe(value => Send(new Control
+            {
+                WhiteBalanceMode = WhiteBalanceModes.Locked,
+                WhiteBalanceTemperature = Math.Round(value.Item1),
+                WhiteBalanceTint = Math.Round(value.Item2),
+            }));
 
         AutoFocusCommand = ReactiveCommand.Create(() => Send(new Control { FocusMode = "continuous" }));
+        AutoWhiteBalanceCommand = ReactiveCommand.Create(() => Send(new Control { WhiteBalanceMode = WhiteBalanceModes.Auto }));
         RotateCommand = ReactiveCommand.Create(() => Send(new Control { Rotation = (Rotation + 90) % 360 }));
     }
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AutoFocusCommand { get; }
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> RotateCommand { get; }
+
+    public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AutoWhiteBalanceCommand { get; }
+
+    // White balance
+
+    public bool SupportsWhiteBalance { get => _supportsWhiteBalance; private set => this.RaiseAndSetIfChanged(ref _supportsWhiteBalance, value); }
+
+    public bool IsAutoWhiteBalance { get => _isAutoWhiteBalance; private set => this.RaiseAndSetIfChanged(ref _isAutoWhiteBalance, value); }
+
+    /// <summary>Kelvin, 2500 (warm light, picture turns bluer) to 8000 (daylight shade, picture turns warmer).</summary>
+    public double WhiteBalanceTemperature
+    {
+        get => _whiteBalanceTemperature;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _whiteBalanceTemperature, value);
+            this.RaisePropertyChanged(nameof(WhiteBalanceText));
+        }
+    }
+
+    /// <summary>Green (negative) to magenta (positive).</summary>
+    public double WhiteBalanceTint
+    {
+        get => _whiteBalanceTint;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _whiteBalanceTint, value);
+            this.RaisePropertyChanged(nameof(WhiteBalanceTintText));
+        }
+    }
+
+    public string WhiteBalanceText => $"{WhiteBalanceTemperature:0} K";
+
+    public string WhiteBalanceTintText => $"{WhiteBalanceTint:+0;-0;0}";
+
+    // Exposure lock
+
+    public bool SupportsExposureLock { get => _supportsExposureLock; private set => this.RaiseAndSetIfChanged(ref _supportsExposureLock, value); }
+
+    /// <summary>Locked exposure keeps brightness fixed; the bias slider has no effect then.</summary>
+    public bool IsExposureLocked
+    {
+        get => _isExposureLocked;
+        set
+        {
+            if (_isExposureLocked == value)
+                return;
+            this.RaiseAndSetIfChanged(ref _isExposureLocked, value);
+            this.RaisePropertyChanged(nameof(CanAdjustExposure));
+            if (!_fromPhone)
+            {
+                MarkLocalEdit();
+                Send(new Control { ExposureMode = value ? ExposureModes.Locked : ExposureModes.Auto });
+            }
+        }
+    }
+
+    public bool CanAdjustExposure => !IsExposureLocked;
+
+    // Stabilization
+
+    public IReadOnlyList<StabilizationOption> StabilizationOptions
+    {
+        get => _stabilizationOptions;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _stabilizationOptions, value);
+            this.RaisePropertyChanged(nameof(SupportsStabilization));
+        }
+    }
+
+    /// <summary>The current format offers more than "off".</summary>
+    public bool SupportsStabilization => StabilizationOptions.Count > 1;
+
+    public StabilizationOption? SelectedStabilization
+    {
+        get => _selectedStabilization;
+        set
+        {
+            if (Equals(_selectedStabilization, value))
+                return;
+            this.RaiseAndSetIfChanged(ref _selectedStabilization, value);
+            if (!_fromPhone && value is not null)
+            {
+                MarkLocalEdit();
+                Send(new Control { Stabilization = value.Id });
+            }
+        }
+    }
 
     /// <summary>False until the phone has reported its cameras and current state.</summary>
     public bool IsAvailable { get => _isAvailable; private set => this.RaiseAndSetIfChanged(ref _isAvailable, value); }
@@ -250,6 +370,19 @@ public sealed class CameraControlsViewModel : ReactiveObject
             Torch = state.Torch;
             Mirror = state.Mirror;
             Rotation = state.Rotation;
+
+            // Older phone apps send neither the capability nor the state: the controls stay hidden.
+            SupportsWhiteBalance = camera?.SupportsWhiteBalance == true && state.WhiteBalanceMode is not null;
+            IsAutoWhiteBalance = state.WhiteBalanceMode != WhiteBalanceModes.Locked;
+            WhiteBalanceTemperature = Math.Clamp(state.WhiteBalanceTemperature ?? 5000, 2500, 8000);
+            WhiteBalanceTint = Math.Clamp(state.WhiteBalanceTint ?? 0, -100, 100);
+            SupportsExposureLock = camera?.SupportsExposureLock == true && state.ExposureMode is not null;
+            IsExposureLocked = state.ExposureMode == ExposureModes.Locked;
+            var modes = state.StabilizationModes ?? [];
+            if (!modes.SequenceEqual(StabilizationOptions.Select(o => o.Id)))
+                StabilizationOptions = [.. modes.Select(StabilizationOption.For)];
+            SelectedStabilization = StabilizationOptions.FirstOrDefault(o => o.Id == (state.Stabilization ?? StabilizationModes.Off));
+
             this.RaisePropertyChanged(nameof(CanZoom));
             IsAvailable = Cameras.Count > 0;
         });
@@ -266,6 +399,10 @@ public sealed class CameraControlsViewModel : ReactiveObject
             Qualities = [];
             SelectedCamera = null;
             SelectedQuality = null;
+            SupportsWhiteBalance = false;
+            SupportsExposureLock = false;
+            StabilizationOptions = [];
+            SelectedStabilization = null;
         });
     }
 

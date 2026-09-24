@@ -92,17 +92,22 @@ phone                                   pc
 
 // Capabilities
 { "cameras": [ { "id": "back-wide", "name": "Wide", "position": "back",
-                 "minZoom": 1.0, "maxZoom": 10.0, "hasTorch": true, "supportsFocus": true } ],
+                 "minZoom": 1.0, "maxZoom": 10.0, "hasTorch": true, "supportsFocus": true,
+                 "supportsWhiteBalance": true, "supportsExposureLock": true } ],
   "presets": [ { "width": 1280, "height": 720, "fps": [30, 60] }, { "width": 1920, "height": 1080, "fps": [30, 60] } ] }
 
 // CameraState  (full snapshot, sent on every change)
 { "cameraId": "back-wide", "zoom": 1.0, "torch": false, "focusMode": "auto", "lensPosition": 0.5,
-  "exposureBias": 0.0, "mirror": false, "rotation": 0, "width": 1920, "height": 1080, "fps": 30, "bitrateKbps": 8000 }
+  "exposureBias": 0.0, "mirror": false, "rotation": 0, "width": 1920, "height": 1080, "fps": 30, "bitrateKbps": 8000,
+  "whiteBalanceMode": "auto", "whiteBalanceTemperature": 5200, "whiteBalanceTint": 0, "exposureMode": "auto",
+  "stabilization": "off", "stabilizationModes": ["off", "standard", "cinematic"] }
 
 // Control (every field optional; only present fields are applied)
 { "cameraId": "front", "zoom": 2.0, "torch": true, "focusMode": "locked", "lensPosition": 0.3,
   "focusPoint": { "x": 0.5, "y": 0.5 }, "exposureBias": -0.5, "mirror": true, "rotation": 90,
-  "width": 1280, "height": 720, "fps": 60, "bitrateKbps": 6000 }
+  "width": 1280, "height": 720, "fps": 60, "bitrateKbps": 6000,
+  "whiteBalanceMode": "locked", "whiteBalanceTemperature": 4200, "whiteBalanceTint": -10, "exposureMode": "locked",
+  "stabilization": "standard" }
 
 // Status
 { "battery": 0.82, "charging": true, "thermal": "nominal", "fps": 29.9, "bitrateKbps": 7900, "droppedFrames": 3 }
@@ -110,3 +115,10 @@ phone                                   pc
 
 `rotation` ∈ {0, 90, 180, 270}; `focusMode` ∈ {"auto", "continuous", "locked"}; `thermal` ∈
 {"nominal", "fair", "serious", "critical"}.
+
+Added in app 0.2 (optional, absent from older apps: hide the controls then): `whiteBalanceMode` and
+`exposureMode` ∈ {"auto", "locked"}; a `whiteBalanceTemperature` (K, 2000–10000) or `whiteBalanceTint` (−150…150)
+without a mode means "locked at this value", the other one keeps its current value. A locked exposure ignores
+`exposureBias`. `stabilization` ∈ {"off", "standard", "cinematic"}, limited to `stabilizationModes`, which the
+phone recomputes for every format; stabilization adds latency. Switching lens or format resets white balance
+and exposure to "auto".

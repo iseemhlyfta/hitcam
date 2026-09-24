@@ -151,7 +151,9 @@
     </Style>
 
     <!--  Segmented control (lens)  -->
+    <!--  Segmented lists never scroll: bringing the selection into view would scroll the whole settings panel.  -->
     <Style Selector="ListBox.segmented">
+        <Setter Property="AutoScrollToSelectedItem" Value="False" />
         <Setter Property="Background" Value="{DynamicResource HcSurface2}" />
         <Setter Property="BorderBrush" Value="{DynamicResource HcBorder}" />
         <Setter Property="BorderThickness" Value="1" />
@@ -180,6 +182,23 @@
     </Style>
     <Style Selector="ListBox.segmented ListBoxItem:selected">
         <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+
+    <!--  Sliders drawn over a colored track (white balance)  -->
+    <Style Selector="Border.gradientTrack">
+        <Setter Property="Height" Value="4" />
+        <Setter Property="Margin" Value="10,0" />
+        <Setter Property="CornerRadius" Value="2" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Slider.gradient /template/ RepeatButton#PART_DecreaseButton, Slider.gradient /template/ RepeatButton#PART_IncreaseButton">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Slider.gradient:pointerover /template/ RepeatButton#PART_DecreaseButton, Slider.gradient:pointerover /template/ RepeatButton#PART_IncreaseButton">
+        <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="Slider.gradient:pressed /template/ RepeatButton#PART_DecreaseButton, Slider.gradient:pressed /template/ RepeatButton#PART_IncreaseButton">
+        <Setter Property="Background" Value="Transparent" />
     </Style>
 
     <Style Selector="ComboBox">

@@ -84,6 +84,34 @@ public class ProtocolTests
     }
 
     [Fact]
+    public void Camera_state_from_an_older_phone_app_has_no_new_settings()
+    {
+        var json = """{"cameraId":"back-wide","zoom":1,"torch":false,"focusMode":"continuous","lensPosition":0.5,"exposureBias":0,"mirror":false,"rotation":0,"width":1920,"height":1080,"fps":30,"bitrateKbps":8000}"""u8;
+        var state = new Message(new MessageHeader(MessageType.CameraState, MessageFlags.None, json.Length, 0), json.ToArray())
+            .ReadJson(ProtocolJson.Default.CameraState);
+
+        Assert.Equal("back-wide", state.CameraId);
+        Assert.Null(state.WhiteBalanceMode);
+        Assert.Null(state.StabilizationModes);
+    }
+
+    [Fact]
+    public void White_balance_exposure_and_stabilization_round_trip()
+    {
+        var state = new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000,
+            WhiteBalanceModes.Locked, 4200, -10, ExposureModes.Locked, StabilizationModes.Standard,
+            [StabilizationModes.Off, StabilizationModes.Standard]);
+        var control = new Control { WhiteBalanceMode = WhiteBalanceModes.Locked, WhiteBalanceTemperature = 4200, ExposureMode = ExposureModes.Auto };
+
+        var stateBack = Message.Json(MessageType.CameraState, state, ProtocolJson.Default.CameraState).ReadJson(ProtocolJson.Default.CameraState);
+        var controlJson = System.Text.Encoding.UTF8.GetString(Message.Json(MessageType.Control, control, ProtocolJson.Default.Control).Payload);
+
+        Assert.Equal((4200.0, -10.0, "standard"), (stateBack.WhiteBalanceTemperature, stateBack.WhiteBalanceTint, stateBack.Stabilization));
+        Assert.Equal(["off", "standard"], stateBack.StabilizationModes!);
+        Assert.Equal("""{"whiteBalanceMode":"locked","whiteBalanceTemperature":4200,"exposureMode":"auto"}""", controlJson);
+    }
+
+    [Fact]
     public void Pong_echoes_ping_timestamp()
     {
         var pong = Message.Pong(123456789, 5);

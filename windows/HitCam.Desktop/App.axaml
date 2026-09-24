@@ -49,6 +49,17 @@
             <SolidColorBrush x:Key="HcOnVideo" Color="#F2F1EE" />
             <SolidColorBrush x:Key="HcVideoMuted" Color="#8C8A84" />
             <SolidColorBrush x:Key="HcLive" Color="#F2553A" />
+            <!--  White balance sliders show how the picture changes (as in photo editors)  -->
+            <LinearGradientBrush x:Key="HcTemperatureGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+                <GradientStop Offset="0" Color="#5B8DEF" />
+                <GradientStop Offset="0.5" Color="#D9D6CF" />
+                <GradientStop Offset="1" Color="#E9A23B" />
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="HcTintGradient" StartPoint="0%,0%" EndPoint="100%,0%">
+                <GradientStop Offset="0" Color="#4DAA57" />
+                <GradientStop Offset="0.5" Color="#D9D6CF" />
+                <GradientStop Offset="1" Color="#C45BC0" />
+            </LinearGradientBrush>
             <FontFamily x:Key="HcDisplayFont">Segoe UI Variable Display, Segoe UI</FontFamily>
             <FontFamily x:Key="HcMonoFont">Cascadia Mono, Consolas</FontFamily>
 

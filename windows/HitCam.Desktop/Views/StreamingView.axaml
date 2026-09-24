@@ -149,10 +149,38 @@
 
                             <StackPanel>
                                 <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ExposureText}" />
-                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.Exposure}" />
+                                    <ToggleButton Margin="8,0,0,0" DockPanel.Dock="Right" Classes="pill" Content="{x:Static svc:Loc.ExposureLock}"
+                                                  IsChecked="{Binding IsExposureLocked}" IsVisible="{Binding SupportsExposureLock}"
+                                                  ToolTip.Tip="{x:Static svc:Loc.ExposureLockHint}" />
+                                    <TextBlock VerticalAlignment="Center" DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ExposureText}" />
+                                    <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.Exposure}" />
                                 </DockPanel>
-                                <Slider Maximum="2" Minimum="-2" Value="{Binding ExposureBias}" AutomationProperties.Name="{x:Static svc:Loc.Exposure}" />
+                                <Slider Maximum="2" Minimum="-2" Value="{Binding ExposureBias}" IsEnabled="{Binding CanAdjustExposure}"
+                                        AutomationProperties.Name="{x:Static svc:Loc.Exposure}" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding SupportsWhiteBalance}">
+                                <DockPanel>
+                                    <ToggleButton Margin="8,0,0,0" DockPanel.Dock="Right" Classes="pill" Command="{Binding AutoWhiteBalanceCommand}"
+                                                  Content="{x:Static svc:Loc.AutoFocus}" IsChecked="{Binding IsAutoWhiteBalance, Mode=OneWay}" />
+                                    <TextBlock VerticalAlignment="Center" DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding WhiteBalanceText}" />
+                                    <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.WhiteBalance}" />
+                                </DockPanel>
+                                <!--  Warm light on the left, daylight on the right  -->
+                                <Panel>
+                                    <Border Classes="gradientTrack" Background="{StaticResource HcTemperatureGradient}" />
+                                    <Slider Classes="gradient" Maximum="8000" Minimum="2500" SmallChange="50" LargeChange="500" Value="{Binding WhiteBalanceTemperature}"
+                                        ToolTip.Tip="{x:Static svc:Loc.WhiteBalanceHint}" AutomationProperties.Name="{x:Static svc:Loc.WhiteBalance}" />
+                                </Panel>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding WhiteBalanceTintText}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.Tint}" />
+                                </DockPanel>
+                                <Panel>
+                                    <Border Classes="gradientTrack" Background="{StaticResource HcTintGradient}" />
+                                    <Slider Classes="gradient" Maximum="100" Minimum="-100" SmallChange="1" LargeChange="10" Value="{Binding WhiteBalanceTint}"
+                                        ToolTip.Tip="{x:Static svc:Loc.TintHint}" AutomationProperties.Name="{x:Static svc:Loc.Tint}" />
+                                </Panel>
                             </StackPanel>
 
                             <StackPanel IsVisible="{Binding SupportsFocus}">
@@ -162,6 +190,18 @@
                                     <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.Focus}" />
                                 </DockPanel>
                                 <Slider Maximum="1" Minimum="0" Value="{Binding LensPosition}" AutomationProperties.Name="{x:Static svc:Loc.Focus}" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="6" IsVisible="{Binding SupportsStabilization}">
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.Stabilization}" ToolTip.Tip="{x:Static svc:Loc.StabilizationHint}" />
+                                <ListBox Classes="segmented" ItemsSource="{Binding StabilizationOptions}" SelectedItem="{Binding SelectedStabilization}"
+                                         ToolTip.Tip="{x:Static svc:Loc.StabilizationHint}" AutomationProperties.Name="{x:Static svc:Loc.Stabilization}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:StabilizationOption">
+                                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
                             </StackPanel>
 
                             <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">

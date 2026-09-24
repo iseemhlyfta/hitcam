@@ -62,6 +62,23 @@ public static class Loc
     public static string Torch => Russian ? "Фонарик" : "Torch";
     public static string Mirror => Russian ? "Зеркало" : "Mirror";
     public static string Rotate => Russian ? "Повернуть" : "Rotate";
+    public static string WhiteBalance => Russian ? "Баланс белого" : "White balance";
+    public static string WhiteBalanceHint => Russian
+        ? "Укажите температуру света в комнате: лампы накаливания около 2700 K, дневной свет около 5500 K"
+        : "Set the light temperature in the room: incandescent about 2700 K, daylight about 5500 K";
+    public static string Tint => Russian ? "Оттенок" : "Tint";
+    public static string TintHint => Russian ? "Влево — зеленее, вправо — пурпурнее" : "Left: greener, right: more magenta";
+    public static string ExposureLock => Russian ? "Фиксация" : "Lock";
+    public static string ExposureLockHint => Russian
+        ? "Яркость перестаёт подстраиваться, когда вы двигаетесь или меняется свет"
+        : "Brightness stops adapting when you move or the light changes";
+    public static string Stabilization => Russian ? "Стабилизация" : "Stabilization";
+    public static string StabilizationHint => Russian
+        ? "Убирает дрожание, если телефон в руке. Добавляет задержку, «Кино» — заметную"
+        : "Removes shake when the phone is handheld. Adds latency; “Cinematic” adds a noticeable amount";
+    public static string StabilizationOff => Russian ? "Выкл" : "Off";
+    public static string StabilizationStandard => Russian ? "Обычная" : "Standard";
+    public static string StabilizationCinematic => Russian ? "Кино" : "Cinematic";
 
     // Virtual camera status
     public static string CameraReadyTitle => Russian ? "Виртуальная камера «HitCam»" : "“HitCam” virtual camera";

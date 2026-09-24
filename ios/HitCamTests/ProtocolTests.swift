@@ -37,6 +37,28 @@ final class ProtocolTests: XCTestCase {
         XCTAssertEqual(object?["torch"] as? Bool, true)
     }
 
+    func testStateSavedByAnOlderVersionStillDecodes() throws {
+        // Stored by 0.1 in UserDefaults, before white balance, exposure lock and stabilization existed.
+        let json = #"{"cameraId":"back-wide","zoom":1,"torch":false,"focusMode":"continuous","lensPosition":0.5,"exposureBias":0,"mirror":false,"rotation":0,"width":1920,"height":1080,"fps":30,"bitrateKbps":8000}"#
+        let state = try JSONDecoder().decode(CameraState.self, from: Data(json.utf8))
+
+        XCTAssertEqual(state.cameraId, "back-wide")
+        XCTAssertNil(state.whiteBalanceMode)
+        XCTAssertNil(state.stabilization)
+    }
+
+    func testPcCanLockWhiteBalanceExposureAndSetStabilization() throws {
+        let json = #"{"whiteBalanceMode":"locked","whiteBalanceTemperature":4200,"whiteBalanceTint":-10,"exposureMode":"locked","stabilization":"standard"}"#
+        let control = try JSONDecoder().decode(Control.self, from: Data(json.utf8))
+
+        XCTAssertEqual(control.whiteBalanceMode, "locked")
+        XCTAssertEqual(control.whiteBalanceTemperature, 4200)
+        XCTAssertEqual(control.whiteBalanceTint, -10)
+        XCTAssertEqual(control.exposureMode, "locked")
+        XCTAssertEqual(control.stabilization, "standard")
+        XCTAssertNil(control.zoom)
+    }
+
     func testHelloAckFromThePcDecodes() throws {
         let json = #"{"protocolVersion":1,"status":"pairingRequired","serverName":"PC","serverId":"abc"}"#
         let ack = try JSONDecoder().decode(HelloAck.self, from: Data(json.utf8))

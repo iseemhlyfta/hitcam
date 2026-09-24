@@ -8,13 +8,15 @@ public sealed class CameraControlsTests
 {
     private static readonly Capabilities Capabilities = new(
         [
-            new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true),
-            new CameraInfo("back-tele", "Telephoto", "back", 1, 10, true, true),
-            new CameraInfo("front", "Front", "front", 1, 5, false, false),
+            new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true, true, true),
+            new CameraInfo("back-tele", "Telephoto", "back", 1, 10, true, true, true, true),
+            new CameraInfo("front", "Front", "front", 1, 5, false, false, true, true),
         ],
         [new VideoPreset(1280, 720, [30, 60]), new VideoPreset(1920, 1080, [30, 60])]);
 
-    private static readonly CameraState Initial = new("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000);
+    private static readonly CameraState Initial = new("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000,
+        WhiteBalanceModes.Auto, 5200, 0, ExposureModes.Auto, StabilizationModes.Off,
+        [StabilizationModes.Off, StabilizationModes.Standard, StabilizationModes.Cinematic]);
 
     private readonly ConcurrentQueue<Control> _sent = new();
     private readonly CameraControlsViewModel _controls;
@@ -126,6 +128,81 @@ public sealed class CameraControlsTests
         _controls.ApplyState(Initial with { Zoom = 3 });
         await Task.Delay(1200, Ct);
         Assert.Equal(3, _controls.Zoom);
+    }
+
+    [Fact]
+    public async Task White_balance_sliders_lock_it_at_the_chosen_temperature_and_tint()
+    {
+        Ready();
+        Assert.True(_controls.SupportsWhiteBalance);
+        Assert.True(_controls.IsAutoWhiteBalance);
+
+        _controls.WhiteBalanceTemperature = 3000;
+        _controls.WhiteBalanceTemperature = 3400.4;
+        _controls.WhiteBalanceTint = -12;
+        await Task.Delay(300, Ct);
+
+        var control = Assert.Single(_sent);
+        Assert.Equal((WhiteBalanceModes.Locked, 3400.0, -12.0), (control.WhiteBalanceMode, control.WhiteBalanceTemperature, control.WhiteBalanceTint));
+        Assert.Equal("3400 K", _controls.WhiteBalanceText);
+    }
+
+    [Fact]
+    public void Auto_white_balance_button_returns_to_auto_and_the_phone_state_is_mirrored()
+    {
+        Ready();
+        _controls.ApplyState(Initial with { WhiteBalanceMode = WhiteBalanceModes.Locked, WhiteBalanceTemperature = 4100 });
+        Assert.False(_controls.IsAutoWhiteBalance);
+        Assert.Equal(4100, _controls.WhiteBalanceTemperature);
+        Assert.Empty(_sent);
+
+        _controls.AutoWhiteBalanceCommand.Execute().Subscribe();
+
+        Assert.Equal(WhiteBalanceModes.Auto, Assert.Single(_sent).WhiteBalanceMode);
+    }
+
+    [Fact]
+    public void Exposure_lock_is_sent_and_disables_the_bias_slider()
+    {
+        Ready();
+        Assert.True(_controls.CanAdjustExposure);
+
+        _controls.IsExposureLocked = true;
+        Assert.False(_controls.CanAdjustExposure);
+        _controls.IsExposureLocked = false;
+
+        Assert.Equal([ExposureModes.Locked, ExposureModes.Auto], _sent.Select(c => c.ExposureMode));
+    }
+
+    [Fact]
+    public async Task Stabilization_offers_only_the_modes_of_the_current_format()
+    {
+        Ready();
+        Assert.True(_controls.SupportsStabilization);
+        Assert.Equal(["off", "standard", "cinematic"], _controls.StabilizationOptions.Select(o => o.Id));
+
+        _controls.SelectedStabilization = _controls.StabilizationOptions.Single(o => o.Id == StabilizationModes.Standard);
+        Assert.Equal(StabilizationModes.Standard, Assert.Single(_sent).Stabilization);
+
+        // e.g. 1080p60 on some iPhones: no stabilization at all.
+        _controls.ApplyState(Initial with { Stabilization = StabilizationModes.Off, StabilizationModes = [StabilizationModes.Off] });
+        // Right after the local choice the phone state is held back until editing settles.
+        await Task.Delay(1200, Ct);
+        Assert.False(_controls.SupportsStabilization);
+    }
+
+    [Fact]
+    public void An_older_phone_app_shows_no_new_settings()
+    {
+        _controls.ApplyCapabilities(new Capabilities(
+            [new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true)],
+            [new VideoPreset(1920, 1080, [30])]));
+        _controls.ApplyState(new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000));
+
+        Assert.True(_controls.IsAvailable);
+        Assert.False(_controls.SupportsWhiteBalance);
+        Assert.False(_controls.SupportsExposureLock);
+        Assert.False(_controls.SupportsStabilization);
     }
 
     [Fact]
