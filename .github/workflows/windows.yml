@@ -1,12 +1,17 @@
 name: Windows
 
 on:
+  # Branches only: a release tag builds through release.yml, not a second time here.
   push:
+    branches: ["**"]
     paths: ["windows/**", "docs/protocol.md", ".github/workflows/windows.yml"]
   pull_request:
     paths: ["windows/**", "docs/protocol.md", ".github/workflows/windows.yml"]
   workflow_dispatch:
   workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build:

@@ -5,8 +5,9 @@ on:
   push:
     tags: ["v*"]
 
+# Only the publish job may write (create the release); the build jobs run third-party build code.
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows:
@@ -18,6 +19,8 @@ jobs:
   publish:
     needs: [windows, ios]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/download-artifact@v4
         with:

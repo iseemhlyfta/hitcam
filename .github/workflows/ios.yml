@@ -1,12 +1,17 @@
 name: iOS
 
 on:
+  # Branches only: a release tag builds through release.yml, not a second time here.
   push:
+    branches: ["**"]
     paths: ["ios/**", ".github/workflows/ios.yml", ".github/scripts/xcodebuild.sh"]
   pull_request:
     paths: ["ios/**", ".github/workflows/ios.yml", ".github/scripts/xcodebuild.sh"]
   workflow_dispatch:
   workflow_call:
+
+permissions:
+  contents: read
 
 jobs:
   build:
