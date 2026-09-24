@@ -1,0 +1,194 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.StreamingView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:MainViewModel">
+
+    <Grid Margin="16,4,16,16" ColumnDefinitions="*,Auto" ColumnSpacing="16">
+
+        <Grid RowDefinitions="Auto,*,Auto" RowSpacing="12">
+
+            <!--  Phone  -->
+            <Grid Height="52" ColumnDefinitions="Auto,*,Auto,Auto" ColumnSpacing="12" IsVisible="{Binding IsNotFullScreen}">
+                <Border Width="40" Height="40" Classes="card" CornerRadius="10">
+                    <Path Classes="icon" Width="18" Height="18" StrokeThickness="1.6" Stroke="{DynamicResource HcText}" Data="{StaticResource IconPhone}" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock FontSize="17" FontWeight="SemiBold" Text="{Binding DeviceName}" />
+                    <TextBlock Classes="muted" Text="{Binding DeviceSubtitle}" />
+                </StackPanel>
+                <Border Grid.Column="2" Height="30" Padding="12,0" VerticalAlignment="Center" Background="{DynamicResource HcOkSoft}" CornerRadius="15"
+                        IsVisible="{Binding IsCameraReady}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{DynamicResource HcOk}" />
+                        <TextBlock VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{DynamicResource HcOk}" Text="{x:Static svc:Loc.CameraLiveBadge}" />
+                    </StackPanel>
+                </Border>
+                <Button Grid.Column="3" VerticalAlignment="Center" Classes="secondary" Command="{Binding DisconnectCommand}" Content="{x:Static svc:Loc.Disconnect}" />
+            </Grid>
+
+            <!--  Preview; stays dark in both themes  -->
+            <Border Grid.Row="1"
+                    Background="{StaticResource HcVideo}" CornerRadius="12" ClipToBounds="True"
+                    DoubleTapped="OnPreviewDoubleTapped">
+                <Panel>
+                    <Image Source="{Binding Preview}" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="MediumQuality" />
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" IsVisible="{Binding !HasPreview}">
+                        <Path Classes="icon" Width="40" Height="40" StrokeThickness="1.4" Stroke="{StaticResource HcVideoMuted}" Data="{StaticResource IconVideo}" />
+                        <TextBlock FontSize="13" Foreground="{StaticResource HcVideoMuted}" Text="{x:Static svc:Loc.WaitingForFrame}" />
+                    </StackPanel>
+                    <Border Margin="14" HorizontalAlignment="Left" VerticalAlignment="Top" Classes="overlay"
+                            IsVisible="{Binding LiveText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Ellipse Width="8" Height="8" VerticalAlignment="Center" Fill="{StaticResource HcLive}" />
+                            <TextBlock VerticalAlignment="Center" FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource HcOnVideo}" Text="{Binding LiveText}" />
+                        </StackPanel>
+                    </Border>
+                    <Button Margin="14" HorizontalAlignment="Right" VerticalAlignment="Top" Classes="onVideo" Command="{Binding ToggleFullScreenCommand}"
+                            ToolTip.Tip="{x:Static svc:Loc.Fullscreen}" AutomationProperties.Name="{x:Static svc:Loc.Fullscreen}" IsVisible="{Binding IsNotFullScreen}">
+                        <Path Classes="icon" StrokeThickness="1.8" Stroke="{StaticResource HcOnVideo}" Data="{StaticResource IconFullscreen}" />
+                    </Button>
+                    <Button Margin="14" HorizontalAlignment="Right" VerticalAlignment="Top" Classes="onVideo" Command="{Binding ToggleFullScreenCommand}"
+                            ToolTip.Tip="{x:Static svc:Loc.ExitFullscreen}" AutomationProperties.Name="{x:Static svc:Loc.ExitFullscreen}" IsVisible="{Binding IsFullScreen}">
+                        <Path Classes="icon" StrokeThickness="1.8" Stroke="{StaticResource HcOnVideo}" Data="{StaticResource IconExitFullscreen}" />
+                    </Button>
+                </Panel>
+            </Border>
+
+            <!--  Stream stats  -->
+            <Grid Grid.Row="2" ColumnDefinitions="*,*,*,*" ColumnSpacing="10" IsVisible="{Binding IsNotFullScreen}">
+                <Border Classes="stat">
+                    <StackPanel Spacing="3">
+                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Stream}" />
+                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="{Binding StreamText}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="1" Classes="stat">
+                    <StackPanel Spacing="3">
+                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Received}" />
+                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="{Binding ReceivedText}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="2" Classes="stat">
+                    <StackPanel Spacing="3">
+                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Latency}" />
+                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="{Binding LatencyText}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Column="3" Classes="stat">
+                    <StackPanel Spacing="3">
+                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Phone}" />
+                        <TextBlock FontSize="14" FontWeight="SemiBold" Text="{Binding PhoneText}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Grid>
+
+        <!--  Camera settings  -->
+        <Border Grid.Column="1" Width="320" Classes="card" IsVisible="{Binding IsNotFullScreen}">
+            <DockPanel>
+                <!--  Virtual camera status  -->
+                <Border Margin="20,0,20,18" Padding="12" DockPanel.Dock="Bottom" CornerRadius="10"
+                        Background="{DynamicResource HcOkSoft}" IsVisible="{Binding IsCameraReady}">
+                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
+                        <Path Classes="icon" Width="18" Height="18" VerticalAlignment="Top" StrokeThickness="2" Stroke="{DynamicResource HcOk}" Data="{StaticResource IconCheckCircle}" />
+                        <StackPanel Grid.Column="1" Spacing="2">
+                            <TextBlock Classes="strong" Text="{Binding CameraTitle}" />
+                            <TextBlock Classes="muted" Text="{Binding CameraDetail}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <Border Margin="20,0,20,18" Padding="12" DockPanel.Dock="Bottom" CornerRadius="10" Classes="softAccent"
+                        IsVisible="{Binding IsCameraAttention}">
+                    <StackPanel Spacing="10">
+                        <StackPanel Spacing="2">
+                            <TextBlock Classes="strong" Text="{Binding CameraTitle}" />
+                            <TextBlock Classes="muted" Text="{Binding CameraDetail}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <Button HorizontalAlignment="Stretch" Classes="primary" Height="36" Command="{Binding InstallCameraCommand}" Content="{Binding InstallCameraLabel}"
+                                IsVisible="{Binding CanInstallCamera}" />
+                    </StackPanel>
+                </Border>
+
+                <ScrollViewer>
+                    <StackPanel Margin="20,18,20,16" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel" Spacing="16">
+                        <StackPanel Spacing="2">
+                            <TextBlock Classes="title" Text="{x:Static svc:Loc.CameraSettings}" />
+                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.CameraSettingsHint}" />
+                        </StackPanel>
+                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.WaitingForPhoneSettings}" IsVisible="{Binding !IsAvailable}" />
+
+                        <StackPanel IsEnabled="{Binding IsAvailable}" Spacing="16">
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.Lens}" />
+                                <ListBox Classes="segmented" ItemsSource="{Binding Cameras}" SelectedItem="{Binding SelectedCamera}"
+                                         AutomationProperties.Name="{x:Static svc:Loc.Lens}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:CameraOption">
+                                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" ToolTip.Tip="{Binding Name}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                            </StackPanel>
+
+                            <StackPanel Spacing="6">
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.Quality}" />
+                                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Qualities}" SelectedItem="{Binding SelectedQuality}"
+                                          AutomationProperties.Name="{x:Static svc:Loc.Quality}" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding CanZoom}">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ZoomText}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.Zoom}" />
+                                </DockPanel>
+                                <Slider Maximum="{Binding MaxZoom}" Minimum="{Binding MinZoom}" Value="{Binding Zoom}" AutomationProperties.Name="{x:Static svc:Loc.Zoom}" />
+                            </StackPanel>
+
+                            <StackPanel>
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ExposureText}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.Exposure}" />
+                                </DockPanel>
+                                <Slider Maximum="2" Minimum="-2" Value="{Binding ExposureBias}" AutomationProperties.Name="{x:Static svc:Loc.Exposure}" />
+                            </StackPanel>
+
+                            <StackPanel IsVisible="{Binding SupportsFocus}">
+                                <DockPanel>
+                                    <ToggleButton DockPanel.Dock="Right" Classes="pill" Command="{Binding AutoFocusCommand}" Content="{x:Static svc:Loc.AutoFocus}"
+                                                  IsChecked="{Binding IsAutoFocus, Mode=OneWay}" />
+                                    <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.Focus}" />
+                                </DockPanel>
+                                <Slider Maximum="1" Minimum="0" Value="{Binding LensPosition}" AutomationProperties.Name="{x:Static svc:Loc.Focus}" />
+                            </StackPanel>
+
+                            <Grid ColumnDefinitions="*,*,*" ColumnSpacing="8">
+                                <ToggleButton Classes="tile" IsChecked="{Binding Torch}" IsEnabled="{Binding HasTorch}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Path Classes="icon" Data="{StaticResource IconTorch}" />
+                                        <TextBlock VerticalAlignment="Center" Text="{x:Static svc:Loc.Torch}" />
+                                    </StackPanel>
+                                </ToggleButton>
+                                <ToggleButton Grid.Column="1" Classes="tile" IsChecked="{Binding Mirror}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Path Classes="icon" Data="{StaticResource IconMirror}" />
+                                        <TextBlock VerticalAlignment="Center" Text="{x:Static svc:Loc.Mirror}" />
+                                    </StackPanel>
+                                </ToggleButton>
+                                <Button Grid.Column="2" Classes="tile" Command="{Binding RotateCommand}" ToolTip.Tip="{x:Static svc:Loc.Rotate}"
+                                        AutomationProperties.Name="{x:Static svc:Loc.Rotate}">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Path Classes="icon" Data="{StaticResource IconRotate}" />
+                                        <TextBlock VerticalAlignment="Center" Text="{Binding RotationText}" />
+                                    </StackPanel>
+                                </Button>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>

@@ -1,18 +1,35 @@
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using HitCam.Core.Protocol;
+using HitCam.Desktop.Services;
 using ReactiveUI;
 
 namespace HitCam.Desktop.ViewModels;
 
-public sealed record CameraOption(string Id, string Name)
+/// <param name="Name">The phone's own name for the lens.</param>
+/// <param name="Label">Short label for the lens switch.</param>
+public sealed record CameraOption(string Id, string Name, string Label)
 {
-    public override string ToString() => Name;
+    public override string ToString() => Label;
+
+    // Known iPhone lenses, ordered by field of view; unknown ones keep the phone's name and go last.
+    private static readonly string[] Order = ["back-ultrawide", "back-wide", "back-tele", "front"];
+
+    public static IEnumerable<CameraOption> FromPhone(IEnumerable<CameraInfo> cameras) => cameras
+        .OrderBy(c => Array.IndexOf(Order, c.Id) is var i && i >= 0 ? i : Order.Length)
+        .Select(c => new CameraOption(c.Id, c.Name, c.Id switch
+        {
+            "back-ultrawide" => Loc.LensUltraWide,
+            "back-wide" => Loc.LensWide,
+            "back-tele" => Loc.LensTele,
+            "front" => Loc.LensFront,
+            _ => c.Name,
+        }));
 }
 
 public sealed record QualityOption(int Width, int Height, int Fps, int BitrateKbps)
 {
-    public override string ToString() => $"{Height}p {Fps} fps";
+    public override string ToString() => $"{Height}p · {Fps} fps";
 }
 
 /// <summary>
@@ -198,7 +215,7 @@ public sealed class CameraControlsViewModel : ReactiveObject
         _cameraInfos = capabilities.Cameras;
         RunFromPhone(() =>
         {
-            Cameras = [.. capabilities.Cameras.Select(c => new CameraOption(c.Id, c.Name))];
+            Cameras = [.. CameraOption.FromPhone(capabilities.Cameras)];
             Qualities = [.. capabilities.Presets
                 .SelectMany(p => p.Fps.Select(fps => new QualityOption(p.Width, p.Height, fps, DefaultBitrate(p.Height, fps))))
                 .OrderBy(q => q.Height).ThenBy(q => q.Fps)];

@@ -1,0 +1,50 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.PairingView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:MainViewModel">
+
+    <UserControl.Resources>
+        <DataTemplate x:Key="PinDigit" x:DataType="x:String">
+            <Border Width="64" Height="80" Margin="5,0" Classes="well" CornerRadius="12">
+                <TextBlock
+                    HorizontalAlignment="Center"
+                    VerticalAlignment="Center"
+                    FontFamily="{StaticResource HcMonoFont}"
+                    FontSize="40"
+                    FontWeight="Bold"
+                    Text="{Binding}" />
+            </Border>
+        </DataTemplate>
+        <ItemsPanelTemplate x:Key="Row">
+            <StackPanel Orientation="Horizontal" />
+        </ItemsPanelTemplate>
+    </UserControl.Resources>
+
+    <Border Margin="16,4,16,16" Classes="card">
+        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="20">
+            <Border Width="64" Height="64" HorizontalAlignment="Center" Classes="softAccent" CornerRadius="20">
+                <Path Classes="icon" Width="28" Height="28" StrokeThickness="1.6" Stroke="{DynamicResource HcAccentSoftText}" Data="{StaticResource IconLock}" />
+            </Border>
+            <StackPanel Spacing="6">
+                <TextBlock HorizontalAlignment="Center" FontSize="13" Foreground="{DynamicResource HcText2}" Text="{Binding PairingText}" />
+                <TextBlock HorizontalAlignment="Center" Classes="h1" Text="{x:Static svc:Loc.PairingTitle}" />
+            </StackPanel>
+            <StackPanel Margin="0,8" HorizontalAlignment="Center" Orientation="Horizontal" Spacing="12"
+                        AutomationProperties.Name="{Binding Pin}">
+                <ItemsControl ItemTemplate="{StaticResource PinDigit}" ItemsPanel="{StaticResource Row}" ItemsSource="{Binding PinFirstHalf}" />
+                <ItemsControl ItemTemplate="{StaticResource PinDigit}" ItemsPanel="{StaticResource Row}" ItemsSource="{Binding PinSecondHalf}" />
+            </StackPanel>
+            <TextBlock
+                HorizontalAlignment="Center"
+                FontSize="13"
+                Foreground="{DynamicResource HcText2}"
+                LineHeight="20"
+                Text="{x:Static svc:Loc.PairingHint}"
+                TextAlignment="Center" />
+            <Button HorizontalAlignment="Center" Classes="secondary" Height="36" Padding="18,0" Command="{Binding CancelPairingCommand}" Content="{x:Static svc:Loc.Cancel}" />
+        </StackPanel>
+    </Border>
+</UserControl>

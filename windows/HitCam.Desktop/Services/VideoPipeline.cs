@@ -12,6 +12,9 @@ public sealed class VideoPipeline : IDisposable
     // Null is the "no signal" marker.
     private readonly BlockingCollection<VideoFrame?> _queue = new(boundedCapacity: 16);
     private readonly Thread _thread;
+    // Guards the handle against destruction while the UI thread copies the preview.
+    private readonly Lock _bridgeLock = new();
+    private IntPtr _bridge;
     private int _dropped;
     private long _decodedFrames;
     private volatile bool _isLinked;
@@ -41,6 +44,28 @@ public sealed class VideoPipeline : IDisposable
     }
 
     public void ClearSignal() => TryAdd(null);
+
+    /// <summary>Size and sequence number of the newest decoded frame's preview; (0, 0, 0) before the first.</summary>
+    public (int Width, int Height, ulong Frame) PreviewInfo()
+    {
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return (0, 0, 0);
+            NativeMethods.HitCam_BridgePreviewInfo(_bridge, out var width, out var height, out var frame);
+            return ((int)width, (int)height, frame);
+        }
+    }
+
+    /// <summary>Copies the preview as BGRA into <paramref name="destination"/>; false if its size changed meanwhile.</summary>
+    public bool CopyPreview(IntPtr destination, int stride, int width, int height)
+    {
+        lock (_bridgeLock)
+        {
+            return _bridge != IntPtr.Zero
+                   && NativeMethods.HitCam_BridgeCopyPreview(_bridge, destination, (uint)stride, (uint)width, (uint)height);
+        }
+    }
 
     private bool TryAdd(VideoFrame? item)
     {
@@ -75,6 +100,8 @@ public sealed class VideoPipeline : IDisposable
             return;
         }
 
+        lock (_bridgeLock)
+            _bridge = bridge;
         try
         {
             var waitForKeyframe = true;
@@ -110,7 +137,11 @@ public sealed class VideoPipeline : IDisposable
         }
         finally
         {
-            NativeMethods.HitCam_BridgeDestroy(bridge);
+            lock (_bridgeLock)
+            {
+                _bridge = IntPtr.Zero;
+                NativeMethods.HitCam_BridgeDestroy(bridge);
+            }
         }
     }
 

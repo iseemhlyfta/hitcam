@@ -1,0 +1,95 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.WaitingView"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:MainViewModel">
+
+    <Grid Margin="16,4,16,16" RowDefinitions="*,Auto" RowSpacing="16">
+
+        <Border Classes="card" Padding="48,40">
+            <Grid VerticalAlignment="Center" ColumnDefinitions="Auto,*" ColumnSpacing="48">
+                <!--  Always black on white, so it scans in the dark theme too  -->
+                <Border
+                    Width="264"
+                    Height="264"
+                    Padding="20"
+                    Background="White"
+                    BorderBrush="{DynamicResource HcBorder}"
+                    BorderThickness="1"
+                    CornerRadius="16">
+                    <Image Source="{Binding QrCode}" RenderOptions.BitmapInterpolationMode="None" />
+                </Border>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="18">
+                    <TextBlock Classes="h1" FontSize="32" Text="{x:Static svc:Loc.WaitingTitle}" />
+                    <TextBlock MaxWidth="520" HorizontalAlignment="Left" Classes="body" Text="{x:Static svc:Loc.WaitingHint}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Border Classes="well" Height="48" Padding="16,0">
+                            <SelectableTextBlock
+                                VerticalAlignment="Center"
+                                FontFamily="{StaticResource HcMonoFont}"
+                                FontSize="22"
+                                FontWeight="SemiBold"
+                                Text="{Binding PrimaryAddress}" />
+                        </Border>
+                        <Button
+                            Width="48"
+                            Height="48"
+                            Classes="secondary"
+                            Click="OnCopyAddress"
+                            ToolTip.Tip="{x:Static svc:Loc.CopyAddress}"
+                            AutomationProperties.Name="{x:Static svc:Loc.CopyAddress}">
+                            <Path Classes="icon" Width="18" Height="18" Data="{StaticResource IconCopy}" />
+                        </Button>
+                    </StackPanel>
+                    <TextBlock Classes="muted" Text="{Binding OtherAddresses}" IsVisible="{Binding HasOtherAddresses}" />
+                    <StackPanel Margin="0,6,0,0" Orientation="Horizontal" Spacing="24">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Width="22" Height="22" Classes="softAccent" CornerRadius="11">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource HcAccentSoftText}" Text="1" />
+                            </Border>
+                            <TextBlock VerticalAlignment="Center" FontSize="13" Text="{x:Static svc:Loc.Step1}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Width="22" Height="22" Classes="softAccent" CornerRadius="11">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource HcAccentSoftText}" Text="2" />
+                            </Border>
+                            <TextBlock VerticalAlignment="Center" FontSize="13" Text="{x:Static svc:Loc.Step2}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <Border Width="22" Height="22" Classes="softAccent" CornerRadius="11">
+                                <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="12" FontWeight="Bold" Foreground="{DynamicResource HcAccentSoftText}" Text="3" />
+                            </Border>
+                            <TextBlock VerticalAlignment="Center" FontSize="13" Text="{x:Static svc:Loc.Step3}" />
+                        </StackPanel>
+                    </StackPanel>
+                    <TextBlock Classes="muted" Text="{Binding StatusText}" IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!--  Virtual camera status  -->
+        <Border Grid.Row="1" Classes="card" MinHeight="64" Padding="16,12,12,12">
+            <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="12">
+                <Border Width="36" Height="36" Classes="softAccent" CornerRadius="10" IsVisible="{Binding IsCameraAttention}">
+                    <Path Classes="icon" Width="18" Height="18" Stroke="{DynamicResource HcAccentSoftText}" Data="{StaticResource IconVideo}" />
+                </Border>
+                <Border Width="36" Height="36" Background="{DynamicResource HcOkSoft}" CornerRadius="10" IsVisible="{Binding IsCameraReady}">
+                    <Path Classes="icon" Width="18" Height="18" Stroke="{DynamicResource HcOk}" StrokeThickness="2" Data="{StaticResource IconCheckCircle}" />
+                </Border>
+                <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Classes="strong" Text="{Binding CameraTitle}" />
+                    <TextBlock Classes="muted" Text="{Binding CameraDetail}" TextWrapping="Wrap" />
+                </StackPanel>
+                <Button Grid.Column="2" Classes="primary" Command="{Binding InstallCameraCommand}" IsVisible="{Binding CanInstallCamera}">
+                    <StackPanel Orientation="Horizontal" Spacing="8">
+                        <Path Classes="icon" Data="{StaticResource IconShield}" />
+                        <TextBlock VerticalAlignment="Center" Text="{Binding InstallCameraLabel}" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+        </Border>
+    </Grid>
+</UserControl>

@@ -28,6 +28,13 @@ internal static class NativeMethods
     [DllImport(Library)]
     public static extern void HitCam_BridgeDestroy(IntPtr handle);
 
+    [DllImport(Library)]
+    public static extern void HitCam_BridgePreviewInfo(IntPtr handle, out uint width, out uint height, out ulong frame);
+
+    [DllImport(Library)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool HitCam_BridgeCopyPreview(IntPtr handle, IntPtr destination, uint stride, uint width, uint height);
+
     [DllImport(Library, CharSet = CharSet.Unicode)]
     public static extern int HitCam_VirtualCameraStart(string friendlyName, out IntPtr handle);
 

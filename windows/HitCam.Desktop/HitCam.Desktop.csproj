@@ -6,20 +6,35 @@
     <RootNamespace>HitCam.Desktop</RootNamespace>
     <AssemblyName>HitCam</AssemblyName>
     <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>Assets\HitCam.ico</ApplicationIcon>
     <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
     <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <!-- System.Reactive's Windows build pulls in the whole WPF/WinForms runtime (~100 MB) that Avalonia never uses. -->
+    <DisableTransitiveFrameworkReferences>true</DisableTransitiveFrameworkReferences>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
-    <PackageReference Include="Avalonia.Fonts.Inter" />
-    <PackageReference Include="Semi.Avalonia" />
+    <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="ReactiveUI.Avalonia" />
     <PackageReference Include="QRCoder" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HitCam.Core\HitCam.Core.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\HitCam.ico" />
+  </ItemGroup>
+
+  <!-- Debug symbols (ours and the native Skia/HarfBuzz ones, ~100 MB) do not belong in an installed app. -->
+  <Target Name="RemovePublishedSymbols" AfterTargets="Publish">
+    <ItemGroup>
+      <PublishedSymbols Include="$(PublishDir)*.pdb" />
+    </ItemGroup>
+    <Delete Files="@(PublishedSymbols)" />
+  </Target>
 
   <!--
     The virtual camera (C++, windows/HitCam.VCam) needs Visual Studio with "Desktop development with C++".

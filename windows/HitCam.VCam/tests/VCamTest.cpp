@@ -28,6 +28,8 @@ extern "C" void __stdcall HitCam_VirtualCameraStop(void* handle);
 extern "C" HRESULT __stdcall HitCam_BridgeCreate(void** handle);
 extern "C" HRESULT __stdcall HitCam_BridgeDecode(void* handle, const uint8_t* data, uint32_t length, int64_t timestamp);
 extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
+extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
+extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 
 namespace {
 
@@ -299,8 +301,22 @@ int main(int argc, char** argv) {
             if (FAILED(hr)) return Fail("read decoded frame", hr);
             passed = luma > kEncodedLuma - 6 && luma < kEncodedLuma + 6;
         }
-        HitCam_BridgeDestroy(bridge);
         std::printf("%s: decoded H.264 (%d frames), average luma %.1f (expected %u)\n", passed ? "OK" : "FAIL", decoded, luma, kEncodedLuma);
+
+        // The app window's preview: downscaled BGRA of the same frame. Luma 120, neutral chroma -> gray ~121.
+        uint32_t previewWidth = 0, previewHeight = 0;
+        uint64_t previewFrame = 0;
+        HitCam_BridgePreviewInfo(bridge, &previewWidth, &previewHeight, &previewFrame);
+        std::vector<uint8_t> pixels(static_cast<size_t>(previewWidth) * previewHeight * 4);
+        const bool copied = previewWidth > 0 && HitCam_BridgeCopyPreview(bridge, pixels.data(), previewWidth * 4, previewWidth, previewHeight);
+        const uint8_t* center = pixels.data() + (static_cast<size_t>(previewHeight / 2) * previewWidth + previewWidth / 2) * 4;
+        const bool previewOk = copied && previewWidth == 960 && previewHeight == 540 && previewFrame > 0
+                               && center[0] > 110 && center[0] < 132 && center[1] > 110 && center[1] < 132 && center[2] > 110 && center[2] < 132;
+        std::printf("%s: preview %ux%u, frame %llu, center BGR %u,%u,%u (expected ~121)\n", previewOk ? "OK" : "FAIL",
+                    previewWidth, previewHeight, static_cast<unsigned long long>(previewFrame),
+                    copied ? center[0] : 0, copied ? center[1] : 0, copied ? center[2] : 0);
+        passed = passed && previewOk;
+        HitCam_BridgeDestroy(bridge);
     }
 
     hitcam::UnmapSharedFrames(header, mapping);

@@ -11,7 +11,9 @@
 #include <wmcodecdsp.h>
 #include <wrl/client.h>
 
+#include <algorithm>
 #include <cstring>
+#include <mutex>
 #include <vector>
 
 #include "Shared.h"
@@ -76,6 +78,84 @@ private:
     ULONGLONG nextMapAttemptMs_ = 0;
 };
 
+// A downscaled BGRA copy of the newest frame for the app's own window (decoder thread writes, UI thread reads).
+class PreviewBuffer {
+public:
+    static constexpr uint32_t kMaxWidth = 960;
+    static constexpr uint32_t kMaxHeight = 960;
+
+    void Update(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height) {
+        if (width < 2 || height < 2) return;
+        const double scale = std::min({1.0, static_cast<double>(kMaxWidth) / width, static_cast<double>(kMaxHeight) / height,
+                                       // Landscape frames are shown at most 960x540.
+                                       width >= height ? 540.0 / height : 1.0});
+        const uint32_t outWidth = std::max<uint32_t>(2, static_cast<uint32_t>(width * scale));
+        const uint32_t outHeight = std::max<uint32_t>(2, static_cast<uint32_t>(height * scale));
+
+        std::lock_guard guard(lock_);
+        pixels_.resize(static_cast<size_t>(outWidth) * outHeight * 4);
+        for (uint32_t y = 0; y < outHeight; ++y) {
+            const uint32_t sourceY = static_cast<uint32_t>(static_cast<uint64_t>(y) * height / outHeight);
+            const uint8_t* lumaRow = luma + static_cast<size_t>(sourceY) * pitch;
+            const uint8_t* chromaRow = chroma + static_cast<size_t>(sourceY / 2) * pitch;
+            uint8_t* out = pixels_.data() + static_cast<size_t>(y) * outWidth * 4;
+            for (uint32_t x = 0; x < outWidth; ++x) {
+                const uint32_t sourceX = static_cast<uint32_t>(static_cast<uint64_t>(x) * width / outWidth);
+                // BT.709, video range (what iPhone H.264 uses for HD).
+                const int c = 298 * (lumaRow[sourceX] - 16);
+                const int d = chromaRow[sourceX & ~1u] - 128;
+                const int e = chromaRow[(sourceX & ~1u) + 1] - 128;
+                out[x * 4 + 0] = Clamp((c + 541 * d + 128) >> 8);
+                out[x * 4 + 1] = Clamp((c - 55 * d - 136 * e + 128) >> 8);
+                out[x * 4 + 2] = Clamp((c + 459 * e + 128) >> 8);
+                out[x * 4 + 3] = 255;
+            }
+        }
+        width_ = outWidth;
+        height_ = outHeight;
+        ++frame_;
+    }
+
+    void Info(uint32_t* width, uint32_t* height, uint64_t* frame) {
+        std::lock_guard guard(lock_);
+        *width = width_;
+        *height = height_;
+        *frame = frame_;
+    }
+
+    // Copies the frame when it still has the given size; returns false if it changed meanwhile.
+    bool Copy(uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height) {
+        std::lock_guard guard(lock_);
+        if (width != width_ || height != height_ || pixels_.empty() || stride < width * 4) return false;
+        for (uint32_t y = 0; y < height; ++y) {
+            std::memcpy(destination + static_cast<size_t>(y) * stride, pixels_.data() + static_cast<size_t>(y) * width * 4, width * 4);
+        }
+        return true;
+    }
+
+private:
+    static uint8_t Clamp(int value) { return static_cast<uint8_t>(value < 0 ? 0 : value > 255 ? 255 : value); }
+
+    std::mutex lock_;
+    std::vector<uint8_t> pixels_;
+    uint32_t width_ = 0;
+    uint32_t height_ = 0;
+    uint64_t frame_ = 0;
+};
+
+// Every decoded frame goes to the virtual camera and to the preview.
+struct FrameSink {
+    FrameWriter writer;
+    PreviewBuffer preview;
+
+    void Publish(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height) {
+        writer.Publish(luma, chroma, pitch, width, height);
+        preview.Update(luma, chroma, pitch, width, height);
+    }
+
+    void ClearSignal() { writer.ClearSignal(); }
+};
+
 class Decoder {
 public:
     HRESULT Initialize() {
@@ -106,7 +186,7 @@ public:
     }
 
     // Returns S_OK when a frame was published, S_FALSE when the decoder needs more data.
-    HRESULT Decode(const uint8_t* data, uint32_t length, int64_t timestamp, FrameWriter& writer) {
+    HRESULT Decode(const uint8_t* data, uint32_t length, int64_t timestamp, FrameSink& writer) {
         ComPtr<IMFMediaBuffer> buffer;
         HRESULT hr = MFCreateMemoryBuffer(length, &buffer);
         if (FAILED(hr)) return hr;
@@ -164,7 +244,7 @@ private:
         stride_ = MFGetAttributeUINT32(type, MF_MT_DEFAULT_STRIDE, width);
     }
 
-    HRESULT Drain(FrameWriter& writer) {
+    HRESULT Drain(FrameSink& writer) {
         HRESULT result = S_FALSE;
         while (true) {
             MFT_OUTPUT_STREAM_INFO info{};
@@ -202,7 +282,7 @@ private:
         }
     }
 
-    void Publish(IMFSample* sample, FrameWriter& writer) {
+    void Publish(IMFSample* sample, FrameSink& writer) {
         ComPtr<IMFMediaBuffer> buffer;
         if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) return;
 
@@ -235,7 +315,7 @@ private:
 
 struct Bridge {
     bool comInitialized = false;
-    FrameWriter writer;
+    FrameSink sink;
     Decoder decoder;
 };
 
@@ -272,17 +352,28 @@ __declspec(dllexport) HRESULT __stdcall HitCam_BridgeCreate(void** handle) {
 __declspec(dllexport) HRESULT __stdcall HitCam_BridgeDecode(void* handle, const uint8_t* data, uint32_t length, int64_t timestamp) {
     if (!handle || !data || length == 0) return E_INVALIDARG;
     auto* bridge = static_cast<hitcam::Bridge*>(handle);
-    return bridge->decoder.Decode(data, length, timestamp, bridge->writer);
+    return bridge->decoder.Decode(data, length, timestamp, bridge->sink);
 }
 
 // Shows "no signal" in the camera right away instead of waiting for the stale timeout.
 __declspec(dllexport) void __stdcall HitCam_BridgeClearSignal(void* handle) {
-    if (handle) static_cast<hitcam::Bridge*>(handle)->writer.ClearSignal();
+    if (handle) static_cast<hitcam::Bridge*>(handle)->sink.ClearSignal();
 }
 
 // True once frames can reach the camera (an app has opened it at least once since the service started).
 __declspec(dllexport) BOOL __stdcall HitCam_BridgeIsLinked(void* handle) {
-    return handle && static_cast<hitcam::Bridge*>(handle)->writer.IsMapped();
+    return handle && static_cast<hitcam::Bridge*>(handle)->sink.writer.IsMapped();
+}
+
+// Size and number of the newest preview frame (0x0 before the first one). Safe to call from any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame) {
+    if (!handle || !width || !height || !frame) return;
+    static_cast<hitcam::Bridge*>(handle)->sink.preview.Info(width, height, frame);
+}
+
+// Copies the preview as BGRA rows of `stride` bytes; fails if its size is no longer width x height.
+__declspec(dllexport) BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height) {
+    return handle && destination && static_cast<hitcam::Bridge*>(handle)->sink.preview.Copy(destination, stride, width, height);
 }
 
 __declspec(dllexport) void __stdcall HitCam_BridgeDestroy(void* handle) {
