@@ -12,15 +12,21 @@ public sealed record Message(MessageHeader Header, byte[] Payload)
 
     public T ReadJson<T>(JsonTypeInfo<T> typeInfo)
     {
+        T value;
         try
         {
-            return JsonSerializer.Deserialize(Payload, typeInfo)
-                   ?? throw new ProtocolException($"{Type} payload is null.");
+            value = JsonSerializer.Deserialize(Payload, typeInfo)
+                    ?? throw new ProtocolException($"{Type} payload is null.");
         }
         catch (JsonException ex)
         {
+            // Also covers missing required fields and nulls in non-nullable ones (see ProtocolJson).
             throw new ProtocolException($"{Type} payload is not valid JSON: {ex.Message}");
         }
+
+        if (value is IValidatedPayload payload)
+            payload.Validate();
+        return value;
     }
 
     public static Message Json<T>(MessageType type, T value, JsonTypeInfo<T> typeInfo, ulong timestamp = 0)

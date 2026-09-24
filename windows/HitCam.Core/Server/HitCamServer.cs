@@ -1,5 +1,7 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using HitCam.Core.Pairing;
 using HitCam.Core.Protocol;
 
@@ -19,6 +21,10 @@ public sealed record HitCamServerOptions
     public TimeSpan PingInterval { get; init; } = TimeSpan.FromSeconds(1);
     /// <summary>How long a reconnecting phone waits for its previous, stale session to shut down.</summary>
     public TimeSpan TakeoverTimeout { get; init; } = TimeSpan.FromSeconds(2);
+    /// <summary>Open connections at most; more are closed right away.</summary>
+    public int MaxConnections { get; init; } = 8;
+    /// <summary>Unfinished handshakes (including pairing) per remote address; more are closed right away.</summary>
+    public int MaxHandshakesPerAddress { get; init; } = 2;
 }
 
 public sealed record ConnectedDevice(string DeviceId, string DeviceName, string? Model, IPEndPoint RemoteEndPoint);
@@ -32,17 +38,22 @@ public sealed record VideoFrame(byte[] Data, bool Keyframe, ulong PhoneTimestamp
 
 /// <summary>
 /// Accepts phones over TCP, handles the handshake and pairing, and exposes the stream as events.
-/// Only one phone streams at a time; a paired phone that reconnects replaces its own stale session.
-/// Events are raised on background threads.
+/// Only one phone streams (or pairs) at a time; a paired phone replaces its own stale session and
+/// any pairing in progress. Events are raised on background threads; exceptions thrown by handlers
+/// are traced and do not affect the session.
 /// </summary>
 public sealed class HitCamServer : IAsyncDisposable
 {
+    private static readonly Func<MessageType, int> HandshakeLimit = static _ => PayloadLimits.Handshake;
+    private static readonly Func<MessageType, int> SessionLimit = PayloadLimits.ForSession;
+
     private readonly HitCamServerOptions _options;
     private readonly IPairingStore _pairingStore;
     private readonly PinGuard _pins;
     private readonly TimeProvider _time;
     private readonly object _gate = new();
     private readonly HashSet<Task> _clients = [];
+    private readonly Dictionary<IPAddress, int> _handshakes = [];
     private CancellationTokenSource? _cts;
     private TcpListener? _listener;
     private Task? _acceptLoop;
@@ -138,6 +149,7 @@ public sealed class HitCamServer : IAsyncDisposable
         while (!cancellationToken.IsCancellationRequested)
         {
             TcpClient client;
+            IPEndPoint remote;
             try
             {
                 client = await listener.AcceptTcpClientAsync(cancellationToken).ConfigureAwait(false);
@@ -147,7 +159,33 @@ public sealed class HitCamServer : IAsyncDisposable
                 return;
             }
 
-            var task = HandleClientAsync(client, cancellationToken);
+            try
+            {
+                remote = (IPEndPoint)client.Client.RemoteEndPoint!;
+            }
+            catch (Exception ex) when (ex is ObjectDisposedException or SocketException)
+            {
+                client.Dispose();
+                continue;
+            }
+
+            // Anyone on the network can connect: cap what they can hold open before proving anything.
+            var address = remote.Address.IsIPv4MappedToIPv6 ? remote.Address.MapToIPv4() : remote.Address;
+            bool admitted;
+            lock (_gate)
+            {
+                var pending = _handshakes.GetValueOrDefault(address);
+                admitted = _clients.Count < _options.MaxConnections && pending < _options.MaxHandshakesPerAddress;
+                if (admitted)
+                    _handshakes[address] = pending + 1;
+            }
+            if (!admitted)
+            {
+                client.Dispose();
+                continue;
+            }
+
+            var task = HandleClientAsync(client, remote, address, cancellationToken);
             lock (_gate)
                 _clients.Add(task);
             _ = task.ContinueWith(t =>
@@ -158,68 +196,102 @@ public sealed class HitCamServer : IAsyncDisposable
         }
     }
 
-    private async Task HandleClientAsync(TcpClient client, CancellationToken serverToken)
+    private void EndHandshake(IPAddress address)
     {
-        using var tcp = client;
-        client.NoDelay = true;
-        var remote = (IPEndPoint)client.Client.RemoteEndPoint!;
-        await using var stream = new MessageStream(client.GetStream());
-        using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(serverToken);
-        var token = connectionCts.Token;
+        lock (_gate)
+        {
+            if (_handshakes.TryGetValue(address, out var pending) && pending > 1)
+                _handshakes[address] = pending - 1;
+            else
+                _handshakes.Remove(address);
+        }
+    }
+
+    private async Task HandleClientAsync(TcpClient client, IPEndPoint remote, IPAddress address, CancellationToken serverToken)
+    {
+        var handshaking = true;
         Connection? connection = null;
         try
         {
-            var hello = await ReadHelloAsync(stream, token).ConfigureAwait(false);
-            if (hello is null)
-                return;
-
-            if (hello.ProtocolVersion != ProtocolInfo.Version)
+            using var tcp = client;
+            client.NoDelay = true;
+            await using var stream = new MessageStream(client.GetStream());
+            using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(serverToken);
+            var token = connectionCts.Token;
+            try
             {
-                await SendAckAsync(stream, HelloStatus.VersionMismatch, token).ConfigureAwait(false);
-                return;
-            }
+                var hello = await ReadHelloAsync(stream, token).ConfigureAwait(false);
+                if (hello is null)
+                    return;
 
-            var paired = _pairingStore.Verify(hello.DeviceId, hello.Token);
-            connection = new Connection(hello.DeviceId, stream, connectionCts);
-            if (!await ClaimAsync(connection, takeover: paired, token).ConfigureAwait(false))
-            {
-                connection = null;
-                await SendAckAsync(stream, HelloStatus.Busy, token).ConfigureAwait(false);
-                return;
-            }
+                if (hello.ProtocolVersion != ProtocolInfo.Version)
+                {
+                    await SendAckAsync(stream, HelloStatus.VersionMismatch, token).ConfigureAwait(false);
+                    return;
+                }
 
-            if (paired)
-            {
-                _pairingStore.Touch(hello.DeviceId);
-                await SendAckAsync(stream, HelloStatus.Accepted, token).ConfigureAwait(false);
-            }
-            else if (!await PairAsync(stream, hello, remote, token).ConfigureAwait(false))
-            {
-                return;
-            }
+                var paired = _pairingStore.Verify(hello.DeviceId, hello.Token);
+                connection = new Connection(hello.DeviceId, stream, connectionCts) { Pairing = !paired };
+                if (!await ClaimAsync(connection, paired, token).ConfigureAwait(false))
+                {
+                    connection = null;
+                    await SendAckAsync(stream, HelloStatus.Busy, token).ConfigureAwait(false);
+                    return;
+                }
 
-            var device = new ConnectedDevice(hello.DeviceId, hello.DeviceName, hello.Model, remote);
-            await RunSessionAsync(connection, device, serverToken).ConfigureAwait(false);
+                if (paired)
+                {
+                    _pairingStore.Touch(hello.DeviceId);
+                    await SendAckAsync(stream, HelloStatus.Accepted, token).ConfigureAwait(false);
+                }
+                else if (!await PairAsync(connection, hello, remote, token).ConfigureAwait(false))
+                {
+                    return;
+                }
+
+                handshaking = false;
+                EndHandshake(address);
+                var device = new ConnectedDevice(hello.DeviceId, hello.DeviceName, hello.Model, remote);
+                await RunSessionAsync(connection, device, serverToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is IOException or SocketException or ProtocolException
+                                           or OperationCanceledException or ObjectDisposedException)
+            {
+                // Dropped during the handshake; RunSessionAsync reports disconnects of established sessions.
+            }
+            finally
+            {
+                // Before the socket closes, so a phone that reconnects right away finds the slots free.
+                if (connection is not null)
+                    Release(connection);
+                if (handshaking)
+                {
+                    handshaking = false;
+                    EndHandshake(address);
+                }
+            }
         }
-        catch (Exception ex) when (ex is IOException or SocketException or ProtocolException
-                                       or OperationCanceledException or ObjectDisposedException)
+        catch (Exception ex)
         {
-            // Dropped during the handshake; RunSessionAsync reports disconnects of established sessions.
+            // Anything else (e.g. a failing pairing store) ends only this connection; StopAsync must not see it.
+            Trace.TraceError($"HitCam: connection from {remote} failed: {ex}");
         }
         finally
         {
-            if (connection is not null)
-                Release(connection);
+            if (handshaking)
+                EndHandshake(address);
         }
     }
 
     /// <summary>
-    /// Takes the single streaming slot. A paired phone may evict a session of the same device,
-    /// which is usually a half-open connection left over from a Wi-Fi drop.
+    /// Takes the single streaming slot. A paired phone may evict a pairing in progress (so a stranger typing
+    /// PINs cannot lock it out) or a session of the same device, which is usually a half-open connection
+    /// left over from a Wi-Fi drop.
     /// </summary>
-    private async Task<bool> ClaimAsync(Connection connection, bool takeover, CancellationToken cancellationToken)
+    private async Task<bool> ClaimAsync(Connection connection, bool paired, CancellationToken cancellationToken)
     {
-        Connection? stale;
+        Connection stale;
+        string reason;
         lock (_gate)
         {
             if (_owner is null)
@@ -228,12 +300,14 @@ public sealed class HitCamServer : IAsyncDisposable
                 return true;
             }
             stale = _owner;
+            if (!paired || !(stale.Pairing || stale.DeviceId == connection.DeviceId))
+                return false;
+            // Decided under the lock, so a pairing that completes concurrently sees it and gives up.
+            reason = stale.Pairing ? "replaced by a paired phone" : "replaced by a new connection";
+            stale.RequestCancel(reason);
         }
 
-        if (!takeover || stale.DeviceId != connection.DeviceId)
-            return false;
-
-        stale.Cancel("replaced by a new connection");
+        stale.Cancel(reason);
         var deadline = _time.GetTimestamp() + (long)(_options.TakeoverTimeout.TotalSeconds * _time.TimestampFrequency);
         while (_time.GetTimestamp() < deadline)
         {
@@ -250,6 +324,18 @@ public sealed class HitCamServer : IAsyncDisposable
         return false;
     }
 
+    /// <summary>Marks a pairing as done, unless a paired phone has already evicted it.</summary>
+    private bool TryFinishPairing(Connection connection)
+    {
+        lock (_gate)
+        {
+            if (connection.CancelReason is not null)
+                return false;
+            connection.Pairing = false;
+            return true;
+        }
+    }
+
     private void Release(Connection connection)
     {
         lock (_gate)
@@ -263,7 +349,7 @@ public sealed class HitCamServer : IAsyncDisposable
     {
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeout.CancelAfter(_options.HelloTimeout);
-        var message = await stream.ReadAsync(timeout.Token).ConfigureAwait(false);
+        var message = await stream.ReadAsync(HandshakeLimit, timeout.Token).ConfigureAwait(false);
         if (message is null || message.Type != MessageType.Hello)
             return null;
 
@@ -274,8 +360,9 @@ public sealed class HitCamServer : IAsyncDisposable
         return hello with { DeviceName = name.Length > 64 ? name[..64] : name };
     }
 
-    private async Task<bool> PairAsync(MessageStream stream, Hello hello, IPEndPoint remote, CancellationToken cancellationToken)
+    private async Task<bool> PairAsync(Connection connection, Hello hello, IPEndPoint remote, CancellationToken cancellationToken)
     {
+        var stream = connection.Stream;
         var pin = _pins.Begin();
         if (pin is null)
         {
@@ -283,15 +370,19 @@ public sealed class HitCamServer : IAsyncDisposable
             return false;
         }
 
-        await SendAckAsync(stream, HelloStatus.PairingRequired, cancellationToken).ConfigureAwait(false);
-        PairingStarted?.Invoke(new PairingPrompt(hello.DeviceName, remote, pin));
+        var started = false;
+        var paired = false;
         try
         {
+            await SendAckAsync(stream, HelloStatus.PairingRequired, cancellationToken).ConfigureAwait(false);
+            started = true;
+            Raise(PairingStarted, new PairingPrompt(hello.DeviceName, remote, pin));
+
             using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             timeout.CancelAfter(_options.PairingTimeout);
             while (true)
             {
-                var message = await stream.ReadAsync(timeout.Token).ConfigureAwait(false);
+                var message = await stream.ReadAsync(HandshakeLimit, timeout.Token).ConfigureAwait(false);
                 if (message is null)
                     return false;
                 if (message.Type != MessageType.PairRequest)
@@ -301,8 +392,11 @@ public sealed class HitCamServer : IAsyncDisposable
                 switch (_pins.Check(request.Pin))
                 {
                     case PinCheckResult.Ok:
+                        if (!TryFinishPairing(connection))
+                            return false;
                         var token = _pairingStore.Pair(hello.DeviceId, hello.DeviceName);
                         await SendPairResultAsync(stream, new PairResult(true, token, _pins.AttemptsLeft), timeout.Token).ConfigureAwait(false);
+                        paired = true;
                         return true;
                     case PinCheckResult.Wrong:
                         await SendPairResultAsync(stream, new PairResult(false, null, _pins.AttemptsLeft), timeout.Token).ConfigureAwait(false);
@@ -315,8 +409,13 @@ public sealed class HitCamServer : IAsyncDisposable
         }
         finally
         {
+            // Closes the PIN window; wrong attempts made so far keep counting towards the lockout.
             _pins.Cancel();
-            PairingEnded?.Invoke();
+            // Free the slot before announcing the end, so whoever reacts to it can connect.
+            if (!paired)
+                Release(connection);
+            if (started)
+                Raise(PairingEnded);
         }
     }
 
@@ -324,12 +423,13 @@ public sealed class HitCamServer : IAsyncDisposable
     {
         var token = connection.Token;
         connection.Device = device;
-        Connected?.Invoke(device);
 
-        string reason;
-        var pingLoop = PingLoopAsync(connection, token);
+        var reason = "session ended";
+        var pingLoop = Task.CompletedTask;
         try
         {
+            Raise(Connected, device);
+            pingLoop = PingLoopAsync(connection, token);
             reason = await ReceiveLoopAsync(connection, token).ConfigureAwait(false);
         }
         catch (OperationCanceledException)
@@ -343,10 +443,9 @@ public sealed class HitCamServer : IAsyncDisposable
         finally
         {
             connection.Cancel("session ended");
+            await pingLoop.ConfigureAwait(false);
+            Raise(Disconnected, device, reason);
         }
-
-        await pingLoop.ConfigureAwait(false);
-        Disconnected?.Invoke(device, reason);
     }
 
     private async Task<string> ReceiveLoopAsync(Connection connection, CancellationToken cancellationToken)
@@ -355,7 +454,7 @@ public sealed class HitCamServer : IAsyncDisposable
         while (true)
         {
             idle.CancelAfter(_options.IdleTimeout);
-            var message = await connection.Stream.ReadAsync(idle.Token).ConfigureAwait(false);
+            var message = await connection.Stream.ReadAsync(SessionLimit, idle.Token).ConfigureAwait(false);
             if (message is null)
                 return "closed by phone";
 
@@ -364,19 +463,19 @@ public sealed class HitCamServer : IAsyncDisposable
                 case MessageType.VideoFrame:
                     var local = connection.Clock.ToLocal(message.Header.Timestamp);
                     long? latency = local is { } captured ? (long)Now() - (long)captured : null;
-                    FrameReceived?.Invoke(new VideoFrame(message.Payload, message.IsKeyframe, message.Header.Timestamp, latency));
+                    Raise(FrameReceived, new VideoFrame(message.Payload, message.IsKeyframe, message.Header.Timestamp, latency));
                     break;
                 case MessageType.StreamConfig:
-                    StreamConfigReceived?.Invoke(message.ReadJson(ProtocolJson.Default.StreamConfig));
+                    Raise(StreamConfigReceived, message.ReadJson(ProtocolJson.Default.StreamConfig));
                     break;
                 case MessageType.Capabilities:
-                    CapabilitiesReceived?.Invoke(message.ReadJson(ProtocolJson.Default.Capabilities));
+                    Raise(CapabilitiesReceived, message.ReadJson(ProtocolJson.Default.Capabilities));
                     break;
                 case MessageType.CameraState:
-                    CameraStateReceived?.Invoke(message.ReadJson(ProtocolJson.Default.CameraState));
+                    Raise(CameraStateReceived, message.ReadJson(ProtocolJson.Default.CameraState));
                     break;
                 case MessageType.Status:
-                    StatusReceived?.Invoke(message.ReadJson(ProtocolJson.Default.Status));
+                    Raise(StatusReceived, message.ReadJson(ProtocolJson.Default.Status));
                     break;
                 case MessageType.Ping:
                     await connection.Stream.WriteAsync(Message.Pong(message.Header.Timestamp, Now()), cancellationToken).ConfigureAwait(false);
@@ -413,6 +512,56 @@ public sealed class HitCamServer : IAsyncDisposable
         }
     }
 
+    // Handlers run synchronously on the connection's thread: one that throws must not end the session,
+    // skip the other subscribers, or leave the PC showing a PIN / a phone that is gone.
+    private static void Raise(Action? handler, [CallerArgumentExpression(nameof(handler))] string name = "")
+    {
+        foreach (var subscriber in Delegate.EnumerateInvocationList(handler))
+        {
+            try
+            {
+                subscriber();
+            }
+            catch (Exception ex)
+            {
+                TraceHandlerFailure(name, ex);
+            }
+        }
+    }
+
+    private static void Raise<T>(Action<T>? handler, T arg, [CallerArgumentExpression(nameof(handler))] string name = "")
+    {
+        foreach (var subscriber in Delegate.EnumerateInvocationList(handler))
+        {
+            try
+            {
+                subscriber(arg);
+            }
+            catch (Exception ex)
+            {
+                TraceHandlerFailure(name, ex);
+            }
+        }
+    }
+
+    private static void Raise<T1, T2>(Action<T1, T2>? handler, T1 arg1, T2 arg2, [CallerArgumentExpression(nameof(handler))] string name = "")
+    {
+        foreach (var subscriber in Delegate.EnumerateInvocationList(handler))
+        {
+            try
+            {
+                subscriber(arg1, arg2);
+            }
+            catch (Exception ex)
+            {
+                TraceHandlerFailure(name, ex);
+            }
+        }
+    }
+
+    private static void TraceHandlerFailure(string name, Exception ex) =>
+        Trace.TraceError($"HitCam: {name} handler threw: {ex}");
+
     private Task SendAckAsync(MessageStream stream, string status, CancellationToken cancellationToken) =>
         stream.WriteAsync(Message.Json(
             MessageType.HelloAck,
@@ -435,13 +584,18 @@ public sealed class HitCamServer : IAsyncDisposable
         public MessageStream Stream { get; } = stream;
         public ClockSync Clock { get; } = new();
         public CancellationToken Token { get; } = cts.Token;
+        /// <summary>Still waiting for the PIN; a paired phone may evict it. Changed under the server lock.</summary>
+        public bool Pairing { get; set; }
         /// <summary>Set once the handshake has completed.</summary>
         public ConnectedDevice? Device { get; set; }
         public string? CancelReason => Volatile.Read(ref _cancelReason);
 
+        /// <summary>Records why the connection ends; the first reason wins.</summary>
+        public void RequestCancel(string reason) => Interlocked.CompareExchange(ref _cancelReason, reason, null);
+
         public void Cancel(string reason)
         {
-            Interlocked.CompareExchange(ref _cancelReason, reason, null);
+            RequestCancel(reason);
             try
             {
                 cts.Cancel();

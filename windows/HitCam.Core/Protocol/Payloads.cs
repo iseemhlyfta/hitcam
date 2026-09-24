@@ -32,7 +32,8 @@ public sealed record HelloAck(int ProtocolVersion, string Status, string ServerN
 
 public sealed record PairRequest(string Pin);
 
-public sealed record PairResult(bool Ok, string? Token, int AttemptsLeft);
+// Token is omitted from the JSON when null, so readers must treat it as optional.
+public sealed record PairResult(bool Ok, string? Token = null, int AttemptsLeft = 0);
 
 public sealed record StreamConfig(string Codec, int Width, int Height, int Fps, int BitrateKbps);
 
@@ -68,9 +69,24 @@ public static class StabilizationModes
     public const string Cinematic = "cinematic";
 }
 
-public sealed record VideoPreset(int Width, int Height, int[] Fps);
+public sealed record VideoPreset(int Width, int Height, int[] Fps)
+{
+    public const int MaxFps = 8;
+}
 
-public sealed record Capabilities(CameraInfo[] Cameras, VideoPreset[] Presets);
+public sealed record Capabilities(CameraInfo[] Cameras, VideoPreset[] Presets) : IValidatedPayload
+{
+    public const int MaxCameras = 16;
+    public const int MaxPresets = 16;
+
+    void IValidatedPayload.Validate()
+    {
+        PayloadChecks.Array(Cameras, MaxCameras, "cameras");
+        PayloadChecks.Array(Presets, MaxPresets, "presets");
+        foreach (var preset in Presets)
+            PayloadChecks.Array(preset.Fps, VideoPreset.MaxFps, "presets.fps");
+    }
+}
 
 public sealed record NormalizedPoint(double X, double Y);
 
@@ -93,7 +109,16 @@ public sealed record CameraState(
     double? WhiteBalanceTint = null,
     string? ExposureMode = null,
     string? Stabilization = null,
-    string[]? StabilizationModes = null);
+    string[]? StabilizationModes = null) : IValidatedPayload
+{
+    public const int MaxStabilizationModes = 8;
+
+    void IValidatedPayload.Validate()
+    {
+        if (StabilizationModes is not null)
+            PayloadChecks.Array(StabilizationModes, MaxStabilizationModes, "stabilizationModes");
+    }
+}
 
 /// <summary>Camera control request; only non-null fields are applied by the phone.</summary>
 public sealed record Control
@@ -127,11 +152,14 @@ public sealed record Status(
     int BitrateKbps,
     long DroppedFrames);
 
-public sealed record Bye(string? Reason);
+public sealed record Bye(string? Reason = null);
 
 [JsonSourceGenerationOptions(
     PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
-    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull)]
+    DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+    // The phone is untrusted: a missing or null non-nullable field is a protocol error, not a crash later.
+    RespectNullableAnnotations = true,
+    RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(Hello))]
 [JsonSerializable(typeof(HelloAck))]
 [JsonSerializable(typeof(PairRequest))]
@@ -143,3 +171,25 @@ public sealed record Bye(string? Reason);
 [JsonSerializable(typeof(Status))]
 [JsonSerializable(typeof(Bye))]
 public sealed partial class ProtocolJson : JsonSerializerContext;
+
+/// <summary>A payload with limits that deserialization alone cannot enforce; checked by <see cref="Message.ReadJson{T}"/>.</summary>
+internal interface IValidatedPayload
+{
+    /// <exception cref="ProtocolException">The payload is out of bounds.</exception>
+    void Validate();
+}
+
+internal static class PayloadChecks
+{
+    /// <summary>Nullable annotations do not cover array elements, and the counts bound the work the PC does per message.</summary>
+    public static void Array<T>(T[] items, int max, string name)
+    {
+        if (items.Length > max)
+            throw new ProtocolException($"{name} has {items.Length} entries, at most {max} are allowed.");
+        foreach (var item in items)
+        {
+            if (item is null)
+                throw new ProtocolException($"{name} contains null.");
+        }
+    }
+}

@@ -18,6 +18,14 @@ Every message is a fixed 16-byte header followed by `length` bytes of payload.
 A receiver closes the connection on an unknown `type` **before the handshake**, on `length` above the limit,
 or on a non-zero `reserved` field. After the handshake unknown types are skipped (forward compatibility).
 
+The PC checks `length` against a per-state limit before reading the payload:
+
+| When                                   | Messages                        | Max `length` |
+|----------------------------------------|---------------------------------|-------------:|
+| before the session is established      | `Hello`, `PairRequest`          | 4 KiB        |
+| established session                    | `VideoFrame`                    | 8 MiB        |
+| established session                    | everything else (JSON, unknown) | 64 KiB       |
+
 ## Message types
 
 | Type | Name            | Direction  | Payload                                   |
@@ -37,7 +45,11 @@ or on a non-zero `reserved` field. After the handshake unknown types are skipped
 | 0x32 | Pong            | both       | 8 bytes: echoed ping timestamp            |
 | 0x3F | Bye             | both       | JSON `{ "reason": "..." }` (optional)     |
 
-JSON payloads are UTF-8, camelCase, unknown fields are ignored.
+JSON payloads are UTF-8, camelCase, unknown fields are ignored. Optional fields are `Hello.model`,
+`Hello.appVersion`, `Hello.token`, `PairResult.token`, `Bye.reason`, the fields added in app 0.2 (see below) and
+every `Control` field; all other fields are required and must not be `null`. The PC treats a missing or `null` required field as a protocol error and closes
+the connection. Arrays are bounded: `cameras` ≤ 16, `presets` ≤ 16, `presets[].fps` ≤ 8, `stabilizationModes` ≤ 8,
+and must not contain `null`.
 
 ## Session flow
 
@@ -56,9 +68,18 @@ phone                                   pc
   | <-> Ping / Pong every 1 s ----------> |
 ```
 
-* Only one phone streams at a time; a second one gets `HelloAck{status:"busy"}` and is closed.
-* Pairing: PIN is 6 digits, regenerated for every pairing attempt window. After **5** wrong PINs the
-  connection is closed and new pairing attempts are refused for 30 s. On success the PC issues a random
+* Only one phone streams or pairs at a time; a second one gets `HelloAck{status:"busy"}` and is closed.
+  Exceptions: a phone with a valid token replaces a stale session of the same `deviceId`, and replaces a
+  pairing that is still waiting for its PIN (the unpaired phone is disconnected), so a stranger typing PINs
+  cannot keep a paired phone out.
+* The PC accepts at most 8 connections at once and at most 2 unfinished handshakes (including pairing) per
+  IP address; further connections are closed without a reply.
+* Pairing: PIN is 6 digits, regenerated for every pairing window (connection); the user has 2 minutes to
+  type it. Wrong PINs count across connections: a new connection, or one dropped mid-pairing, does not get
+  the attempts back, and `attemptsLeft` reports what is left overall. After **5** wrong PINs (counted until
+  5 minutes pass without a wrong PIN or lockout) the connection is closed and pairing is refused for 30 s;
+  every further lockout doubles that time, up to 10 minutes. A correct PIN, or 5 quiet minutes after the
+  last wrong PIN or lockout, resets the count and the lockout time. On success the PC issues a random
   256-bit `token` (hex) that the phone stores and presents in future `Hello`s. The PC stores only a
   SHA-256 hash of the token. A successful `PairResult` means the session is accepted (no second `HelloAck`).
   While locked out the PC answers `HelloAck{status:"pairingLocked"}` and closes.

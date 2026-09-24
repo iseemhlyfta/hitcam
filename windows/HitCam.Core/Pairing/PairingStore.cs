@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -17,6 +18,7 @@ public interface IPairingStore
 
     bool Verify(string deviceId, string? token);
 
+    /// <summary>Records that the device connected. Best effort: never throws on storage errors.</summary>
     void Touch(string deviceId);
 
     bool Remove(string deviceId);
@@ -26,23 +28,18 @@ public class InMemoryPairingStore(TimeProvider? timeProvider = null) : IPairingS
 {
     private readonly object _gate = new();
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    protected List<PairedDevice> Items { get; } = [];
+    private PairedDevice[] _items = [];
 
     public IReadOnlyList<PairedDevice> Devices
     {
-        get { lock (_gate) return Items.ToArray(); }
+        get { lock (_gate) return Array.AsReadOnly(_items); }
     }
 
     public string Pair(string deviceId, string deviceName)
     {
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
         var now = _time.GetUtcNow();
-        lock (_gate)
-        {
-            Items.RemoveAll(d => d.DeviceId == deviceId);
-            Items.Add(new PairedDevice(deviceId, deviceName, Hash(token), now, now));
-            Save();
-        }
+        Update(items => [.. items.Where(d => d.DeviceId != deviceId), new PairedDevice(deviceId, deviceName, Hash(token), now, now)]);
         return token;
     }
 
@@ -53,7 +50,7 @@ public class InMemoryPairingStore(TimeProvider? timeProvider = null) : IPairingS
 
         PairedDevice? device;
         lock (_gate)
-            device = Items.Find(d => d.DeviceId == deviceId);
+            device = Array.Find(_items, d => d.DeviceId == deviceId);
         if (device is null)
             return false;
 
@@ -64,30 +61,56 @@ public class InMemoryPairingStore(TimeProvider? timeProvider = null) : IPairingS
 
     public void Touch(string deviceId)
     {
-        lock (_gate)
+        var now = _time.GetUtcNow();
+        try
         {
-            var index = Items.FindIndex(d => d.DeviceId == deviceId);
-            if (index < 0)
-                return;
-            Items[index] = Items[index] with { LastSeen = _time.GetUtcNow() };
-            Save();
+            Update(items => Array.Exists(items, d => d.DeviceId == deviceId)
+                ? Array.ConvertAll(items, d => d.DeviceId == deviceId ? d with { LastSeen = now } : d)
+                : items);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Only the "last seen" time is lost; the phone must still be able to connect.
+            Trace.TraceWarning($"HitCam: could not save the pairing store: {ex.Message}");
         }
     }
 
     public bool Remove(string deviceId)
     {
-        lock (_gate)
+        var removed = false;
+        Update(items =>
         {
-            var removed = Items.RemoveAll(d => d.DeviceId == deviceId) > 0;
-            if (removed)
-                Save();
-            return removed;
-        }
+            removed = Array.Exists(items, d => d.DeviceId == deviceId);
+            return removed ? Array.FindAll(items, d => d.DeviceId != deviceId) : items;
+        });
+        return removed;
     }
 
-    /// <summary>Called under the lock after every change.</summary>
-    protected virtual void Save()
+    /// <summary>Replaces the list without saving; for loading persisted devices.</summary>
+    protected void Restore(IEnumerable<PairedDevice> devices)
     {
+        lock (_gate)
+            _items = [.. devices];
+    }
+
+    /// <summary>
+    /// Persists the new list. Called under the lock before it replaces the current one,
+    /// so a failure leaves the store unchanged.
+    /// </summary>
+    protected virtual void Save(IReadOnlyList<PairedDevice> devices)
+    {
+    }
+
+    private void Update(Func<PairedDevice[], PairedDevice[]> change)
+    {
+        lock (_gate)
+        {
+            var next = change(_items);
+            if (ReferenceEquals(next, _items))
+                return;
+            Save(next);
+            _items = next;
+        }
     }
 
     private static string Hash(string token) =>
@@ -102,30 +125,48 @@ public sealed class FilePairingStore : InMemoryPairingStore
     public FilePairingStore(string path, TimeProvider? timeProvider = null) : base(timeProvider)
     {
         _path = path;
-        if (!File.Exists(path))
-            return;
         try
         {
+            if (!File.Exists(path))
+                return;
             using var stream = File.OpenRead(path);
             var devices = JsonSerializer.Deserialize(stream, PairingJson.Default.PairedDeviceArray);
             if (devices is not null)
-                Items.AddRange(devices);
+                Restore(devices.Where(d => d is not null));
         }
-        catch (JsonException)
+        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
         {
-            // A corrupt file only means the phones have to pair again.
+            // Start empty: the phones only have to pair again. Keep the unreadable file for inspection,
+            // since the next save replaces it.
+            Trace.TraceWarning($"HitCam: could not read the pairing store {path}: {ex.Message}");
+            try
+            {
+                File.Copy(path, path + ".bak", overwrite: true);
+            }
+            catch (Exception copyEx) when (copyEx is IOException or UnauthorizedAccessException)
+            {
+            }
         }
     }
 
-    protected override void Save()
+    protected override void Save(IReadOnlyList<PairedDevice> devices)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
+        // Write a flushed temp file and swap it in, so a crash or power loss never leaves a half-written store.
         var temp = _path + ".tmp";
-        File.WriteAllBytes(temp, JsonSerializer.SerializeToUtf8Bytes(Items.ToArray(), PairingJson.Default.PairedDeviceArray));
+        using (var stream = new FileStream(temp, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            JsonSerializer.Serialize(stream, devices.ToArray(), PairingJson.Default.PairedDeviceArray);
+            stream.Flush(flushToDisk: true);
+        }
         File.Move(temp, _path, overwrite: true);
     }
 }
 
-[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
+[JsonSourceGenerationOptions(
+    PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase,
+    WriteIndented = true,
+    RespectNullableAnnotations = true,
+    RespectRequiredConstructorParameters = true)]
 [JsonSerializable(typeof(PairedDevice[]))]
 internal sealed partial class PairingJson : JsonSerializerContext;

@@ -11,7 +11,14 @@ public sealed class MessageStream(Stream stream) : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     /// <summary>Returns the next message, or null when the peer closed the stream cleanly between messages.</summary>
-    public async ValueTask<Message?> ReadAsync(CancellationToken cancellationToken = default)
+    public ValueTask<Message?> ReadAsync(CancellationToken cancellationToken = default) =>
+        ReadAsync(static _ => MessageHeader.MaxPayloadLength, cancellationToken);
+
+    /// <summary>
+    /// Like <see cref="ReadAsync(CancellationToken)"/>, but rejects a payload longer than
+    /// <paramref name="maxLength"/> allows for its type before allocating a buffer for it.
+    /// </summary>
+    public async ValueTask<Message?> ReadAsync(Func<MessageType, int> maxLength, CancellationToken cancellationToken = default)
     {
         var first = await stream.ReadAtLeastAsync(_readHeader, MessageHeader.Size, throwOnEndOfStream: false, cancellationToken)
             .ConfigureAwait(false);
@@ -21,6 +28,9 @@ public sealed class MessageStream(Stream stream) : IAsyncDisposable
             throw new EndOfStreamException("Connection closed in the middle of a message header.");
 
         var header = MessageHeader.Read(_readHeader);
+        var limit = maxLength(header.Type);
+        if (header.Length > limit)
+            throw new ProtocolException($"{header.Type} payload of {header.Length} bytes exceeds the {limit} byte limit here.");
         var payload = header.Length == 0 ? [] : new byte[header.Length];
         if (payload.Length > 0)
             await stream.ReadExactlyAsync(payload, cancellationToken).ConfigureAwait(false);

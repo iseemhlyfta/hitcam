@@ -111,6 +111,80 @@ public class ProtocolTests
         Assert.Equal("""{"whiteBalanceMode":"locked","whiteBalanceTemperature":4200,"exposureMode":"auto"}""", controlJson);
     }
 
+    [Theory]
+    [InlineData("""{"cameras":null,"presets":[]}""")]
+    [InlineData("""{"presets":[]}""")]
+    [InlineData("""{"cameras":[null],"presets":[]}""")]
+    [InlineData("""{"cameras":[],"presets":[{"width":1920,"height":1080,"fps":null}]}""")]
+    [InlineData("""{"cameras":[{"id":"a","name":null,"position":"back","minZoom":1,"maxZoom":2,"hasTorch":false,"supportsFocus":false}],"presets":[]}""")]
+    public void Capabilities_with_missing_or_null_fields_are_a_protocol_error(string json)
+    {
+        Assert.Throws<ProtocolException>(() => JsonMessage(MessageType.Capabilities, json).ReadJson(ProtocolJson.Default.Capabilities));
+    }
+
+    [Fact]
+    public void Null_in_a_required_field_is_a_protocol_error()
+    {
+        var status = JsonMessage(MessageType.Status, """{"battery":1,"charging":true,"thermal":null,"fps":30,"bitrateKbps":8000,"droppedFrames":0}""");
+        var config = JsonMessage(MessageType.StreamConfig, """{"codec":null,"width":1920,"height":1080,"fps":30,"bitrateKbps":8000}""");
+        var state = JsonMessage(MessageType.CameraState, """{"cameraId":"a","zoom":1,"torch":false,"focusMode":"auto","lensPosition":0,"exposureBias":0,"mirror":false,"rotation":0,"width":1,"height":1,"fps":30,"bitrateKbps":1,"stabilizationModes":[null]}""");
+
+        Assert.Throws<ProtocolException>(() => status.ReadJson(ProtocolJson.Default.Status));
+        Assert.Throws<ProtocolException>(() => config.ReadJson(ProtocolJson.Default.StreamConfig));
+        Assert.Throws<ProtocolException>(() => state.ReadJson(ProtocolJson.Default.CameraState));
+    }
+
+    [Fact]
+    public void Oversized_arrays_are_a_protocol_error()
+    {
+        var camera = new CameraInfo("a", "A", "back", 1, 2, false, false);
+        var preset = new VideoPreset(1920, 1080, [30]);
+        Capabilities[] tooBig =
+        [
+            new([.. Enumerable.Repeat(camera, Capabilities.MaxCameras + 1)], [preset]),
+            new([camera], [.. Enumerable.Repeat(preset, Capabilities.MaxPresets + 1)]),
+            new([camera], [new VideoPreset(1920, 1080, [.. Enumerable.Range(1, VideoPreset.MaxFps + 1)])]),
+        ];
+        var fits = new Capabilities([.. Enumerable.Repeat(camera, Capabilities.MaxCameras)], [.. Enumerable.Repeat(preset, Capabilities.MaxPresets)]);
+
+        foreach (var capabilities in tooBig)
+        {
+            var message = Message.Json(MessageType.Capabilities, capabilities, ProtocolJson.Default.Capabilities);
+            Assert.Throws<ProtocolException>(() => message.ReadJson(ProtocolJson.Default.Capabilities));
+        }
+        Assert.Equal(Capabilities.MaxCameras, Message.Json(MessageType.Capabilities, fits, ProtocolJson.Default.Capabilities)
+            .ReadJson(ProtocolJson.Default.Capabilities).Cameras.Length);
+    }
+
+    [Fact]
+    public void Failed_pair_result_without_token_round_trips()
+    {
+        var result = Message.Json(MessageType.PairResult, new PairResult(false, null, 3), ProtocolJson.Default.PairResult)
+            .ReadJson(ProtocolJson.Default.PairResult);
+
+        Assert.Equal(new PairResult(false, null, 3), result);
+    }
+
+    [Fact]
+    public async Task Stream_rejects_payload_over_the_limit_before_reading_it()
+    {
+        var header = new byte[MessageHeader.Size];
+        new MessageHeader(MessageType.Hello, MessageFlags.None, PayloadLimits.Handshake + 1, 0).Write(header);
+        // Only the header is there: reading the payload would fail with EndOfStreamException instead.
+        var reader = new MessageStream(new MemoryStream(header));
+
+        await Assert.ThrowsAsync<ProtocolException>(() =>
+            reader.ReadAsync(_ => PayloadLimits.Handshake, TestContext.Current.CancellationToken).AsTask());
+        Assert.Equal(PayloadLimits.Json, PayloadLimits.ForSession(MessageType.CameraState));
+        Assert.Equal(MessageHeader.MaxPayloadLength, PayloadLimits.ForSession(MessageType.VideoFrame));
+    }
+
+    private static Message JsonMessage(MessageType type, string json)
+    {
+        var payload = System.Text.Encoding.UTF8.GetBytes(json);
+        return new Message(new MessageHeader(type, MessageFlags.None, payload.Length, 0), payload);
+    }
+
     [Fact]
     public void Pong_echoes_ping_timestamp()
     {

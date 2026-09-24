@@ -68,8 +68,22 @@ public readonly record struct MessageHeader(MessageType Type, MessageFlags Flags
             length,
             BinaryPrimitives.ReadUInt64LittleEndian(source[8..]));
     }
+}
 
-    public static bool IsKnownType(MessageType type) => Enum.IsDefined(type);
+/// <summary>
+/// Per-state payload limits, checked before the payload buffer is allocated, so a peer that has not
+/// finished the handshake cannot make the receiver reserve megabytes.
+/// </summary>
+public static class PayloadLimits
+{
+    /// <summary>Hello and PairRequest, before the session is established.</summary>
+    public const int Handshake = 4 * 1024;
+    /// <summary>JSON and other small messages of an established session.</summary>
+    public const int Json = 64 * 1024;
+    /// <summary>VideoFrame of an established session.</summary>
+    public const int VideoFrame = MessageHeader.MaxPayloadLength;
+
+    public static int ForSession(MessageType type) => type == MessageType.VideoFrame ? VideoFrame : Json;
 }
 
 public sealed class ProtocolException(string message) : Exception(message);

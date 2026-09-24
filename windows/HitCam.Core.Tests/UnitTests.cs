@@ -1,38 +1,7 @@
 using HitCam.Core.Pairing;
 using HitCam.Core.Server;
-using HitCam.Core.Video;
 
 namespace HitCam.Core.Tests;
-
-public class AnnexBTests
-{
-    private static readonly byte[] Keyframe =
-    [
-        0, 0, 0, 1, 0x67, 0xAA, 0xBB,   // SPS, 4-byte start code
-        0, 0, 1, 0x68, 0xCC,            // PPS, 3-byte start code
-        0, 0, 0, 1, 0x65, 0x11, 0x22,   // IDR slice
-    ];
-
-    [Fact]
-    public void Splits_units_with_both_start_code_lengths()
-    {
-        var units = AnnexB.SplitNalUnits(Keyframe).Select(r => Keyframe[r]).ToArray();
-
-        Assert.Equal(3, units.Length);
-        Assert.Equal([0x67, 0xAA, 0xBB], units[0]);
-        Assert.Equal([0x68, 0xCC], units[1]);
-        Assert.Equal([0x65, 0x11, 0x22], units[2]);
-    }
-
-    [Fact]
-    public void Detects_decodable_keyframes()
-    {
-        Assert.True(AnnexB.IsDecodableKeyframe(Keyframe));
-        Assert.False(AnnexB.IsDecodableKeyframe(Keyframe.AsSpan(12)));
-        Assert.False(AnnexB.IsDecodableKeyframe([0, 0, 1, 0x41, 0x9A]));
-        Assert.Empty(AnnexB.SplitNalUnits([1, 2, 3]));
-    }
-}
 
 public class PairingTests
 {
@@ -59,11 +28,88 @@ public class PairingTests
             Assert.Equal(PinCheckResult.Wrong, guard.Check(wrong));
         Assert.Equal(PinCheckResult.Exhausted, guard.Check(wrong));
 
-        Assert.True(guard.IsLockedOut);
         Assert.Null(guard.Begin());
+        time.Advance(PinGuard.Lockout - TimeSpan.FromSeconds(1));
+        Assert.Null(guard.Begin());
+        time.Advance(TimeSpan.FromSeconds(1));
+        Assert.NotNull(guard.Begin());
+        Assert.Equal(PinGuard.MaxAttempts, guard.AttemptsLeft);
+    }
+
+    [Fact]
+    public void Wrong_pins_add_up_across_pairing_windows()
+    {
+        var time = new ManualTime();
+        var guard = new PinGuard(time);
+
+        // A new connection (Begin) or a dropped one (Cancel) does not give the attempts back.
+        for (var i = 0; i < PinGuard.MaxAttempts - 1; i++)
+        {
+            Assert.Equal(PinCheckResult.Wrong, guard.Check(WrongPin(guard.Begin()!)));
+            guard.Cancel();
+            time.Advance(TimeSpan.FromSeconds(10));
+        }
+
+        var pin = guard.Begin()!;
+        Assert.Equal(1, guard.AttemptsLeft);
+        Assert.Equal(PinCheckResult.Exhausted, guard.Check(WrongPin(pin)));
+        Assert.Null(guard.Begin());
+    }
+
+    [Fact]
+    public void Each_lockout_doubles_up_to_ten_minutes()
+    {
+        var time = new ManualTime();
+        var guard = new PinGuard(time);
+        TimeSpan[] expected =
+        [
+            TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(120), TimeSpan.FromSeconds(240),
+            TimeSpan.FromSeconds(480), TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(10),
+        ];
+
+        foreach (var lockout in expected)
+        {
+            ExhaustAttempts(guard);
+            time.Advance(lockout - TimeSpan.FromSeconds(1));
+            Assert.Null(guard.Begin());
+            time.Advance(TimeSpan.FromSeconds(1));
+            Assert.NotNull(guard.Begin());
+            guard.Cancel();
+        }
+    }
+
+    [Fact]
+    public void Correct_pin_or_a_quiet_window_resets_the_count()
+    {
+        var time = new ManualTime();
+        var guard = new PinGuard(time);
+
+        ExhaustAttempts(guard);
+        time.Advance(PinGuard.Lockout);
+        var pin = guard.Begin()!;
+        Assert.Equal(PinCheckResult.Wrong, guard.Check(WrongPin(pin)));
+        Assert.Equal(PinCheckResult.Ok, guard.Check(pin));
+
+        // Back to a 30 s lockout after success.
+        ExhaustAttempts(guard);
         time.Advance(PinGuard.Lockout);
         Assert.NotNull(guard.Begin());
+
+        Assert.Equal(PinCheckResult.Wrong, guard.Check(WrongPin(guard.Begin()!)));
+        time.Advance(PinGuard.FailureWindow);
+        guard.Begin();
+        Assert.Equal(PinGuard.MaxAttempts, guard.AttemptsLeft);
     }
+
+    private static void ExhaustAttempts(PinGuard guard)
+    {
+        var pin = guard.Begin()!;
+        for (var i = 0; i < PinGuard.MaxAttempts - 1; i++)
+            Assert.Equal(PinCheckResult.Wrong, guard.Check(WrongPin(pin)));
+        Assert.Equal(PinCheckResult.Exhausted, guard.Check(WrongPin(pin)));
+    }
+
+    private static string WrongPin(string pin) => pin == "000000" ? "000001" : "000000";
 
     [Fact]
     public void Store_verifies_only_the_latest_token_of_a_device()
@@ -98,6 +144,75 @@ public class PairingTests
             Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
         }
     }
+
+    [Fact]
+    public void File_store_is_unchanged_when_saving_fails()
+    {
+        var path = TempStorePath();
+        try
+        {
+            var time = new ManualTime();
+            var store = new FilePairingStore(path, time);
+            var token = store.Pair("phone-1", "iPhone");
+            // A directory where the temp file goes makes every save fail.
+            Directory.CreateDirectory(path + ".tmp");
+
+            Assert.ThrowsAny<Exception>(() => store.Pair("phone-2", "iPhone 2"));
+            Assert.Equal(["phone-1"], store.Devices.Select(d => d.DeviceId));
+
+            time.Advance(TimeSpan.FromHours(1));
+            store.Touch("phone-1");
+            Assert.True(store.Verify("phone-1", token));
+            Assert.True(new FilePairingStore(path).Verify("phone-1", token));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Corrupt_file_store_starts_empty_and_keeps_a_backup()
+    {
+        var path = TempStorePath();
+        try
+        {
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            File.WriteAllText(path, """[{"deviceId":null}]""");
+
+            var store = new FilePairingStore(path);
+            Assert.Empty(store.Devices);
+            Assert.Equal("""[{"deviceId":null}]""", File.ReadAllText(path + ".bak"));
+
+            store.Pair("phone-1", "iPhone");
+            Assert.Single(new FilePairingStore(path).Devices);
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void Locked_file_store_does_not_throw()
+    {
+        var path = TempStorePath();
+        try
+        {
+            var token = new FilePairingStore(path).Pair("phone-1", "iPhone");
+            using (File.Open(path, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                Assert.Empty(new FilePairingStore(path).Devices);
+
+            Assert.True(new FilePairingStore(path).Verify("phone-1", token));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    private static string TempStorePath() =>
+        Path.Combine(Path.GetTempPath(), $"hitcam-test-{Guid.NewGuid()}", "devices.json");
 }
 
 public class ClockSyncTests
