@@ -244,27 +244,36 @@ public sealed partial class VirtualCamera : IDisposable
     }
 
     // Exit codes: 0 registered, 1 failed, 2 the copy does not match the hash.
-    // The camera service keeps the old DLL loaded; stopping it lets the file be replaced (it restarts on demand,
-    // but every camera, the built-in one too, drops for a moment).
+    // The installed DLL stays loaded wherever the camera was used, HitCam.exe itself included (adding the camera loads
+    // it), so it cannot be overwritten: each version gets its own file name (with part of its hash), and old ones are
+    // deleted once nothing holds them. Stopping the camera service makes it load the new version (it restarts on
+    // demand, but every camera, the built-in one too, drops for a moment).
     private const string InstallScriptTemplate = """
         $ErrorActionPreference = 'Stop'
         $source = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('@SOURCE@'))
         $expected = '@SHA256@'
         $dir = Join-Path ([Environment]::GetFolderPath('ProgramFiles')) 'HitCam'
-        $target = Join-Path $dir 'HitCamVCam.dll'
-        $staged = Join-Path $dir 'HitCamVCam.dll.new'
+        $target = Join-Path $dir ('HitCamVCam-' + $expected.Substring(0, 16) + '.dll')
+        $staged = $target + '.new'
         try {
             New-Item -ItemType Directory -Force -Path $dir | Out-Null
-            Copy-Item -LiteralPath $source -Destination $staged -Force
-            if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $expected) {
-                Remove-Item -LiteralPath $staged -Force
-                exit 2
+            $current = (Test-Path -LiteralPath $target) -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq $expected
+            if (-not $current) {
+                Copy-Item -LiteralPath $source -Destination $staged -Force
+                if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $expected) {
+                    Remove-Item -LiteralPath $staged -Force
+                    exit 2
+                }
+                Move-Item -LiteralPath $staged -Destination $target -Force
             }
             Stop-Service -Name FrameServer, FrameServerMonitor -Force -ErrorAction SilentlyContinue
-            Move-Item -LiteralPath $staged -Destination $target -Force
             $regsvr32 = Join-Path ([Environment]::SystemDirectory) 'regsvr32.exe'
             $p = Start-Process -FilePath $regsvr32 -ArgumentList '/s', ('"' + $target + '"') -Wait -PassThru
-            exit $p.ExitCode
+            if ($p.ExitCode -ne 0) { exit $p.ExitCode }
+            Get-ChildItem -LiteralPath $dir -Filter 'HitCamVCam*.dll' |
+                Where-Object { $_.FullName -ne $target } |
+                Remove-Item -Force -ErrorAction SilentlyContinue
+            exit 0
         } catch {
             Remove-Item -LiteralPath $staged -Force -ErrorAction SilentlyContinue
             exit 1

@@ -67,7 +67,9 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 `HitCamVCam.dll` копируется в `C:\Program Files\HitCam` и регистрируется. Дальше камера **HitCam** появляется
 в Zoom, Discord, Teams, OBS и браузерах, пока открыт HitCam для ПК. Без телефона камера показывает тёмно-серый кадр.
 
-Удаление: `regsvr32 /u "C:\Program Files\HitCam\HitCamVCam.dll"` (от администратора), затем удалить папку.
+Каждая версия камеры ставится под своим именем (`HitCamVCam-<часть хэша>.dll`): старый файл может быть занят
+программами, которые открывали камеру, и удаляется при следующем обновлении.
+Удаление: `regsvr32 /u` для `C:\Program Files\HitCam\HitCamVCam-*.dll` (от администратора), затем удалить папку.
 
 ### Windows 10
 
