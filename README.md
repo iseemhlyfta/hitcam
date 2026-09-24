@@ -1,4 +1,5 @@
 <img width="1920" height="960" alt="hitcam_00000" src="https://github.com/user-attachments/assets/7dad765f-a832-4b1b-ae0d-407609e5cead" />
+
 # HitCam
 
 **Камера iPhone как веб-камера для Windows 11** — открытая локальная замена iVCam.
