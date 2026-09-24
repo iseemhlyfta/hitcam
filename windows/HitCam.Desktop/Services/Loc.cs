@@ -80,6 +80,25 @@ public static class Loc
     public static string StabilizationStandard => Russian ? "Обычная" : "Standard";
     public static string StabilizationCinematic => Russian ? "Кино" : "Cinematic";
 
+    // AI noise removal (on the PC)
+    public static string Denoise => Russian ? "ИИ-шумоподавление" : "AI noise removal";
+    public static string DenoiseHint => Russian
+        ? "Нейросеть NVIDIA убирает шум, не размывая детали. Работает на видеокарте ПК, iPhone не нагружает."
+        : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the iPhone.";
+    public static string DenoiseStrength => Russian ? "Сила" : "Strength";
+    public static string DenoiseStrengthHint => Russian
+        ? "До 50% — мягкая модель (сохраняет текстуру), выше — сильная"
+        : "Up to 50%: gentle model (keeps texture); above: strong model";
+    public static string DenoiseLoading => Russian ? "Загружаем модель…" : "Loading the model…";
+    public static string DenoiseTime(double milliseconds) =>
+        Russian ? $"{milliseconds:0.0} мс на кадр" : $"{milliseconds:0.0} ms per frame";
+    public static string DenoiseFailed(int code) =>
+        Russian ? $"Не запустилось (код NVIDIA {code}). Нужна видеокарта RTX." : $"Did not start (NVIDIA code {code}). Needs an RTX GPU.";
+    public static string DenoiseMissing => Russian
+        ? "Нужна видеокарта NVIDIA RTX и бесплатный компонент NVIDIA Video Effects."
+        : "Needs an NVIDIA RTX GPU and the free NVIDIA Video Effects component.";
+    public static string DenoiseDownload => Russian ? "Скачать компонент NVIDIA" : "Download the NVIDIA component";
+
     // Virtual camera status
     public static string CameraReadyTitle => Russian ? "Виртуальная камера «HitCam»" : "“HitCam” virtual camera";
     public static string CameraReadyDetail => Russian

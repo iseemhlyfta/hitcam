@@ -10,9 +10,16 @@ add_library(HitCamVCam SHARED
     src/Shared.cpp
     src/MediaSource.cpp
     src/Bridge.cpp
+    src/Denoiser.cpp
     src/DllMain.cpp
     src/HitCamVCam.def
+    # NVIDIA Video Effects SDK loaders (MIT): the runtime itself is a separate NVIDIA install.
+    third_party/nvvfx/src/NVVideoEffectsProxy.cpp
+    third_party/nvvfx/src/nvCVImageProxy.cpp
 )
+target_include_directories(HitCamVCam PRIVATE third_party/nvvfx/include)
+set_source_files_properties(third_party/nvvfx/src/NVVideoEffectsProxy.cpp third_party/nvvfx/src/nvCVImageProxy.cpp
+    PROPERTIES COMPILE_OPTIONS "/W0;/WX-")
 
 target_compile_definitions(HitCamVCam PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCam PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

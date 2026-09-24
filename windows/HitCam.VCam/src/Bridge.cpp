@@ -16,6 +16,7 @@
 #include <mutex>
 #include <vector>
 
+#include "Denoiser.h"
 #include "Shared.h"
 
 using Microsoft::WRL::ComPtr;
@@ -143,12 +144,29 @@ private:
     uint64_t frame_ = 0;
 };
 
-// Every decoded frame goes to the virtual camera and to the preview.
+// Every decoded frame goes (optionally denoised) to the virtual camera and to the preview.
 struct FrameSink {
     FrameWriter writer;
     PreviewBuffer preview;
+    Denoiser denoiser;
+    std::vector<uint8_t> packed;
 
     void Publish(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height) {
+        width &= ~1u;
+        height &= ~1u;
+        if (denoiser.IsEnabled()) {
+            // The effect needs one contiguous NV12 image; the decoder's has padding rows between the planes.
+            packed.resize(static_cast<size_t>(width) * height * 3 / 2);
+            uint8_t* out = packed.data();
+            for (uint32_t y = 0; y < height; ++y) std::memcpy(out + static_cast<size_t>(y) * width, luma + static_cast<size_t>(y) * pitch, width);
+            out += static_cast<size_t>(width) * height;
+            for (uint32_t y = 0; y < height / 2; ++y) std::memcpy(out + static_cast<size_t>(y) * width, chroma + static_cast<size_t>(y) * pitch, width);
+            if (denoiser.Process(packed.data(), width, height)) {
+                luma = packed.data();
+                chroma = packed.data() + static_cast<size_t>(width) * height;
+                pitch = width;
+            }
+        }
         writer.Publish(luma, chroma, pitch, width, height);
         preview.Update(luma, chroma, pitch, width, height);
     }
@@ -363,6 +381,24 @@ __declspec(dllexport) void __stdcall HitCam_BridgeClearSignal(void* handle) {
 // True once frames can reach the camera (an app has opened it at least once since the service started).
 __declspec(dllexport) BOOL __stdcall HitCam_BridgeIsLinked(void* handle) {
     return handle && static_cast<hitcam::Bridge*>(handle)->sink.writer.IsMapped();
+}
+
+// True if the NVIDIA Video Effects runtime is installed (AI noise removal can be offered).
+__declspec(dllexport) BOOL __stdcall HitCam_DenoiseAvailable() {
+    return hitcam::Denoiser::IsAvailable();
+}
+
+// 0 turns noise removal off; up to 0.5 the gentle model is mixed in, above that the strong one. Any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetDenoise(void* handle, float strength) {
+    if (handle) static_cast<hitcam::Bridge*>(handle)->sink.denoiser.SetStrength(strength);
+}
+
+// Time the last denoised frame took (ms, -1 if none) and the NvCV status of a failed model load (0 if none).
+__declspec(dllexport) void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error) {
+    if (!handle || !milliseconds || !error) return;
+    const auto& denoiser = static_cast<hitcam::Bridge*>(handle)->sink.denoiser;
+    *milliseconds = denoiser.LastMilliseconds();
+    *error = denoiser.LastError();
 }
 
 // Size and number of the newest preview frame (0x0 before the first one). Safe to call from any thread.

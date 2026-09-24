@@ -14,6 +14,8 @@
 #include <wmcodecdsp.h>
 #include <wrl/client.h>
 
+#include <algorithm>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -30,6 +32,9 @@ extern "C" HRESULT __stdcall HitCam_BridgeDecode(void* handle, const uint8_t* da
 extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
 extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
 extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
+extern "C" BOOL __stdcall HitCam_DenoiseAvailable();
+extern "C" void __stdcall HitCam_BridgeSetDenoise(void* handle, float strength);
+extern "C" void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error);
 
 namespace {
 
@@ -41,7 +46,7 @@ int Fail(const char* step, HRESULT hr) {
 // Produces real H.264 (Annex-B, like the iPhone sends) with the Windows software encoder.
 class TestEncoder {
 public:
-    HRESULT Initialize(UINT32 width, UINT32 height) {
+    HRESULT Initialize(UINT32 width, UINT32 height, UINT32 bitrate = 4'000'000) {
         width_ = width;
         height_ = height;
         HRESULT hr = CoCreateInstance(CLSID_CMSH264EncoderMFT, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&transform_));
@@ -49,7 +54,7 @@ public:
         if (SUCCEEDED(hr)) hr = MFCreateMediaType(&output);
         if (SUCCEEDED(hr)) hr = output->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
         if (SUCCEEDED(hr)) hr = output->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_H264);
-        if (SUCCEEDED(hr)) hr = output->SetUINT32(MF_MT_AVG_BITRATE, 4'000'000);
+        if (SUCCEEDED(hr)) hr = output->SetUINT32(MF_MT_AVG_BITRATE, bitrate);
         if (SUCCEEDED(hr)) hr = MFSetAttributeSize(output.Get(), MF_MT_FRAME_SIZE, width, height);
         if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(output.Get(), MF_MT_FRAME_RATE, 30, 1);
         if (SUCCEEDED(hr)) hr = output->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
@@ -66,8 +71,9 @@ public:
         return hr;
     }
 
-    // Encodes a flat frame; `units` receives the access units the encoder produced (possibly none yet).
-    HRESULT Encode(uint8_t luma, std::vector<std::vector<uint8_t>>& units) {
+    // Encodes a flat frame, optionally with random luma noise of +-`noise`; `units` receives the access units
+    // the encoder produced (possibly none yet).
+    HRESULT Encode(uint8_t luma, std::vector<std::vector<uint8_t>>& units, int noise = 0) {
         const DWORD size = width_ * height_ * 3 / 2;
         ComPtr<IMFMediaBuffer> buffer;
         HRESULT hr = MFCreateMemoryBuffer(size, &buffer);
@@ -75,6 +81,10 @@ public:
         if (SUCCEEDED(hr)) hr = buffer->Lock(&data, nullptr, nullptr);
         if (FAILED(hr)) return hr;
         std::memset(data, luma, width_ * height_);
+        for (UINT32 i = 0; noise > 0 && i < width_ * height_; ++i) {
+            seed_ = seed_ * 1664525u + 1013904223u;
+            data[i] = static_cast<uint8_t>(std::clamp(luma + static_cast<int>(seed_ >> 24) % (2 * noise + 1) - noise, 16, 235));
+        }
         std::memset(data + width_ * height_, 128, width_ * height_ / 2);
         buffer->Unlock();
         buffer->SetCurrentLength(size);
@@ -123,6 +133,7 @@ private:
     UINT32 width_ = 0;
     UINT32 height_ = 0;
     LONGLONG time_ = 0;
+    uint32_t seed_ = 1;
 };
 
 HRESULT OpenCamera(const wchar_t* name, IMFSourceReader** reader) {
@@ -186,6 +197,98 @@ HRESULT ReadAverageLuma(IMFSourceReader* reader, UINT32 width, UINT32 height, do
 
 }  // namespace
 
+// Mean and standard deviation of the green channel of the bridge's BGRA preview.
+bool PreviewStats(void* bridge, double* mean, double* deviation) {
+    uint32_t width = 0, height = 0;
+    uint64_t frame = 0;
+    HitCam_BridgePreviewInfo(bridge, &width, &height, &frame);
+    if (width == 0) return false;
+    std::vector<uint8_t> pixels(static_cast<size_t>(width) * height * 4);
+    if (!HitCam_BridgeCopyPreview(bridge, pixels.data(), width * 4, width, height)) return false;
+    double sum = 0, squares = 0;
+    const size_t count = static_cast<size_t>(width) * height;
+    for (size_t i = 0; i < count; ++i) {
+        const double green = pixels[i * 4 + 1];
+        sum += green;
+        squares += green * green;
+    }
+    *mean = sum / count;
+    *deviation = std::sqrt(std::max(0.0, squares / count - *mean * *mean));
+    return true;
+}
+
+// --denoise: NVIDIA AI noise removal on real H.264 with synthetic sensor noise; no camera needed.
+int RunDenoiseCheck() {
+    if (!HitCam_DenoiseAvailable()) {
+        std::printf("SKIP: NVIDIA Video Effects runtime is not installed\n");
+        return 0;
+    }
+    TestEncoder encoder;
+    HRESULT hr = encoder.Initialize(1920, 1080, 30'000'000);
+    if (FAILED(hr)) return Fail("H.264 encoder", hr);
+    void* bridge = nullptr;
+    hr = HitCam_BridgeCreate(&bridge);
+    if (FAILED(hr)) return Fail("HitCam_BridgeCreate", hr);
+
+    constexpr uint8_t kLuma = 120;
+    constexpr int kNoise = 24;
+    int64_t time = 0;
+    auto feed = [&](int frames) -> HRESULT {
+        for (int i = 0; i < frames; ++i) {
+            std::vector<std::vector<uint8_t>> units;
+            HRESULT result = encoder.Encode(kLuma, units, kNoise);
+            for (const auto& unit : units) {
+                if (SUCCEEDED(result)) result = HitCam_BridgeDecode(bridge, unit.data(), static_cast<uint32_t>(unit.size()), time += 333'333);
+            }
+            if (FAILED(result)) return result;
+        }
+        return S_OK;
+    };
+
+    double noisyMean = 0, noisyDeviation = 0;
+    // The Windows encoder and decoder hold a few frames at the start.
+    bool decoded = false;
+    for (int round = 0; round < 60 && !decoded; ++round) {
+        hr = feed(1);
+        if (FAILED(hr)) return Fail("decode noisy frames", hr);
+        decoded = PreviewStats(bridge, &noisyMean, &noisyDeviation);
+    }
+    if (!decoded) return Fail("no decoded frame", E_FAIL);
+    hr = feed(5);
+    PreviewStats(bridge, &noisyMean, &noisyDeviation);
+    std::printf("OK: without denoise: mean %.1f, noise (std dev) %.1f\n", noisyMean, noisyDeviation);
+
+    bool passed = true;
+    for (const float strength : {1.0f, 0.5f}) {
+        HitCam_BridgeSetDenoise(bridge, strength);
+        double milliseconds = -1;
+        int error = 0;
+        // The model loads in the background (TensorRT); frames pass through meanwhile.
+        const ULONGLONG deadline = GetTickCount64() + 60'000;
+        while (GetTickCount64() < deadline) {
+            hr = feed(3);
+            if (FAILED(hr)) return Fail("decode while loading", hr);
+            HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error);
+            if (error != 0) break;
+            if (milliseconds >= 0) {
+                hr = feed(10);  // let the temporal model settle
+                break;
+            }
+            Sleep(50);
+        }
+        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error);
+        double mean = 0, deviation = 0;
+        const bool ok = error == 0 && milliseconds >= 0 && PreviewStats(bridge, &mean, &deviation)
+                        && deviation < noisyDeviation * 0.7 && std::abs(mean - noisyMean) < 4;
+        std::printf("%s: denoise %.1f: mean %.1f, noise %.1f (was %.1f), %.1f ms per frame, NvCV status %d\n",
+                    ok ? "OK" : "FAIL", strength, mean, deviation, noisyDeviation, milliseconds, error);
+        passed = passed && ok;
+    }
+
+    HitCam_BridgeDestroy(bridge);
+    return passed ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     HRESULT hr = MFStartup(MF_VERSION);
@@ -197,6 +300,7 @@ int main(int argc, char** argv) {
         OpenCamera(L"|no camera has this name|", &none);
         return 0;
     }
+    if (argc > 1 && std::strcmp(argv[1], "--denoise") == 0) return RunDenoiseCheck();
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {

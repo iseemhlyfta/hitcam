@@ -1,4 +1,6 @@
+using System.Diagnostics;
 using System.Net.Sockets;
+using System.Reactive.Linq;
 using System.Reactive;
 using Avalonia;
 using Avalonia.Media.Imaging;
@@ -14,7 +16,7 @@ namespace HitCam.Desktop.ViewModels;
 
 public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 {
-    private readonly AppSettings _settings = AppSettings.Load();
+    private AppSettings _settings = AppSettings.Load();
     private readonly HitCamServer _server;
     private readonly DispatcherTimer _statsTimer;
     private readonly DispatcherTimer _previewTimer;
@@ -50,6 +52,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _canInstallCamera;
     private WriteableBitmap? _preview;
     private bool _isFullScreen;
+    private bool _isDenoiseAvailable;
+    private bool _isDenoiseEnabled;
+    private double _denoiseStrength;
+    private string _denoiseStatus = "";
 
     public MainViewModel()
     {
@@ -110,6 +116,17 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         CancelPairingCommand = ReactiveCommand.Create(() => _server.Kick());
         InstallCameraCommand = ReactiveCommand.CreateFromTask(InstallCameraAsync);
         ToggleFullScreenCommand = ReactiveCommand.Create(() => { IsFullScreen = !IsFullScreen; });
+        OpenDenoiseDownloadCommand = ReactiveCommand.Create(() =>
+        {
+            Process.Start(new ProcessStartInfo(NvidiaVideoEffectsDownload) { UseShellExecute = true })?.Dispose();
+        });
+
+        _isDenoiseEnabled = _settings.DenoiseEnabled;
+        _denoiseStrength = Math.Clamp(_settings.DenoiseStrength, 0.05, 1);
+        // Saved once the slider rests, not on every step of a drag.
+        this.WhenAnyValue(x => x.DenoiseStrength).Skip(1)
+            .Throttle(TimeSpan.FromMilliseconds(500))
+            .Subscribe(_ => Dispatcher.UIThread.Post(SaveDenoiseSettings));
         _statsTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStats());
         _previewTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) => UpdatePreview());
     }
@@ -121,6 +138,64 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     public ReactiveCommand<Unit, Unit> InstallCameraCommand { get; }
 
     public ReactiveCommand<Unit, Unit> ToggleFullScreenCommand { get; }
+
+    public ReactiveCommand<Unit, Unit> OpenDenoiseDownloadCommand { get; }
+
+    // AI noise removal (NVIDIA Video Effects SDK, on the PC's RTX GPU)
+
+    private const string NvidiaVideoEffectsDownload = "https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-sdk/resources/";
+
+    /// <summary>The NVIDIA runtime is installed; checked in the background at start.</summary>
+    public bool IsDenoiseAvailable
+    {
+        get => _isDenoiseAvailable;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _isDenoiseAvailable, value);
+            this.RaisePropertyChanged(nameof(IsDenoiseMissing));
+        }
+    }
+
+    public bool IsDenoiseMissing => !IsDenoiseAvailable;
+
+    public bool IsDenoiseEnabled
+    {
+        get => _isDenoiseEnabled;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _isDenoiseEnabled, value);
+            ApplyDenoise();
+            SaveDenoiseSettings();
+            if (!value)
+                DenoiseStatus = "";
+        }
+    }
+
+    /// <summary>0.05..1; up to 0.5 the gentle model is mixed with the original, above that the strong one.</summary>
+    public double DenoiseStrength
+    {
+        get => _denoiseStrength;
+        set
+        {
+            this.RaiseAndSetIfChanged(ref _denoiseStrength, value);
+            this.RaisePropertyChanged(nameof(DenoiseStrengthText));
+            ApplyDenoise();
+        }
+    }
+
+    public string DenoiseStrengthText => $"{DenoiseStrength:P0}";
+
+    /// <summary>Loading / time per frame / error, while enabled.</summary>
+    public string DenoiseStatus { get => _denoiseStatus; private set => this.RaiseAndSetIfChanged(ref _denoiseStatus, value); }
+
+    private void ApplyDenoise() =>
+        _pipeline.SetDenoise(IsDenoiseAvailable && IsDenoiseEnabled ? (float)Math.Clamp(DenoiseStrength, 0.05, 1) : 0);
+
+    private void SaveDenoiseSettings()
+    {
+        _settings = _settings with { DenoiseEnabled = IsDenoiseEnabled, DenoiseStrength = Math.Round(DenoiseStrength, 2) };
+        _settings.Save();
+    }
 
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
@@ -262,6 +337,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         RefreshCamera();
         System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) =>
             Dispatcher.UIThread.Post(RefreshAddresses);
+        // Loading the NVIDIA libraries takes a moment; the switch appears once they are found.
+        _ = Task.Run(VideoPipeline.IsDenoiseAvailable).ContinueWith(
+            t => Dispatcher.UIThread.Post(() =>
+            {
+                IsDenoiseAvailable = t.Result;
+                ApplyDenoise();
+            }),
+            TaskScheduler.Default);
         _statsTimer.Start();
     }
 
@@ -357,6 +440,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
         if (!IsConnected)
             return;
+
+        if (IsDenoiseAvailable && IsDenoiseEnabled)
+        {
+            var (milliseconds, denoiseError) = _pipeline.DenoiseStats();
+            DenoiseStatus = denoiseError != 0 ? Loc.DenoiseFailed(denoiseError)
+                : milliseconds is { } ms ? Loc.DenoiseTime(ms)
+                : Loc.DenoiseLoading;
+        }
 
         var frames = Interlocked.Exchange(ref _framesInWindow, 0);
         var bytes = Interlocked.Exchange(ref _bytesInWindow, 0);

@@ -16,19 +16,21 @@ public static class AppPaths
 public sealed record AppSettings
 {
     /// <summary>Stable identity of this PC, so phones can recognize it across restarts.</summary>
-    public string ServerId { get; init; } = Guid.NewGuid().ToString();
-    public int Port { get; init; } = Core.Protocol.ProtocolInfo.DefaultPort;
+    // Plain setters, not init: the JSON source generator fills init-only properties through an object
+    // initializer and would overwrite these defaults with zeros for fields an older file does not have.
+    public string ServerId { get; set; } = Guid.NewGuid().ToString();
+    public int Port { get; set; } = Core.Protocol.ProtocolInfo.DefaultPort;
+    /// <summary>NVIDIA AI noise removal (PC-side, RTX only).</summary>
+    public bool DenoiseEnabled { get; set; }
+    /// <summary>0..1: up to 0.5 the gentle model is mixed in, above that the strong one.</summary>
+    public double DenoiseStrength { get; set; } = 0.5;
 
     public static AppSettings Load()
     {
         try
         {
-            if (File.Exists(AppPaths.Settings))
-            {
-                var settings = JsonSerializer.Deserialize(File.ReadAllBytes(AppPaths.Settings), SettingsJson.Default.AppSettings);
-                if (settings is not null)
-                    return settings;
-            }
+            if (File.Exists(AppPaths.Settings) && Parse(File.ReadAllBytes(AppPaths.Settings)) is { } settings)
+                return settings;
         }
         catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
         {
@@ -39,6 +41,9 @@ public sealed record AppSettings
         created.Save();
         return created;
     }
+
+    /// <summary>Settings written by any earlier version; fields it did not know keep their defaults.</summary>
+    public static AppSettings? Parse(ReadOnlySpan<byte> json) => JsonSerializer.Deserialize(json, SettingsJson.Default.AppSettings);
 
     public void Save()
     {

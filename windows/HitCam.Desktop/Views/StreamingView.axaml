@@ -113,6 +113,7 @@
                 </Border>
 
                 <ScrollViewer>
+                    <StackPanel>
                     <StackPanel Margin="20,18,20,16" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel" Spacing="16">
                         <StackPanel Spacing="2">
                             <TextBlock Classes="title" Text="{x:Static svc:Loc.CameraSettings}" />
@@ -226,6 +227,36 @@
                                 </Button>
                             </Grid>
                         </StackPanel>
+                    </StackPanel>
+
+                    <!--  AI noise removal runs on this PC, not on the phone  -->
+                    <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
+                        <StackPanel Spacing="8">
+                            <DockPanel>
+                                <ToggleSwitch DockPanel.Dock="Right" MinWidth="0" Padding="0" OnContent="" OffContent=""
+                                              IsChecked="{Binding IsDenoiseEnabled}" IsEnabled="{Binding IsDenoiseAvailable}"
+                                              AutomationProperties.Name="{x:Static svc:Loc.Denoise}" />
+                                <TextBlock VerticalAlignment="Center" Classes="title" Text="{x:Static svc:Loc.Denoise}" />
+                            </DockPanel>
+                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseHint}" TextWrapping="Wrap" />
+
+                            <StackPanel IsVisible="{Binding IsDenoiseEnabled}">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding DenoiseStrengthText}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseStrength}" />
+                                </DockPanel>
+                                <Slider Maximum="1" Minimum="0.05" Value="{Binding DenoiseStrength}" ToolTip.Tip="{x:Static svc:Loc.DenoiseStrengthHint}"
+                                        IsEnabled="{Binding IsDenoiseAvailable}" AutomationProperties.Name="{x:Static svc:Loc.DenoiseStrength}" />
+                                <TextBlock Classes="muted" Text="{Binding DenoiseStatus}" />
+                            </StackPanel>
+
+                            <StackPanel Spacing="6" IsVisible="{Binding IsDenoiseMissing}">
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseMissing}" TextWrapping="Wrap" />
+                                <Button HorizontalAlignment="Left" Classes="secondary" Command="{Binding OpenDenoiseDownloadCommand}"
+                                        Content="{x:Static svc:Loc.DenoiseDownload}" />
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
                     </StackPanel>
                 </ScrollViewer>
             </DockPanel>

@@ -15,6 +15,7 @@ public sealed class VideoPipeline : IDisposable
     // Guards the handle against destruction while the UI thread copies the preview.
     private readonly Lock _bridgeLock = new();
     private IntPtr _bridge;
+    private float _denoise;
     private int _dropped;
     private long _decodedFrames;
     private volatile bool _isLinked;
@@ -44,6 +45,44 @@ public sealed class VideoPipeline : IDisposable
     }
 
     public void ClearSignal() => TryAdd(null);
+
+    /// <summary>
+    /// NVIDIA AI noise removal strength, 0 (off) to 1. Kept across decoder restarts; applied once the decoder exists.
+    /// </summary>
+    public void SetDenoise(float strength)
+    {
+        lock (_bridgeLock)
+        {
+            _denoise = strength;
+            if (_bridge != IntPtr.Zero)
+                NativeMethods.HitCam_BridgeSetDenoise(_bridge, strength);
+        }
+    }
+
+    /// <summary>Last frame's denoise time (ms, null if none yet) and the NVIDIA status of a failed model load (0 if none).</summary>
+    public (double? Milliseconds, int Error) DenoiseStats()
+    {
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return (null, 0);
+            NativeMethods.HitCam_BridgeDenoiseStats(_bridge, out var milliseconds, out var error);
+            return (milliseconds >= 0 ? milliseconds : null, error);
+        }
+    }
+
+    /// <summary>Whether the NVIDIA Video Effects runtime is installed. Loads large NVIDIA libraries: call off the UI thread.</summary>
+    public static bool IsDenoiseAvailable()
+    {
+        try
+        {
+            return NativeMethods.HitCam_DenoiseAvailable();
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            return false;
+        }
+    }
 
     /// <summary>Size and sequence number of the newest decoded frame's preview; (0, 0, 0) before the first.</summary>
     public (int Width, int Height, ulong Frame) PreviewInfo()
@@ -101,7 +140,10 @@ public sealed class VideoPipeline : IDisposable
         }
 
         lock (_bridgeLock)
+        {
             _bridge = bridge;
+            NativeMethods.HitCam_BridgeSetDenoise(bridge, _denoise);
+        }
         try
         {
             var waitForKeyframe = true;
