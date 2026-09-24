@@ -1,5 +1,7 @@
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 
 namespace HitCam.Desktop.Services;
 
@@ -13,7 +15,7 @@ public static class AppPaths
     public static string Settings => Path.Combine(DataDirectory, "settings.json");
 }
 
-public sealed record AppSettings
+public sealed partial record AppSettings
 {
     /// <summary>Stable identity of this PC, so phones can recognize it across restarts.</summary>
     // Plain setters, not init: the JSON source generator fills init-only properties through an object
@@ -25,38 +27,90 @@ public sealed record AppSettings
     /// <summary>"fast", "general" or "maximum" (see <see cref="Services.DenoiseMode"/>); unknown values mean "general".</summary>
     public string DenoiseMode { get; set; } = "general";
 
-    public static AppSettings Load()
+    public static AppSettings Load() => Load(AppPaths.Settings);
+
+    /// <summary>
+    /// Reads the settings, creating the file on first start. A damaged file is kept as <c>.bak</c> and replaced by
+    /// defaults, but with the old <see cref="ServerId"/> if it can still be read: a new one would make every paired
+    /// phone treat this PC as a stranger.
+    /// </summary>
+    public static AppSettings Load(string path)
     {
+        byte[] json;
         try
         {
-            if (File.Exists(AppPaths.Settings) && Parse(File.ReadAllBytes(AppPaths.Settings)) is { } settings)
-                return settings;
+            if (!File.Exists(path))
+            {
+                var created = new AppSettings();
+                created.Save(path);
+                return created;
+            }
+            json = File.ReadAllBytes(path);
         }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Fall back to defaults; they are written back below.
+            // Unreadable right now (e.g. locked): run with defaults and leave the file alone.
+            return new AppSettings();
         }
 
-        var created = new AppSettings();
-        created.Save();
-        return created;
+        try
+        {
+            if (Parse(json) is { } settings)
+                return settings;
+        }
+        catch (JsonException)
+        {
+            // Damaged; recovered below.
+        }
+
+        var recovered = new AppSettings();
+        if (RecoverServerId(json) is { } serverId)
+            recovered.ServerId = serverId;
+        try
+        {
+            File.Move(path, path + ".bak", overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Overwritten below then; the identity is kept anyway if it was readable.
+        }
+        recovered.Save(path);
+        return recovered;
     }
 
     /// <summary>Settings written by any earlier version; fields it did not know keep their defaults.</summary>
     public static AppSettings? Parse(ReadOnlySpan<byte> json) => JsonSerializer.Deserialize(json, SettingsJson.Default.AppSettings);
 
-    public void Save()
+    /// <summary>The server id from a file that no longer parses as a whole (e.g. cut short).</summary>
+    public static string? RecoverServerId(ReadOnlySpan<byte> json) =>
+        ServerIdPattern().Match(Encoding.UTF8.GetString(json)) is { Success: true } match ? match.Groups[1].Value : null;
+
+    public void Save() => Save(AppPaths.Settings);
+
+    /// <summary>Writes a temporary file and moves it over the old one, so a crash never leaves half a file.</summary>
+    public void Save(string path)
     {
+        var temporary = path + ".tmp";
         try
         {
-            Directory.CreateDirectory(AppPaths.DataDirectory);
-            File.WriteAllBytes(AppPaths.Settings, JsonSerializer.SerializeToUtf8Bytes(this, SettingsJson.Default.AppSettings));
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+            {
+                stream.Write(JsonSerializer.SerializeToUtf8Bytes(this, SettingsJson.Default.AppSettings));
+                stream.Flush(flushToDisk: true);
+            }
+            File.Move(temporary, path, overwrite: true);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Settings are a convenience; the app keeps working with in-memory values.
         }
     }
+
+    [GeneratedRegex("""
+        "serverId"\s*:\s*"([^"\\\s]{1,100})"
+        """, RegexOptions.IgnoreCase)]
+    private static partial Regex ServerIdPattern();
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
