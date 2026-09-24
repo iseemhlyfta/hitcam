@@ -49,13 +49,26 @@ enum LocalStore {
         return id
     }
 
+    /// Recently used PCs. A stored serverId is trusted (its token may be sent to that address), so the session only
+    /// remembers an id that came from a QR code or was confirmed by pairing, never one a PC merely claimed.
     static var recentServers: [ServerAddress] {
         get {
             guard let data = defaults.data(forKey: "recentServers") else { return [] }
-            return (try? JSONDecoder().decode([ServerAddress].self, from: data)) ?? []
+            let stored = (try? JSONDecoder().decode([ServerAddress].self, from: data)) ?? []
+            if defaults.bool(forKey: "recentServersTrusted") { return stored }
+            // Older versions also stored the id a typed address's PC claimed about itself; it can't be told apart
+            // from a scanned one, so drop them all once. Tokens are still found by host:port; a QR scan restores the id.
+            let cleaned = stored.map { server -> ServerAddress in
+                var copy = server
+                copy.serverId = nil
+                return copy
+            }
+            recentServers = cleaned
+            return cleaned
         }
         set {
             defaults.set(try? JSONEncoder().encode(Array(newValue.prefix(5))), forKey: "recentServers")
+            defaults.set(true, forKey: "recentServersTrusted")
         }
     }
 
