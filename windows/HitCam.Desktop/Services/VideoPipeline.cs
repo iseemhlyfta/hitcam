@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using HitCam.Core.Server;
+using HitCam.Vision;
 
 namespace HitCam.Desktop.Services;
 
@@ -20,6 +21,7 @@ public sealed class VideoPipeline : IDisposable
     private long _decodedFrames;
     private volatile bool _isLinked;
     private volatile string? _error;
+    private volatile bool _overlayUnsupported;
 
     public VideoPipeline()
     {
@@ -107,6 +109,55 @@ public sealed class VideoPipeline : IDisposable
         {
             return _bridge != IntPtr.Zero
                    && NativeMethods.HitCam_BridgeCopyPreview(_bridge, destination, (uint)stride, (uint)width, (uint)height);
+        }
+    }
+
+    /// <summary>
+    /// For object analysis (any thread): copies the newest preview into <paramref name="target"/> if it is newer than
+    /// <paramref name="previousFrame"/>. Only called when the analysis is ready for a frame, so frames it has no time
+    /// for are never copied.
+    /// </summary>
+    public unsafe bool CopyPreviewTo(ulong previousFrame, VisionFrame target)
+    {
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return false;
+            NativeMethods.HitCam_BridgePreviewInfo(_bridge, out var width, out var height, out var frame);
+            if (width == 0 || height == 0 || frame == previousFrame)
+                return false;
+            target.SetSize((int)width, (int)height);
+            fixed (byte* pixels = target.Buffer)
+            {
+                if (!NativeMethods.HitCam_BridgeCopyPreview(_bridge, (IntPtr)pixels, (uint)target.Stride, width, height))
+                    return false;
+            }
+            target.Sequence = frame;
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Boxes drawn into the camera picture (see <see cref="CameraOverlay"/>); empty clears them. The DLL copies them
+    /// during the call. Does nothing before the decoder exists or with a DLL that predates overlays.
+    /// </summary>
+    public unsafe void SetOverlay(ReadOnlySpan<HitCamOverlayBox> boxes)
+    {
+        if (_overlayUnsupported)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                fixed (HitCamOverlayBox* pointer = boxes)
+                    NativeMethods.HitCam_BridgeSetOverlay(_bridge, pointer, boxes.Length);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _overlayUnsupported = true;
+            }
         }
     }
 

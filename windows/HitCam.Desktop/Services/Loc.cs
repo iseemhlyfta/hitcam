@@ -125,6 +125,53 @@ public static class Loc
         ? $"Удаление артефактов не работает (код NVIDIA {code}). Например, вертикальное видео не поддерживается."
         : $"Artifact removal is not working (NVIDIA code {code}). Portrait video, for example, is not supported.";
 
+    // Object analysis (HitCam Vision)
+    public static string Vision => Russian ? "Анализ объектов" : "Object analysis";
+    public static string VisionHint => Russian
+        ? "Находит людей, животных и предметы в кадре и обводит их рамками. Работает на этом ПК"
+        : "Finds people, animals and things in the picture and draws boxes around them. Runs on this PC";
+    public static string VisionBurnIn => Russian ? "Показывать рамки в камере «HitCam»" : "Show boxes in the “HitCam” camera";
+    public static string VisionBurnInHint => Russian
+        ? "Рамки увидят и в Zoom, Discord, OBS. Без этого они видны только здесь, в превью"
+        : "Boxes also show in Zoom, Discord, OBS. Without it they are only shown here, in the preview";
+    public static string VisionModel => Russian ? "Модель" : "Model";
+    public static string VisionModelHint => Russian
+        ? "«Быстрая» почти не нагружает ПК, «Точная» лучше находит мелкие и далёкие предметы"
+        : "“Fast” barely loads the PC, “Accurate” is better at small and distant things";
+    public static string VisionModelFast => Russian ? "Быстрая" : "Fast";
+    public static string VisionModelAccurate => Russian ? "Точная" : "Accurate";
+    public static string VisionThreshold => Russian ? "Уверенность" : "Confidence";
+    public static string VisionThresholdHint => Russian
+        ? "Показывать только то, в чём модель уверена хотя бы на столько. Меньше — больше находок и ошибок"
+        : "Only show what the model is at least this sure of. Lower finds more, with more mistakes";
+    public static string VisionClasses => Russian ? "Что искать" : "What to find";
+    public static string VisionSearch => Russian ? "Поиск класса" : "Search classes";
+    public static string VisionSelectAll => Russian ? "Все" : "All";
+    public static string VisionSelectNone => Russian ? "Ничего" : "None";
+    public static string VisionAllClasses => Russian ? "Все классы" : "All classes";
+    public static string VisionNoClasses => Russian ? "Ничего не выбрано" : "Nothing selected";
+    public static string VisionSomeClasses(int on, int total) => Russian ? $"{on} из {total} классов" : $"{on} of {total} classes";
+    public static string VisionNoModels(string folder) => Russian
+        ? $"Модели не найдены. Положите файлы .onnx и .labels.json в папку {folder}"
+        : $"No models found. Put the .onnx and .labels.json files into {folder}";
+    public static string VisionLoading => Russian ? "Загрузка модели…" : "Loading the model…";
+    public static string VisionStarting(string provider) => Russian ? $"Анализ: запуск · {provider}" : $"Analysis: starting · {provider}";
+    public static string VisionStats(double fps, double milliseconds, string provider) => Russian
+        ? $"Анализ: {fps:0} fps · {milliseconds:0} мс · {provider}"
+        : $"Analysis: {fps:0} fps · {milliseconds:0} ms · {provider}";
+    public static string VisionFailed(string error) => Russian ? $"Модель не загрузилась: {error}" : $"The model did not load: {error}";
+    public static string ClassGroupPeople => Russian ? "Люди" : "People";
+    public static string ClassGroupVehicles => Russian ? "Транспорт" : "Vehicles";
+    public static string ClassGroupStreet => Russian ? "Улица" : "Street";
+    public static string ClassGroupAnimals => Russian ? "Животные" : "Animals";
+    public static string ClassGroupAccessories => Russian ? "Сумки и аксессуары" : "Bags and accessories";
+    public static string ClassGroupSports => Russian ? "Спорт" : "Sports";
+    public static string ClassGroupKitchen => Russian ? "Посуда" : "Kitchen";
+    public static string ClassGroupFood => Russian ? "Еда" : "Food";
+    public static string ClassGroupFurniture => Russian ? "Мебель и техника" : "Furniture and appliances";
+    public static string ClassGroupThings => Russian ? "Предметы" : "Things";
+    public static string ClassGroupOther => Russian ? "Другое" : "Other";
+
     // Virtual camera status
     public static string CameraReadyTitle => Russian ? "Виртуальная камера «HitCam»" : "“HitCam” virtual camera";
     public static string CameraReadyDetail => Russian

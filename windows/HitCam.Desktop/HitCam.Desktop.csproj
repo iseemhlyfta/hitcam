@@ -20,18 +20,25 @@
     <PackageReference Include="Avalonia.Themes.Fluent" />
     <PackageReference Include="ReactiveUI.Avalonia" />
     <PackageReference Include="QRCoder" />
+    <!-- Already there through Avalonia; used directly to draw labels into the camera picture. -->
+    <PackageReference Include="SkiaSharp" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HitCam.Core\HitCam.Core.csproj" />
+    <!-- Object analysis. Its native ONNX Runtime and DirectML DLLs are published next to HitCam.exe, not bundled. -->
+    <ProjectReference Include="..\HitCam.Vision\HitCam.Vision.csproj" />
   </ItemGroup>
   <ItemGroup>
     <AvaloniaResource Include="Assets\HitCam.ico" />
   </ItemGroup>
 
-  <!-- Debug symbols (ours and the native Skia/HarfBuzz ones, ~100 MB) do not belong in an installed app. -->
+  <!--
+    Debug symbols (ours and the native Skia/HarfBuzz ones, ~100 MB) do not belong in an installed app, nor does
+    ONNX Runtime's import library. onnxruntime.dll and DirectML.dll stay next to HitCam.exe (native, not bundled).
+  -->
   <Target Name="RemovePublishedSymbols" AfterTargets="Publish">
     <ItemGroup>
-      <PublishedSymbols Include="$(PublishDir)*.pdb" />
+      <PublishedSymbols Include="$(PublishDir)*.pdb;$(PublishDir)*.lib" />
     </ItemGroup>
     <Delete Files="@(PublishedSymbols)" />
   </Target>

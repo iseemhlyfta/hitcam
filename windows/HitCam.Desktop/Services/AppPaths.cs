@@ -35,6 +35,15 @@ public sealed partial record AppSettings
 
     private ProcessingSettings _processing = new();
 
+    /// <summary>Object analysis; off by default.</summary>
+    public VisionSettings Vision
+    {
+        get => _vision;
+        set => _vision = value ?? new VisionSettings();
+    }
+
+    private VisionSettings _vision = new();
+
     public static AppSettings Load() => Load(AppPaths.Settings);
 
     /// <summary>

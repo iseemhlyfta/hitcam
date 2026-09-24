@@ -48,6 +48,10 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool HitCam_BridgeCopyPreview(IntPtr handle, IntPtr destination, uint stride, uint width, uint height);
 
+    /// <summary>Copies the boxes; count 0 clears them. The DLL drops boxes older than a second by itself.</summary>
+    [DllImport(Library)]
+    public static extern unsafe void HitCam_BridgeSetOverlay(IntPtr handle, HitCamOverlayBox* boxes, int count);
+
     [DllImport(Library, CharSet = CharSet.Unicode)]
     public static extern int HitCam_VirtualCameraStart(string friendlyName, out IntPtr handle);
 

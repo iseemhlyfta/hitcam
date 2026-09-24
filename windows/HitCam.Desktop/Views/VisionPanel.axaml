@@ -1,0 +1,129 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.VisionPanel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:VisionViewModel">
+
+    <UserControl.Resources>
+        <!--  Switches without the Fluent "On/Off" text column, which is 154 px wide  -->
+        <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <Style Selector="ToggleSwitch.bare">
+            <Setter Property="OnContent" Value="{x:Null}" />
+            <Setter Property="OffContent" Value="{x:Null}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </UserControl.Styles>
+
+    <StackPanel Spacing="14">
+        <DockPanel>
+            <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}"
+                          AutomationProperties.Name="{x:Static svc:Loc.Vision}" />
+            <StackPanel Spacing="2">
+                <TextBlock Classes="title" Text="{x:Static svc:Loc.Vision}" />
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionHint}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DockPanel>
+
+        <!--  No models next to the app or in LocalAppData  -->
+        <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModels}">
+            <SelectableTextBlock FontSize="12" Text="{Binding NoModelsText}" TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Spacing="14" IsVisible="{Binding HasModels}">
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.VisionBurnInHint}">
+                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding BurnIn}"
+                              AutomationProperties.Name="{x:Static svc:Loc.VisionBurnIn}" />
+                <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.VisionBurnIn}" TextWrapping="Wrap" />
+            </DockPanel>
+
+            <StackPanel Spacing="6">
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionModel}" ToolTip.Tip="{x:Static svc:Loc.VisionModelHint}" />
+                <ListBox Classes="segmented" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" IsVisible="{Binding UsesModelSegments}"
+                         ToolTip.Tip="{x:Static svc:Loc.VisionModelHint}" AutomationProperties.Name="{x:Static svc:Loc.VisionModel}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:ModelOption">
+                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" TextTrimming="CharacterEllipsis" ToolTip.Tip="{Binding Model.Name}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+                <ComboBox HorizontalAlignment="Stretch" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" IsVisible="{Binding UsesModelList}"
+                          ToolTip.Tip="{x:Static svc:Loc.VisionModelHint}" AutomationProperties.Name="{x:Static svc:Loc.VisionModel}" />
+            </StackPanel>
+
+            <StackPanel>
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ThresholdText}" />
+                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionThreshold}" ToolTip.Tip="{x:Static svc:Loc.VisionThresholdHint}" />
+                </DockPanel>
+                <Slider Minimum="10" Maximum="95" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                        Value="{Binding Threshold}" ToolTip.Tip="{x:Static svc:Loc.VisionThresholdHint}"
+                        AutomationProperties.Name="{x:Static svc:Loc.VisionThreshold}" />
+            </StackPanel>
+
+            <!--  Class filter: a compact button; the list opens beside the panel  -->
+            <StackPanel Spacing="6">
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionClasses}" />
+                <Button HorizontalAlignment="Stretch" HorizontalContentAlignment="Stretch" Classes="secondary" Height="36"
+                        AutomationProperties.Name="{x:Static svc:Loc.VisionClasses}">
+                    <DockPanel>
+                        <Path Classes="icon" Width="12" Height="12" DockPanel.Dock="Right" Stroke="{DynamicResource HcText2}" Data="M6 9 L12 15 L18 9" />
+                        <TextBlock VerticalAlignment="Center" Text="{Binding ClassFilterText}" />
+                    </DockPanel>
+                    <Button.Flyout>
+                        <Flyout Placement="LeftEdgeAlignedTop" ShowMode="Standard">
+                            <StackPanel Width="300" Spacing="10">
+                                <TextBox Text="{Binding ClassSearch}" PlaceholderText="{x:Static svc:Loc.VisionSearch}"
+                                         AutomationProperties.Name="{x:Static svc:Loc.VisionSearch}" />
+                                <Grid ColumnDefinitions="*,*" ColumnSpacing="8">
+                                    <Button HorizontalAlignment="Stretch" Classes="secondary" Command="{Binding SelectAllCommand}" Content="{x:Static svc:Loc.VisionSelectAll}" />
+                                    <Button Grid.Column="1" HorizontalAlignment="Stretch" Classes="secondary" Command="{Binding SelectNoneCommand}" Content="{x:Static svc:Loc.VisionSelectNone}" />
+                                </Grid>
+                                <ScrollViewer MaxHeight="420">
+                                    <ItemsControl ItemsSource="{Binding Groups}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ClassGroupViewModel">
+                                                <StackPanel Margin="0,0,0,8" IsVisible="{Binding IsVisible}">
+                                                    <CheckBox FontSize="13" FontWeight="SemiBold" Content="{Binding Title}" IsChecked="{Binding IsChecked}" />
+                                                    <ItemsControl Margin="22,0,0,0" ItemsSource="{Binding Items}">
+                                                        <!--  Classes hidden by the search leave no gap in the grid  -->
+                                                        <ItemsControl.Styles>
+                                                            <Style Selector="ItemsControl > ContentPresenter" x:DataType="vm:ClassItemViewModel">
+                                                                <Setter Property="IsVisible" Value="{Binding IsVisible}" />
+                                                            </Style>
+                                                        </ItemsControl.Styles>
+                                                        <ItemsControl.ItemsPanel>
+                                                            <ItemsPanelTemplate>
+                                                                <UniformGrid Columns="2" />
+                                                            </ItemsPanelTemplate>
+                                                        </ItemsControl.ItemsPanel>
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate x:DataType="vm:ClassItemViewModel">
+                                                                <CheckBox MinHeight="28" FontSize="12" Content="{Binding Name}" IsChecked="{Binding IsChecked}" />
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
+                                                </StackPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </ScrollViewer>
+                            </StackPanel>
+                        </Flyout>
+                    </Button.Flyout>
+                </Button>
+            </StackPanel>
+
+            <!--  What runs and how fast; why it does not  -->
+            <StackPanel Spacing="4">
+                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
+                <TextBlock Classes="muted" Text="{Binding ModelText}" TextWrapping="Wrap" IsVisible="{Binding HasModelText}" />
+                <TextBlock Classes="muted" Foreground="{StaticResource HcLive}" Text="{Binding ErrorText}" TextWrapping="Wrap" IsVisible="{Binding HasError}" />
+            </StackPanel>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

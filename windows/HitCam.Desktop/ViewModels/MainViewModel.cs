@@ -11,6 +11,7 @@ using HitCam.Core.Pairing;
 using HitCam.Core.Protocol;
 using HitCam.Core.Server;
 using HitCam.Desktop.Services;
+using HitCam.Vision;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
 
@@ -28,6 +29,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private int _disposed;
     private readonly VideoPipeline _pipeline = new();
     private readonly VirtualCamera _camera = new();
+    private readonly VisionEngine _vision;
+    private readonly CameraOverlay _cameraOverlay;
+    // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
+    private long _streamSize;
     private long _framesInWindow;
     private long _bytesInWindow;
     private long _lastLatencyMicros = -1;
@@ -72,6 +77,29 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             },
             AvaloniaScheduler.Instance);
 
+        // Object analysis pulls preview frames itself, only when it is ready for one.
+        _cameraOverlay = new CameraOverlay(boxes => _pipeline.SetOverlay(boxes));
+        _vision = new VisionEngine(_pipeline.CopyPreviewTo);
+        Vision = new VisionViewModel(
+            _settings.Vision,
+            ModelCatalog.Scan,
+            _ => ApplyVision(),
+            settings =>
+            {
+                _settings = _settings with { Vision = settings };
+                _settings.Save();
+            },
+            AvaloniaScheduler.Instance);
+        _vision.StatusChanged += s => Dispatcher.UIThread.Post(() => Vision.ShowStatus(s));
+        _vision.ResultReady += r =>
+        {
+            // Burn-in straight from the analysis thread; the preview overlay on the UI thread.
+            _cameraOverlay.FrameHeight = CameraFrameHeight(r.FrameWidth, r.FrameHeight);
+            _cameraOverlay.Show(r.Tracks);
+            Dispatcher.UIThread.Post(() => Vision.ShowResult(r));
+        };
+        Vision.WhenAnyValue(v => v.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowDetections)));
+
         _server = new HitCamServer(
             new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
             new FilePairingStore(AppPaths.PairedDevices));
@@ -90,6 +118,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _lastPreviewFrame = _pipeline.PreviewInfo().Frame;
             IsConnected = true;
             _previewTimer!.Start();
+            _vision.ResetTracks();
+            ApplyVision();
         });
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
@@ -102,6 +132,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
             LiveText = "";
             Processing.ClearStats();
+            ApplyVision();
+            _cameraOverlay.Clear();
+            Interlocked.Exchange(ref _streamSize, 0);
         });
         _server.Disconnected += (_, _) => _pipeline.ClearSignal();
 
@@ -114,6 +147,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             var codec = c.Codec.ToLowerInvariant() switch { "h264" => "H.264", "hevc" => "HEVC", _ => c.Codec.ToUpperInvariant() };
             StreamText = $"{codec} · {c.Width}×{c.Height}";
+            // Another lens, quality or orientation: tracks from the old picture mean nothing.
+            Interlocked.Exchange(ref _streamSize, ((long)c.Width << 32) | (uint)c.Height);
+            _vision.ResetTracks();
             LiveText = $"LIVE · {Math.Min(c.Width, c.Height)}p · {c.Fps} fps";
         });
         _server.StatusReceived += s => Dispatcher.UIThread.Post(() =>
@@ -163,6 +199,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
     public ProcessingViewModel Processing { get; }
+
+    /// <summary>Object analysis: settings panel, stats and the tracks for the preview overlay.</summary>
+    public VisionViewModel Vision { get; }
+
+    /// <summary>Boxes are drawn over the preview: analysis runs and there is a picture.</summary>
+    public bool ShowDetections => Vision.IsActive && HasPreview;
 
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
@@ -248,6 +290,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             this.RaiseAndSetIfChanged(ref _preview, value);
             this.RaisePropertyChanged(nameof(HasPreview));
+            this.RaisePropertyChanged(nameof(ShowDetections));
         }
     }
 
@@ -410,6 +453,37 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             SetCameraStatus(false, Loc.CameraInstallFailedTitle, Loc.CameraInstallFailedDetail, Loc.InstallCamera);
     }
 
+    /// <summary>
+    /// Analysis runs while it is on and a phone is connected; otherwise the model is unloaded and the boxes leave the
+    /// preview and the camera picture. Called on every change of the panel and on connect and disconnect.
+    /// </summary>
+    private void ApplyVision()
+    {
+        var model = Vision.SelectedModel?.Model;
+        var active = Vision.IsEnabled && IsConnected && model is not null;
+        if (model is not null)
+            _vision.Options = Vision.Settings.ToOptions(model);
+        Vision.IsActive = active;
+        if (active)
+            _vision.Start(model!);
+        else
+            _vision.Stop();
+        _cameraOverlay.SetEnabled(active && Vision.BurnIn);
+    }
+
+    /// <summary>
+    /// Height in pixels of the picture the camera sends, for the size of burnt-in labels: the phone's stream in the
+    /// preview's orientation, or twice the preview (which is at most 960×540) before the stream is known.
+    /// </summary>
+    private int CameraFrameHeight(int previewWidth, int previewHeight)
+    {
+        var size = Interlocked.Read(ref _streamSize);
+        var (width, height) = ((int)(size >> 32), (int)(size & 0xFFFFFFFF));
+        if (width <= 0 || height <= 0)
+            return previewHeight * 2;
+        return previewHeight > previewWidth ? Math.Max(width, height) : Math.Min(width, height);
+    }
+
     private void UpdatePreview()
     {
         var (width, height, frame) = _pipeline.PreviewInfo();
@@ -498,6 +572,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _previewTimer.Stop();
         _addressTimer.Stop();
         Processing.SaveNow();
+        Vision.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -511,7 +586,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
         await _server.DisposeAsync().ConfigureAwait(false);
+        // Analysis reads the decoder's preview: it goes first.
+        _vision.Dispose();
+        _cameraOverlay.Clear();
         _pipeline.Dispose();
+        _cameraOverlay.Dispose();
         _camera.Dispose();
     }
 }
