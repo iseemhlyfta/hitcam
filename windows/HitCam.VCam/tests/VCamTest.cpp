@@ -11,6 +11,7 @@
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
 //   --dshow           the DirectShow camera (Windows 10) of the DLLs built next to this test, without registration
+//   --dshow-installed the same with the DirectShow camera installed in the system, found as apps find it
 
 #include <windows.h>
 #include <aclapi.h>
@@ -793,7 +794,8 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--denoise") == 0) return RunDenoiseCheck();
     if (argc > 1 && std::strcmp(argv[1], "--denoise-scene") == 0) return RunSceneCheck();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
-    if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run(false);
+    if (argc > 1 && std::strcmp(argv[1], "--dshow-installed") == 0) return dshow_check::Run(true);
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {

@@ -54,6 +54,31 @@ HRESULT CreateFilter(IBaseFilter** filter) {
     return factory->CreateInstance(nullptr, IID_PPV_ARGS(filter));
 }
 
+// The installed camera, found the way apps find cameras: the video input device list (the registered DLL loads).
+HRESULT FindInstalledFilter(IBaseFilter** filter) {
+    ComPtr<ICreateDevEnum> devices;
+    HRESULT hr = CoCreateInstance(CLSID_SystemDeviceEnum, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&devices));
+    if (FAILED(hr)) return hr;
+    ComPtr<IEnumMoniker> monikers;
+    hr = devices->CreateClassEnumerator(CLSID_VideoInputDeviceCategory, &monikers, 0);
+    if (hr != S_OK) return E_FAIL;
+    ComPtr<IMoniker> moniker;
+    while (monikers->Next(1, &moniker, nullptr) == S_OK) {
+        ComPtr<IPropertyBag> properties;
+        VARIANT name;
+        VariantInit(&name);
+        if (SUCCEEDED(moniker->BindToStorage(nullptr, nullptr, IID_PPV_ARGS(&properties))) &&
+            SUCCEEDED(properties->Read(L"FriendlyName", &name, nullptr))) {
+            std::printf("      video input device: %ls\n", name.bstrVal);
+            const bool hitcam = std::wcscmp(name.bstrVal, L"HitCam") == 0;
+            VariantClear(&name);
+            if (hitcam) return moniker->BindToObject(nullptr, nullptr, IID_PPV_ARGS(filter));
+        }
+        moniker.Reset();
+    }
+    return HRESULT_FROM_WIN32(ERROR_NOT_FOUND);
+}
+
 ComPtr<IPin> FirstPin(IBaseFilter* filter, PIN_DIRECTION wanted) {
     ComPtr<IEnumPins> pins;
     if (FAILED(filter->EnumPins(&pins))) return nullptr;
@@ -135,14 +160,15 @@ bool Feed(void* bridge, UINT32 width, UINT32 height, uint8_t luma, int rounds) {
     return true;
 }
 
-int Run() {
+// `installed`: the camera registered in the system (--dshow-installed) instead of the DLL next to this test.
+int Run(bool installed) {
     HRESULT hr = HitCam_DShowStart();
     if (FAILED(hr)) return Fail("HitCam_DShowStart", hr);
     Check(HitCam_DShowStart() == S_OK, "starting again is harmless");
 
     ComPtr<IBaseFilter> camera;
-    hr = CreateFilter(&camera);
-    if (FAILED(hr)) return Fail("create the HitCamDShow filter", hr);
+    hr = installed ? FindInstalledFilter(&camera) : CreateFilter(&camera);
+    if (FAILED(hr)) return Fail(installed ? "find the installed \"HitCam\" camera" : "create the HitCamDShow filter", hr);
     Graph graph;
     hr = BuildGraph(camera.Get(), graph);
     if (FAILED(hr)) return Fail("build the DirectShow graph", hr);
