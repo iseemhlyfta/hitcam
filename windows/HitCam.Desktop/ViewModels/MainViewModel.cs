@@ -58,13 +58,20 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _canInstallCamera;
     private WriteableBitmap? _preview;
     private bool _isFullScreen;
-    private bool _isDenoiseAvailable;
-    private bool _isDenoiseEnabled;
-    private DenoiseModeOption _selectedDenoiseMode;
-    private string _denoiseStatus = "";
 
     public MainViewModel()
     {
+        // Applied to the pipeline right away, so the first decoder already starts with the saved settings.
+        Processing = new ProcessingViewModel(
+            _settings.Processing,
+            settings => _pipeline.SetProcessing(settings),
+            settings =>
+            {
+                _settings = _settings with { Processing = settings };
+                _settings.Save();
+            },
+            AvaloniaScheduler.Instance);
+
         _server = new HitCamServer(
             new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
             new FilePairingStore(AppPaths.PairedDevices));
@@ -94,6 +101,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             StatusText = Loc.Disconnected(reason);
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
             LiveText = "";
+            Processing.ClearStats();
         });
         _server.Disconnected += (_, _) => _pipeline.ClearSignal();
 
@@ -123,10 +131,6 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         CancelPairingCommand = ReactiveCommand.Create(() => _server.Kick());
         InstallCameraCommand = ReactiveCommand.CreateFromTask(InstallCameraAsync);
         ToggleFullScreenCommand = ReactiveCommand.Create(() => { IsFullScreen = !IsFullScreen; });
-        OpenDenoiseDownloadCommand = ReactiveCommand.Create(() =>
-        {
-            Process.Start(new ProcessStartInfo(NvidiaVideoEffectsDownload) { UseShellExecute = true })?.Dispose();
-        });
 
         // An unobserved command error would crash the app; show it where the user clicked instead.
         DisconnectCommand.ThrownExceptions.Subscribe(ex => StatusText = Loc.ActionFailed(ex.Message));
@@ -134,10 +138,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         InstallCameraCommand.ThrownExceptions.Subscribe(ex =>
             SetCameraStatus(false, Loc.CameraInstallFailedTitle, Loc.CameraInstallError(ex.Message), Loc.InstallCamera));
         ToggleFullScreenCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Full screen: {ex.Message}"));
-        OpenDenoiseDownloadCommand.ThrownExceptions.Subscribe(ex => DenoiseStatus = Loc.ActionFailed(ex.Message));
+        Processing.ResetColorCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Reset colour: {ex.Message}"));
 
-        _isDenoiseEnabled = _settings.DenoiseEnabled;
-        _selectedDenoiseMode = DenoiseModes.FirstOrDefault(o => o.Key == _settings.DenoiseMode) ?? DenoiseModes[1];
         // Property-initialized timers: the constructor taking a callback also starts the timer.
         _statsTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
         _statsTimer.Tick += (_, _) => UpdateStats();
@@ -159,71 +161,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public ReactiveCommand<Unit, Unit> ToggleFullScreenCommand { get; }
 
-    public ReactiveCommand<Unit, Unit> OpenDenoiseDownloadCommand { get; }
-
-    // AI noise removal (NVIDIA Video Effects SDK, on the PC's RTX GPU)
-
-    private const string NvidiaVideoEffectsDownload = "https://www.nvidia.com/en-us/geforce/broadcasting/broadcast-sdk/resources/";
-
-    /// <summary>The NVIDIA runtime is installed; checked in the background at start.</summary>
-    public bool IsDenoiseAvailable
-    {
-        get => _isDenoiseAvailable;
-        private set
-        {
-            this.RaiseAndSetIfChanged(ref _isDenoiseAvailable, value);
-            this.RaisePropertyChanged(nameof(IsDenoiseMissing));
-        }
-    }
-
-    public bool IsDenoiseMissing => !IsDenoiseAvailable;
-
-    public bool IsDenoiseEnabled
-    {
-        get => _isDenoiseEnabled;
-        set
-        {
-            this.RaiseAndSetIfChanged(ref _isDenoiseEnabled, value);
-            ApplyDenoise();
-            SaveDenoiseSettings();
-            if (!value)
-                DenoiseStatus = "";
-        }
-    }
-
-    /// <summary>The three buttons: fast, general, maximum.</summary>
-    public IReadOnlyList<DenoiseModeOption> DenoiseModes { get; } =
-    [
-        new("fast", DenoiseMode.Fast, Loc.DenoiseFast, Loc.DenoiseFastHint),
-        new("general", DenoiseMode.General, Loc.DenoiseGeneral, Loc.DenoiseGeneralHint),
-        new("maximum", DenoiseMode.Maximum, Loc.DenoiseMaximum, Loc.DenoiseMaximumHint),
-    ];
-
-    public DenoiseModeOption SelectedDenoiseMode
-    {
-        get => _selectedDenoiseMode;
-        set
-        {
-            // The segmented list briefly reports "nothing selected" while it rebuilds; keep the last choice then.
-            if (value is null || value == _selectedDenoiseMode)
-                return;
-            this.RaiseAndSetIfChanged(ref _selectedDenoiseMode, value);
-            ApplyDenoise();
-            SaveDenoiseSettings();
-        }
-    }
-
-    /// <summary>Loading / noise level / time per frame / error, while enabled.</summary>
-    public string DenoiseStatus { get => _denoiseStatus; private set => this.RaiseAndSetIfChanged(ref _denoiseStatus, value); }
-
-    private void ApplyDenoise() =>
-        _pipeline.SetDenoise(IsDenoiseAvailable && IsDenoiseEnabled ? SelectedDenoiseMode.Mode : DenoiseMode.Off);
-
-    private void SaveDenoiseSettings()
-    {
-        _settings = _settings with { DenoiseEnabled = IsDenoiseEnabled, DenoiseMode = SelectedDenoiseMode.Key };
-        _settings.Save();
-    }
+    /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
+    public ProcessingViewModel Processing { get; }
 
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
@@ -369,13 +308,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _addressTimer.Start();
         });
         NetworkChange.NetworkAddressChanged += _networkChanged;
-        // Loading the NVIDIA libraries takes a moment; the switch appears once they are found.
-        _ = Task.Run(VideoPipeline.IsDenoiseAvailable).ContinueWith(
-            t => Dispatcher.UIThread.Post(() =>
-            {
-                IsDenoiseAvailable = t.Result;
-                ApplyDenoise();
-            }),
+        // Loading the NVIDIA libraries takes a moment; the artifact removal choice appears once they are found.
+        _ = Task.Run(VideoPipeline.IsArtifactReductionAvailable).ContinueWith(
+            t => Dispatcher.UIThread.Post(() => Processing.IsArtifactReductionAvailable = t.Result),
             TaskScheduler.Default);
         _statsTimer.Start();
     }
@@ -509,16 +444,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (!IsConnected)
             return;
 
-        if (IsDenoiseAvailable && IsDenoiseEnabled)
-        {
-            var stats = _pipeline.DenoiseStats();
-            DenoiseStatus = stats.Error != 0 ? Loc.DenoiseFailed(stats.Error)
-                : stats.Noise is not { } noise ? Loc.DenoiseLoading
-                // Below ~2% the picture is clean enough that it is passed through untouched.
-                : stats.Amount < 0.02f ? Loc.DenoiseIdle(noise)
-                : stats.Milliseconds is { } ms ? Loc.DenoiseActive(noise, stats.Amount, ms)
-                : Loc.DenoiseLoading;
-        }
+        Processing.ShowStats(_pipeline.ProcessingStats());
 
         var frames = Interlocked.Exchange(ref _framesInWindow, 0);
         var bytes = Interlocked.Exchange(ref _bytesInWindow, 0);
@@ -571,6 +497,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _statsTimer.Stop();
         _previewTimer.Stop();
         _addressTimer.Stop();
+        Processing.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -587,11 +514,4 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _pipeline.Dispose();
         _camera.Dispose();
     }
-}
-
-/// <param name="Key">Stored in settings.</param>
-/// <param name="Hint">What the mode does, shown under the buttons.</param>
-public sealed record DenoiseModeOption(string Key, DenoiseMode Mode, string Label, string Hint)
-{
-    public override string ToString() => Label;
 }

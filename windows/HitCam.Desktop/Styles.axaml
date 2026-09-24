@@ -183,6 +183,10 @@
     <Style Selector="ListBox.segmented ListBoxItem:selected">
         <Setter Property="FontWeight" Value="SemiBold" />
     </Style>
+    <!--  An option the device does not offer (phone camera noise reduction)  -->
+    <Style Selector="ListBox.segmented ListBoxItem:disabled">
+        <Setter Property="Opacity" Value="0.4" />
+    </Style>
 
     <!--  Sliders drawn over a colored track (white balance)  -->
     <Style Selector="Border.gradientTrack">

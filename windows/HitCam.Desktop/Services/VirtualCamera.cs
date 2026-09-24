@@ -32,13 +32,14 @@ internal static class NativeMethods
 
     [DllImport(Library)]
     [return: MarshalAs(UnmanagedType.Bool)]
-    public static extern bool HitCam_DenoiseAvailable();
+    public static extern bool HitCam_ArtifactReductionAvailable();
 
     [DllImport(Library)]
-    public static extern void HitCam_BridgeSetDenoiseMode(IntPtr handle, int mode);
+    public static extern void HitCam_BridgeSetProcessing(IntPtr handle, in HitCamProcessing settings);
 
+    /// <summary>A time of -1 ms means that stage did not run on the last frame.</summary>
     [DllImport(Library)]
-    public static extern void HitCam_BridgeDenoiseStats(IntPtr handle, out double milliseconds, out int error, out double noise, out float amount);
+    public static extern void HitCam_BridgeProcessingStats(IntPtr handle, out double gpuMilliseconds, out double artifactMilliseconds, out int artifactError);
 
     [DllImport(Library)]
     public static extern void HitCam_BridgePreviewInfo(IntPtr handle, out uint width, out uint height, out ulong frame);

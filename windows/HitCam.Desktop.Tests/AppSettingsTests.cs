@@ -22,8 +22,38 @@ public sealed class AppSettingsTests : IDisposable
 
         Assert.NotNull(settings);
         Assert.Equal("b929fd73", settings.ServerId);
-        Assert.False(settings.DenoiseEnabled);
-        Assert.Equal("general", settings.DenoiseMode);
+        Assert.Equal(new ProcessingSettings(), settings.Processing);
+        Assert.True(settings.Processing.IsColorNeutral);
+        Assert.Equal(0, settings.Processing.TemporalStrength);
+        Assert.Equal(0, settings.Processing.ArtifactReduction);
+    }
+
+    [Fact]
+    public void The_old_ai_noise_removal_setting_is_dropped()
+    {
+        Directory.CreateDirectory(_directory);
+        // Written by 0.2.3 with NVIDIA AI noise removal on.
+        File.WriteAllText(SettingsPath, """{"serverId":"b929fd73","port":47800,"denoiseEnabled":true,"denoiseMode":"maximum"}""");
+
+        var settings = AppSettings.Load(SettingsPath);
+        settings.Save(SettingsPath);
+        var json = File.ReadAllText(SettingsPath);
+
+        Assert.Equal("b929fd73", settings.ServerId);
+        Assert.Equal(new ProcessingSettings(), settings.Processing);
+        Assert.False(File.Exists(SettingsPath + ".bak"));
+        Assert.DoesNotContain("denoise", json, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("\"processing\"", json);
+    }
+
+    [Fact]
+    public void Processing_fields_missing_or_null_keep_their_defaults()
+    {
+        var partial = AppSettings.Parse("""{"serverId":"a","processing":{"brightness":20}}"""u8);
+        var nulled = AppSettings.Parse("""{"serverId":"a","processing":null}"""u8);
+
+        Assert.Equal(new ProcessingSettings { Brightness = 20 }, partial?.Processing);
+        Assert.Equal(new ProcessingSettings(), nulled?.Processing);
     }
 
     [Fact]
@@ -42,12 +72,16 @@ public sealed class AppSettingsTests : IDisposable
         var created = AppSettings.Load(SettingsPath);
         Assert.True(File.Exists(SettingsPath));
 
-        (created with { DenoiseEnabled = true, DenoiseMode = "maximum" }).Save(SettingsPath);
+        var processing = new ProcessingSettings
+        {
+            TemporalStrength = 40, ArtifactReduction = 2, Brightness = -15, Contrast = 10, Saturation = 25,
+            Shadows = 30, Highlights = -20, Sharpness = 60,
+        };
+        (created with { Processing = processing }).Save(SettingsPath);
         var loaded = AppSettings.Load(SettingsPath);
 
         Assert.Equal(created.ServerId, loaded.ServerId);
-        Assert.True(loaded.DenoiseEnabled);
-        Assert.Equal("maximum", loaded.DenoiseMode);
+        Assert.Equal(processing, loaded.Processing);
         Assert.False(File.Exists(SettingsPath + ".tmp"));
     }
 

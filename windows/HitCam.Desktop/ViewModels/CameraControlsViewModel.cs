@@ -48,6 +48,20 @@ public sealed record StabilizationOption(string Id, string Label)
     });
 }
 
+/// <param name="IsOffered">The phone's current camera supports this mode; the others are shown but not clickable.</param>
+public sealed record NoiseReductionOption(string Id, string Label, bool IsOffered)
+{
+    public override string ToString() => Label;
+
+    /// <summary>Always the same three buttons; only modes the phone offers can be picked.</summary>
+    public static IReadOnlyList<NoiseReductionOption> For(IReadOnlyCollection<string> offered) =>
+    [
+        new(NoiseReductionModes.Off, Loc.PhoneNoiseReductionOff, offered.Contains(NoiseReductionModes.Off)),
+        new(NoiseReductionModes.Fast, Loc.PhoneNoiseReductionFast, offered.Contains(NoiseReductionModes.Fast)),
+        new(NoiseReductionModes.High, Loc.PhoneNoiseReductionHigh, offered.Contains(NoiseReductionModes.High)),
+    ];
+}
+
 /// <summary>
 /// Camera settings on the PC. Edits are sent to the phone as <see cref="Control"/>; the phone answers with a full
 /// <see cref="CameraState"/>, which is mirrored back here. Must be used on the UI thread.
@@ -90,6 +104,8 @@ public sealed class CameraControlsViewModel : ReactiveObject
     private bool _isExposureLocked;
     private IReadOnlyList<StabilizationOption> _stabilizationOptions = [];
     private StabilizationOption? _selectedStabilization;
+    private IReadOnlyList<NoiseReductionOption> _noiseReductionOptions = [];
+    private NoiseReductionOption? _selectedNoiseReduction;
     private IReadOnlyList<CameraInfo> _cameraInfos = [];
 
     /// <param name="ui">Scheduler of the UI thread (the one this view model is used on).</param>
@@ -224,6 +240,43 @@ public sealed class CameraControlsViewModel : ReactiveObject
             {
                 MarkLocalEdit();
                 Send(new Control { Stabilization = value.Id });
+            }
+        }
+    }
+
+    // Noise reduction of the phone camera itself (before compression)
+
+    public IReadOnlyList<NoiseReductionOption> NoiseReductionOptions
+    {
+        get => _noiseReductionOptions;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _noiseReductionOptions, value);
+            this.RaisePropertyChanged(nameof(SupportsNoiseReduction));
+        }
+    }
+
+    /// <summary>The phone reports noise reduction modes for the current camera (older apps do not).</summary>
+    public bool SupportsNoiseReduction => NoiseReductionOptions.Any(o => o.IsOffered);
+
+    public NoiseReductionOption? SelectedNoiseReduction
+    {
+        get => _selectedNoiseReduction;
+        set
+        {
+            if (Equals(_selectedNoiseReduction, value))
+                return;
+            if (value is { IsOffered: false })
+            {
+                // Not clickable in the view; if it gets here anyway, the list goes back to the current mode.
+                this.RaisePropertyChanged();
+                return;
+            }
+            this.RaiseAndSetIfChanged(ref _selectedNoiseReduction, value);
+            if (!_fromPhone && value is not null)
+            {
+                MarkLocalEdit();
+                Send(new Control { NoiseReduction = value.Id });
             }
         }
     }
@@ -401,6 +454,11 @@ public sealed class CameraControlsViewModel : ReactiveObject
             if (!modes.SequenceEqual(StabilizationOptions.Select(o => o.Id)))
                 StabilizationOptions = [.. modes.Select(StabilizationOption.For)];
             SelectedStabilization = StabilizationOptions.FirstOrDefault(o => o.Id == (state.Stabilization ?? StabilizationModes.Off));
+            var noiseModes = state.NoiseReductionModes ?? [];
+            var noiseOptions = noiseModes.Length > 0 ? NoiseReductionOption.For(noiseModes) : [];
+            if (!noiseOptions.SequenceEqual(NoiseReductionOptions))
+                NoiseReductionOptions = noiseOptions;
+            SelectedNoiseReduction = NoiseReductionOptions.FirstOrDefault(o => o.Id == state.NoiseReduction && o.IsOffered);
 
             this.RaisePropertyChanged(nameof(CanZoom));
             IsAvailable = Cameras.Count > 0;
@@ -422,6 +480,8 @@ public sealed class CameraControlsViewModel : ReactiveObject
             SupportsExposureLock = false;
             StabilizationOptions = [];
             SelectedStabilization = null;
+            NoiseReductionOptions = [];
+            SelectedNoiseReduction = null;
         });
     }
 

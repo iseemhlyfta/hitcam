@@ -229,34 +229,131 @@
                         </StackPanel>
                     </StackPanel>
 
-                    <!--  AI noise removal runs on this PC, not on the phone  -->
+                    <!--  Processing: on this PC (sliders, NVIDIA) and, for noise, also on the phone before compression  -->
                     <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
-                        <StackPanel Spacing="8">
-                            <DockPanel>
-                                <ToggleSwitch DockPanel.Dock="Right" MinWidth="0" Padding="0" OnContent="" OffContent=""
-                                              IsChecked="{Binding IsDenoiseEnabled}" IsEnabled="{Binding IsDenoiseAvailable}"
-                                              AutomationProperties.Name="{x:Static svc:Loc.Denoise}" />
-                                <TextBlock VerticalAlignment="Center" Classes="title" Text="{x:Static svc:Loc.Denoise}" />
-                            </DockPanel>
-                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseHint}" TextWrapping="Wrap" />
-
-                            <StackPanel Spacing="8" IsVisible="{Binding IsDenoiseEnabled}">
-                                <ListBox Classes="segmented" ItemsSource="{Binding DenoiseModes}" SelectedItem="{Binding SelectedDenoiseMode}"
-                                         IsEnabled="{Binding IsDenoiseAvailable}" AutomationProperties.Name="{x:Static svc:Loc.Denoise}">
-                                    <ListBox.ItemTemplate>
-                                        <DataTemplate x:DataType="vm:DenoiseModeOption">
-                                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" ToolTip.Tip="{Binding Hint}" />
-                                        </DataTemplate>
-                                    </ListBox.ItemTemplate>
-                                </ListBox>
-                                <TextBlock Classes="muted" Text="{Binding SelectedDenoiseMode.Hint}" TextWrapping="Wrap" />
-                                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding DenoiseStatus}" TextWrapping="Wrap" />
+                        <StackPanel Spacing="16">
+                            <StackPanel Spacing="2">
+                                <TextBlock Classes="title" Text="{x:Static svc:Loc.Processing}" />
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.ProcessingHint}" TextWrapping="Wrap" />
                             </StackPanel>
 
-                            <StackPanel Spacing="6" IsVisible="{Binding IsDenoiseMissing}">
-                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseMissing}" TextWrapping="Wrap" />
-                                <Button HorizontalAlignment="Left" Classes="secondary" Command="{Binding OpenDenoiseDownloadCommand}"
-                                        Content="{x:Static svc:Loc.DenoiseDownload}" />
+                            <!--  Noise reduction  -->
+                            <StackPanel Spacing="12">
+                                <TextBlock Classes="strong" Text="{x:Static svc:Loc.NoiseReduction}" />
+
+                                <StackPanel DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding TemporalStrengthText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.TemporalNoiseReduction}" ToolTip.Tip="{x:Static svc:Loc.TemporalNoiseReductionHint}" />
+                                    </DockPanel>
+                                    <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding TemporalStrength}" ToolTip.Tip="{x:Static svc:Loc.TemporalNoiseReductionHint}"
+                                            AutomationProperties.Name="{x:Static svc:Loc.TemporalNoiseReduction}" />
+                                </StackPanel>
+
+                                <StackPanel Spacing="6" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel"
+                                            IsVisible="{Binding IsArtifactReductionAvailable}">
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.ArtifactReduction}" TextWrapping="Wrap"
+                                               ToolTip.Tip="{x:Static svc:Loc.ArtifactReductionHint}" />
+                                    <ListBox Classes="segmented" ItemsSource="{Binding ArtifactReductionOptions}" SelectedItem="{Binding SelectedArtifactReduction}"
+                                             ToolTip.Tip="{x:Static svc:Loc.ArtifactReductionHint}" AutomationProperties.Name="{x:Static svc:Loc.ArtifactReduction}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:ArtifactReductionOption">
+                                                <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+
+                                <StackPanel Spacing="6" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel"
+                                            IsVisible="{Binding SupportsNoiseReduction}">
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.PhoneNoiseReduction}" ToolTip.Tip="{x:Static svc:Loc.PhoneNoiseReductionHint}" />
+                                    <ListBox Classes="segmented" ItemsSource="{Binding NoiseReductionOptions}" SelectedItem="{Binding SelectedNoiseReduction}"
+                                             IsEnabled="{Binding IsAvailable}" ToolTip.Tip="{x:Static svc:Loc.PhoneNoiseReductionHint}"
+                                             AutomationProperties.Name="{x:Static svc:Loc.PhoneNoiseReduction}">
+                                        <ListBox.Styles>
+                                            <!--  Modes the phone's camera does not have stay visible but cannot be picked  -->
+                                            <Style Selector="ListBoxItem" x:DataType="vm:NoiseReductionOption">
+                                                <Setter Property="IsEnabled" Value="{Binding IsOffered}" />
+                                            </Style>
+                                        </ListBox.Styles>
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:NoiseReductionOption">
+                                                <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Colour and sharpness  -->
+                            <StackPanel Spacing="10" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Classes="secondary" Height="28" Padding="10,0" FontSize="12"
+                                            Command="{Binding ResetColorCommand}" Content="{x:Static svc:Loc.ResetColor}"
+                                            ToolTip.Tip="{x:Static svc:Loc.ResetColorHint}" />
+                                    <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.ColorAndSharpness}" />
+                                </DockPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding BrightnessText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Brightness}" />
+                                    </DockPanel>
+                                    <Slider Minimum="-100" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Brightness}" AutomationProperties.Name="{x:Static svc:Loc.Brightness}" />
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ContrastText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Contrast}" />
+                                    </DockPanel>
+                                    <Slider Minimum="-100" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Contrast}" AutomationProperties.Name="{x:Static svc:Loc.Contrast}" />
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding SaturationText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Saturation}" />
+                                    </DockPanel>
+                                    <Slider Minimum="-100" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Saturation}" AutomationProperties.Name="{x:Static svc:Loc.Saturation}" />
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding ShadowsText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Shadows}" ToolTip.Tip="{x:Static svc:Loc.ShadowsHint}" />
+                                    </DockPanel>
+                                    <Slider Minimum="-100" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Shadows}" ToolTip.Tip="{x:Static svc:Loc.ShadowsHint}" AutomationProperties.Name="{x:Static svc:Loc.Shadows}" />
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding HighlightsText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Highlights}" ToolTip.Tip="{x:Static svc:Loc.HighlightsHint}" />
+                                    </DockPanel>
+                                    <Slider Minimum="-100" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Highlights}" ToolTip.Tip="{x:Static svc:Loc.HighlightsHint}" AutomationProperties.Name="{x:Static svc:Loc.Highlights}" />
+                                </StackPanel>
+
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding SharpnessText}" />
+                                        <TextBlock Classes="muted" Text="{x:Static svc:Loc.Sharpness}" />
+                                    </DockPanel>
+                                    <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                            Value="{Binding Sharpness}" AutomationProperties.Name="{x:Static svc:Loc.Sharpness}" />
+                                </StackPanel>
+                            </StackPanel>
+
+                            <!--  Last frame's cost on the GPU; why artifact removal is not running  -->
+                            <StackPanel Spacing="4" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
+                                <TextBlock Classes="muted" Text="{Binding ArtifactErrorText}" TextWrapping="Wrap" IsVisible="{Binding HasArtifactError}" />
                             </StackPanel>
                         </StackPanel>
                     </Border>

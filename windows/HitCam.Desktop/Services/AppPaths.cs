@@ -22,10 +22,18 @@ public sealed partial record AppSettings
     // initializer and would overwrite these defaults with zeros for fields an older file does not have.
     public string ServerId { get; set; } = Guid.NewGuid().ToString();
     public int Port { get; set; } = Core.Protocol.ProtocolInfo.DefaultPort;
-    /// <summary>NVIDIA AI noise removal (PC-side, RTX only).</summary>
-    public bool DenoiseEnabled { get; set; }
-    /// <summary>"fast", "general" or "maximum" (see <see cref="Services.DenoiseMode"/>); unknown values mean "general".</summary>
-    public string DenoiseMode { get; set; } = "general";
+    // Up to 0.2.3 there were also "denoiseEnabled" and "denoiseMode" (NVIDIA AI noise removal, removed): they are
+    // ignored when read and dropped on the next save.
+
+    /// <summary>Picture processing on this PC; everything off or neutral by default.</summary>
+    public ProcessingSettings Processing
+    {
+        get => _processing;
+        // "processing": null in a hand-edited file means defaults.
+        set => _processing = value ?? new ProcessingSettings();
+    }
+
+    private ProcessingSettings _processing = new();
 
     public static AppSettings Load() => Load(AppPaths.Settings);
 

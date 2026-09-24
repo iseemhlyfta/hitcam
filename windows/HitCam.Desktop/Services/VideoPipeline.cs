@@ -15,7 +15,7 @@ public sealed class VideoPipeline : IDisposable
     // Guards the handle against destruction while the UI thread copies the preview.
     private readonly Lock _bridgeLock = new();
     private IntPtr _bridge;
-    private DenoiseMode _denoise;
+    private HitCamProcessing _processing;
     private int _dropped;
     private long _decodedFrames;
     private volatile bool _isLinked;
@@ -46,38 +46,41 @@ public sealed class VideoPipeline : IDisposable
 
     public void ClearSignal() => TryAdd(null);
 
-    /// <summary>NVIDIA AI noise removal mode. Kept across decoder restarts; applied once the decoder exists.</summary>
-    public void SetDenoise(DenoiseMode mode)
+    /// <summary>
+    /// PC-side picture processing (noise reduction, colour, sharpness). Cheap: call on every slider change. Kept across
+    /// decoder restarts; applied once the decoder exists.
+    /// </summary>
+    public void SetProcessing(in HitCamProcessing settings)
     {
         lock (_bridgeLock)
         {
-            _denoise = mode;
+            _processing = settings;
             if (_bridge != IntPtr.Zero)
-                NativeMethods.HitCam_BridgeSetDenoiseMode(_bridge, (int)mode);
+                NativeMethods.HitCam_BridgeSetProcessing(_bridge, in _processing);
         }
     }
 
-    /// <summary>
-    /// Last denoised frame's time (ms, null if none yet), the NVIDIA status of a failed model load (0 if none),
-    /// the measured noise level (null before the first frame) and the amount applied to the last frame (0..1).
-    /// </summary>
-    public DenoiseStats DenoiseStats()
+    /// <summary>Last frame's processing times and the artifact reduction error (see <see cref="Services.ProcessingStats"/>).</summary>
+    public ProcessingStats ProcessingStats()
     {
         lock (_bridgeLock)
         {
             if (_bridge == IntPtr.Zero)
-                return new DenoiseStats(null, 0, null, 0);
-            NativeMethods.HitCam_BridgeDenoiseStats(_bridge, out var milliseconds, out var error, out var noise, out var amount);
-            return new DenoiseStats(milliseconds >= 0 ? milliseconds : null, error, noise >= 0 ? noise : null, amount);
+                return new ProcessingStats(null, null, 0);
+            NativeMethods.HitCam_BridgeProcessingStats(_bridge, out var gpu, out var artifact, out var error);
+            return new ProcessingStats(gpu >= 0 ? gpu : null, artifact >= 0 ? artifact : null, error);
         }
     }
 
-    /// <summary>Whether the NVIDIA Video Effects runtime is installed. Loads large NVIDIA libraries: call off the UI thread.</summary>
-    public static bool IsDenoiseAvailable()
+    /// <summary>
+    /// Whether NVIDIA RTX compression artifact reduction can run on this PC. May load large NVIDIA libraries: call off
+    /// the UI thread.
+    /// </summary>
+    public static bool IsArtifactReductionAvailable()
     {
         try
         {
-            return NativeMethods.HitCam_DenoiseAvailable();
+            return NativeMethods.HitCam_ArtifactReductionAvailable();
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
@@ -143,7 +146,7 @@ public sealed class VideoPipeline : IDisposable
         lock (_bridgeLock)
         {
             _bridge = bridge;
-            NativeMethods.HitCam_BridgeSetDenoiseMode(bridge, (int)_denoise);
+            NativeMethods.HitCam_BridgeSetProcessing(bridge, in _processing);
         }
         try
         {
@@ -202,19 +205,4 @@ public sealed class VideoPipeline : IDisposable
         _queue.CompleteAdding();
         _thread.Join(TimeSpan.FromSeconds(2));
     }
-}
-
-/// <summary>AI noise removal state of the last frame (see <see cref="VideoPipeline.DenoiseStats"/>).</summary>
-public readonly record struct DenoiseStats(double? Milliseconds, int Error, double? Noise, float Amount);
-
-/// <summary>AI noise removal modes; the numbers match HitCam_BridgeSetDenoiseMode.</summary>
-public enum DenoiseMode
-{
-    Off = 0,
-    /// <summary>Gentle model only as far as noise is measured; a clean picture is left untouched.</summary>
-    Fast = 1,
-    /// <summary>Gentle model on every frame.</summary>
-    General = 2,
-    /// <summary>Strong model on every frame.</summary>
-    Maximum = 3,
 }

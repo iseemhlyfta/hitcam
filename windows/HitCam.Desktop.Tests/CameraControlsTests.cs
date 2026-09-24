@@ -210,6 +210,43 @@ public sealed class CameraControlsTests
     }
 
     [Fact]
+    public void Phone_noise_reduction_offers_only_the_camera_s_modes()
+    {
+        Ready();
+        Assert.False(_controls.SupportsNoiseReduction);
+
+        _controls.ApplyState(Initial with { NoiseReduction = NoiseReductionModes.Fast, NoiseReductionModes = [NoiseReductionModes.Off, NoiseReductionModes.Fast] });
+
+        Assert.True(_controls.SupportsNoiseReduction);
+        Assert.Equal(["off", "fast", "high"], _controls.NoiseReductionOptions.Select(o => o.Id));
+        Assert.Equal([true, true, false], _controls.NoiseReductionOptions.Select(o => o.IsOffered));
+        Assert.Equal(NoiseReductionModes.Fast, _controls.SelectedNoiseReduction?.Id);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(300));
+        Assert.Empty(_sent);
+
+        // Not offered: nothing is sent and the selection stays.
+        _controls.SelectedNoiseReduction = _controls.NoiseReductionOptions.Single(o => o.Id == NoiseReductionModes.High);
+        Assert.Equal(NoiseReductionModes.Fast, _controls.SelectedNoiseReduction?.Id);
+        Assert.Empty(_sent);
+
+        _controls.SelectedNoiseReduction = _controls.NoiseReductionOptions.Single(o => o.Id == NoiseReductionModes.Off);
+        Assert.Equal(NoiseReductionModes.Off, Assert.Single(_sent).NoiseReduction);
+    }
+
+    [Fact]
+    public void Disconnect_hides_phone_noise_reduction()
+    {
+        Ready();
+        _controls.ApplyState(Initial with { NoiseReduction = NoiseReductionModes.High, NoiseReductionModes = [NoiseReductionModes.Off, NoiseReductionModes.High] });
+        Assert.True(_controls.SupportsNoiseReduction);
+
+        _controls.Reset();
+
+        Assert.False(_controls.SupportsNoiseReduction);
+        Assert.Null(_controls.SelectedNoiseReduction);
+    }
+
+    [Fact]
     public void An_older_phone_app_shows_no_new_settings()
     {
         _controls.ApplyCapabilities(new Capabilities(
@@ -221,6 +258,7 @@ public sealed class CameraControlsTests
         Assert.False(_controls.SupportsWhiteBalance);
         Assert.False(_controls.SupportsExposureLock);
         Assert.False(_controls.SupportsStabilization);
+        Assert.False(_controls.SupportsNoiseReduction);
     }
 
     [Fact]

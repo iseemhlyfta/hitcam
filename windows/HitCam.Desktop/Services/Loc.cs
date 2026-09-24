@@ -80,36 +80,50 @@ public static class Loc
     public static string StabilizationStandard => Russian ? "Обычная" : "Standard";
     public static string StabilizationCinematic => Russian ? "Кино" : "Cinematic";
 
-    // AI noise removal (on the PC)
-    public static string Denoise => Russian ? "ИИ-шумоподавление" : "AI noise removal";
-    public static string DenoiseHint => Russian
-        ? "Нейросеть NVIDIA убирает шум при слабом свете, не размывая детали. Работает на видеокарте ПК, телефон не нагружает."
-        : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the phone.";
-    public static string DenoiseFast => Russian ? "Быстрое" : "Fast";
-    public static string DenoiseGeneral => Russian ? "Общее" : "General";
-    public static string DenoiseMaximum => Russian ? "Максимальное" : "Maximum";
-    public static string DenoiseFastHint => Russian
-        ? "Включается только когда шум есть. Чистую картинку не трогает и видеокарту не нагружает."
-        : "Turns on only when there is noise. Leaves a clean picture alone and does not load the GPU.";
-    public static string DenoiseGeneralHint => Russian
-        ? "Мягкая модель на каждом кадре: убирает зерно и шум сжатия, сохраняет текстуру."
-        : "Gentle model on every frame: removes grain and compression noise, keeps texture.";
-    public static string DenoiseMaximumHint => Russian
-        ? "Сильная модель на каждом кадре: чище всего, но сглаживает и мелкие детали."
-        : "Strong model on every frame: cleanest, but also smooths fine detail.";
-    public static string DenoiseLoading => Russian ? "Загружаем модель…" : "Loading the model…";
-    public static string DenoiseIdle(double noise) => Russian
-        ? $"Шум {noise:0.0} — картинка чистая, обработка не нужна"
-        : $"Noise {noise:0.0}: the picture is clean, nothing to do";
-    public static string DenoiseActive(double noise, float amount, double milliseconds) => Russian
-        ? $"Шум {noise:0.0} — убираем на {amount:P0}, {milliseconds:0.0} мс на кадр"
-        : $"Noise {noise:0.0}: removing {amount:P0}, {milliseconds:0.0} ms per frame";
-    public static string DenoiseFailed(int code) =>
-        Russian ? $"Не запустилось (код NVIDIA {code}). Нужна видеокарта RTX." : $"Did not start (NVIDIA code {code}). Needs an RTX GPU.";
-    public static string DenoiseMissing => Russian
-        ? "Нужна видеокарта NVIDIA RTX и бесплатный компонент NVIDIA Video Effects."
-        : "Needs an NVIDIA RTX GPU and the free NVIDIA Video Effects component.";
-    public static string DenoiseDownload => Russian ? "Скачать компонент NVIDIA" : "Download the NVIDIA component";
+    // Phone camera noise reduction (on the phone, before compression)
+    public static string PhoneNoiseReduction => Russian ? "Шумоподавление камеры телефона" : "Phone camera noise reduction";
+    public static string PhoneNoiseReductionHint => Russian
+        ? "Работает на телефоне до сжатия видео. «Качество» чище, но может немного снизить частоту кадров"
+        : "Runs on the phone before the video is compressed. “Quality” is cleaner but may lower the frame rate a little";
+    public static string PhoneNoiseReductionOff => Russian ? "Выкл" : "Off";
+    public static string PhoneNoiseReductionFast => Russian ? "Быстрое" : "Fast";
+    public static string PhoneNoiseReductionHigh => Russian ? "Качество" : "Quality";
+
+    // Processing on the PC
+    public static string Processing => Russian ? "Обработка" : "Processing";
+    public static string ProcessingHint => Russian
+        ? "Работает на этом ПК и сразу видна в камере «HitCam». Телефон не нагружает"
+        : "Runs on this PC and shows in the “HitCam” camera right away. Does not load the phone";
+    public static string ProcessingOff => Russian ? "Выкл" : "Off";
+    public static string NoiseReduction => Russian ? "Шумоподавление" : "Noise reduction";
+    public static string TemporalNoiseReduction => Russian ? "Временное шумоподавление" : "Temporal noise reduction";
+    public static string TemporalNoiseReductionHint => Russian
+        ? "Усредняет соседние кадры и убирает зерно при слабом свете. На больших значениях движение может слегка смазываться"
+        : "Averages neighbouring frames to remove grain in low light. High values may slightly smear motion";
+    public static string ArtifactReduction => Russian ? "Удаление артефактов сжатия (NVIDIA RTX)" : "Compression artifact removal (NVIDIA RTX)";
+    public static string ArtifactReductionHint => Russian
+        ? "Нейросеть NVIDIA убирает блоки и ореолы сжатия. Работает на видеокарте RTX"
+        : "An NVIDIA neural network removes compression blocks and halos. Runs on the RTX GPU";
+    public static string ArtifactReductionGentle => Russian ? "Мягко" : "Gentle";
+    public static string ArtifactReductionStrong => Russian ? "Сильно" : "Strong";
+    public static string ColorAndSharpness => Russian ? "Цвет и резкость" : "Colour and sharpness";
+    public static string Brightness => Russian ? "Яркость" : "Brightness";
+    public static string Contrast => Russian ? "Контраст" : "Contrast";
+    public static string Saturation => Russian ? "Насыщенность" : "Saturation";
+    public static string Shadows => Russian ? "Тени" : "Shadows";
+    public static string ShadowsHint => Russian ? "Вправо — тёмные места светлее" : "Right: dark areas get brighter";
+    public static string Highlights => Russian ? "Света" : "Highlights";
+    public static string HighlightsHint => Russian ? "Влево — возвращает детали в пересвеченных местах" : "Left: recovers detail in overexposed areas";
+    public static string Sharpness => Russian ? "Резкость" : "Sharpness";
+    public static string ResetColor => Russian ? "Сбросить" : "Reset";
+    public static string ResetColorHint => Russian ? "Вернуть цвет и резкость к исходным" : "Return colour and sharpness to neutral";
+    public static string ProcessingTime(double milliseconds) =>
+        Russian ? $"Обработка: {milliseconds:0.0} мс" : $"Processing: {milliseconds:0.0} ms";
+    public static string ArtifactReductionTime(double milliseconds) =>
+        Russian ? $"артефакты: {milliseconds:0.0} мс" : $"artifacts: {milliseconds:0.0} ms";
+    public static string ArtifactReductionFailed(int code) => Russian
+        ? $"Удаление артефактов не работает (код NVIDIA {code}). Например, вертикальное видео не поддерживается."
+        : $"Artifact removal is not working (NVIDIA code {code}). Portrait video, for example, is not supported.";
 
     // Virtual camera status
     public static string CameraReadyTitle => Russian ? "Виртуальная камера «HitCam»" : "“HitCam” virtual camera";
