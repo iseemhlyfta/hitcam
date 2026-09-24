@@ -54,7 +54,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _isFullScreen;
     private bool _isDenoiseAvailable;
     private bool _isDenoiseEnabled;
-    private double _denoiseStrength;
+    private DenoiseModeOption _selectedDenoiseMode;
     private string _denoiseStatus = "";
 
     public MainViewModel()
@@ -122,11 +122,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         });
 
         _isDenoiseEnabled = _settings.DenoiseEnabled;
-        _denoiseStrength = Math.Clamp(_settings.DenoiseStrength, 0.05, 1);
-        // Saved once the slider rests, not on every step of a drag.
-        this.WhenAnyValue(x => x.DenoiseStrength).Skip(1)
-            .Throttle(TimeSpan.FromMilliseconds(500))
-            .Subscribe(_ => Dispatcher.UIThread.Post(SaveDenoiseSettings));
+        _selectedDenoiseMode = DenoiseModes.FirstOrDefault(o => o.Key == _settings.DenoiseMode) ?? DenoiseModes[1];
         _statsTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStats());
         _previewTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) => UpdatePreview());
     }
@@ -171,29 +167,37 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         }
     }
 
-    /// <summary>0.05..1: upper limit of noise removal; how much is applied follows the measured noise.</summary>
-    public double DenoiseStrength
+    /// <summary>The three buttons: fast, general, maximum.</summary>
+    public IReadOnlyList<DenoiseModeOption> DenoiseModes { get; } =
+    [
+        new("fast", DenoiseMode.Fast, Loc.DenoiseFast, Loc.DenoiseFastHint),
+        new("general", DenoiseMode.General, Loc.DenoiseGeneral, Loc.DenoiseGeneralHint),
+        new("maximum", DenoiseMode.Maximum, Loc.DenoiseMaximum, Loc.DenoiseMaximumHint),
+    ];
+
+    public DenoiseModeOption SelectedDenoiseMode
     {
-        get => _denoiseStrength;
+        get => _selectedDenoiseMode;
         set
         {
-            this.RaiseAndSetIfChanged(ref _denoiseStrength, value);
-            this.RaisePropertyChanged(nameof(DenoiseStrengthText));
+            // The segmented list briefly reports "nothing selected" while it rebuilds; keep the last choice then.
+            if (value is null || value == _selectedDenoiseMode)
+                return;
+            this.RaiseAndSetIfChanged(ref _selectedDenoiseMode, value);
             ApplyDenoise();
+            SaveDenoiseSettings();
         }
     }
 
-    public string DenoiseStrengthText => $"{DenoiseStrength:P0}";
-
-    /// <summary>Loading / time per frame / error, while enabled.</summary>
+    /// <summary>Loading / noise level / time per frame / error, while enabled.</summary>
     public string DenoiseStatus { get => _denoiseStatus; private set => this.RaiseAndSetIfChanged(ref _denoiseStatus, value); }
 
     private void ApplyDenoise() =>
-        _pipeline.SetDenoise(IsDenoiseAvailable && IsDenoiseEnabled ? (float)Math.Clamp(DenoiseStrength, 0.05, 1) : 0);
+        _pipeline.SetDenoise(IsDenoiseAvailable && IsDenoiseEnabled ? SelectedDenoiseMode.Mode : DenoiseMode.Off);
 
     private void SaveDenoiseSettings()
     {
-        _settings = _settings with { DenoiseEnabled = IsDenoiseEnabled, DenoiseStrength = Math.Round(DenoiseStrength, 2) };
+        _settings = _settings with { DenoiseEnabled = IsDenoiseEnabled, DenoiseMode = SelectedDenoiseMode.Key };
         _settings.Save();
     }
 
@@ -470,4 +474,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _pipeline.Dispose();
         _camera.Dispose();
     }
+}
+
+/// <param name="Key">Stored in settings.</param>
+/// <param name="Hint">What the mode does, shown under the buttons.</param>
+public sealed record DenoiseModeOption(string Key, DenoiseMode Mode, string Label, string Hint)
+{
+    public override string ToString() => Label;
 }

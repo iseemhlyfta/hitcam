@@ -33,7 +33,7 @@ extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
 extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
 extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 extern "C" BOOL __stdcall HitCam_DenoiseAvailable();
-extern "C" void __stdcall HitCam_BridgeSetDenoise(void* handle, float strength);
+extern "C" void __stdcall HitCam_BridgeSetDenoiseMode(void* handle, int mode);
 extern "C" void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error, double* noise, float* amount);
 
 namespace {
@@ -253,12 +253,12 @@ bool PreviewStats(void* bridge, double* mean, double* deviation) {
 }
 
 // Decodes a textured scene through a fresh bridge and returns the settled BGRA preview.
-bool RenderScene(int noise, float denoise, std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, double& milliseconds, double& noiseLevel, float& applied) {
+bool RenderScene(int noise, int denoise, std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, double& milliseconds, double& noiseLevel, float& applied) {
     TestEncoder encoder;
     encoder.UseScene();
     void* bridge = nullptr;
     if (FAILED(encoder.Initialize(1920, 1080, 30'000'000)) || FAILED(HitCam_BridgeCreate(&bridge))) return false;
-    HitCam_BridgeSetDenoise(bridge, denoise);
+    HitCam_BridgeSetDenoiseMode(bridge, denoise);
 
     int64_t time = 0;
     int settled = 0;
@@ -275,7 +275,7 @@ bool RenderScene(int noise, float denoise, std::vector<uint8_t>& pixels, uint32_
         uint64_t frame = 0;
         HitCam_BridgePreviewInfo(bridge, &width, &height, &frame);
         // Count frames once decoding runs and, with denoise, once the model runs or it decided nothing is needed.
-        if (frame > 0 && (denoise <= 0 || milliseconds >= 0 || (noiseLevel >= 0 && amount < 0.02f && frame > 30))) ++settled;
+        if (frame > 0 && (denoise == 0 || milliseconds >= 0 || (noiseLevel >= 0 && amount < 0.02f && frame > 30))) ++settled;
         else Sleep(20);
     }
     pixels.assign(static_cast<size_t>(width) * height * 4, 0);
@@ -290,10 +290,12 @@ bool RenderScene(int noise, float denoise, std::vector<uint8_t>& pixels, uint32_
 
 // --denoise-scene: does noise removal keep colour and detail on a textured picture (and not damage a clean one)?
 int RunSceneCheck() {
-    struct Case { const char* name; int noise; float denoise; };
+    struct Case { const char* name; int noise; int denoise; };
     const Case cases[] = {
-        {"clean", 0, 0}, {"light noise", 4, 0}, {"light noise + 100%", 4, 1.0f}, {"noisy", 12, 0}, {"noisy + 100%", 12, 1.0f},
-        {"dark room", 30, 0}, {"dark room + 100%", 30, 1.0f}, {"clean + 100%", 0, 1.0f},
+        // Modes: 1 fast, 2 general, 3 maximum.
+        {"clean", 0, 0}, {"clean + fast", 0, 1}, {"clean + general", 0, 2}, {"clean + maximum", 0, 3},
+        {"noisy", 12, 0}, {"noisy + fast", 12, 1}, {"noisy + general", 12, 2}, {"noisy + maximum", 12, 3},
+        {"dark room", 30, 0}, {"dark room + fast", 30, 1}, {"dark room + general", 30, 2}, {"dark room + maximum", 30, 3},
     };
     std::vector<uint8_t> reference;
     std::printf("%-20s %6s %6s %6s %6s %8s %7s %6s %8s\n", "case", "diff", "dB", "dG", "dR", "texture", "smooth", "noise", "applied");
@@ -377,8 +379,8 @@ int RunDenoiseCheck() {
     std::printf("OK: without denoise: mean %.1f, noise (std dev) %.1f\n", noisyMean, noisyDeviation);
 
     bool passed = true;
-    for (const float strength : {1.0f, 0.5f}) {
-        HitCam_BridgeSetDenoise(bridge, strength);
+    for (const int strength : {3, 2, 1}) {
+        HitCam_BridgeSetDenoiseMode(bridge, strength);
         double milliseconds = -1;
         int error = 0;
         double noiseLevel = -1;
@@ -400,7 +402,7 @@ int RunDenoiseCheck() {
         double mean = 0, deviation = 0;
         const bool ok = error == 0 && milliseconds >= 0 && PreviewStats(bridge, &mean, &deviation)
                         && deviation < noisyDeviation * 0.7 && std::abs(mean - noisyMean) < 4;
-        std::printf("%s: denoise %.1f: mean %.1f, noise %.1f (was %.1f), %.1f ms per frame, NvCV status %d\n",
+        std::printf("%s: denoise mode %d: mean %.1f, noise %.1f (was %.1f), %.1f ms per frame, NvCV status %d\n",
                     ok ? "OK" : "FAIL", strength, mean, deviation, noisyDeviation, milliseconds, error);
         passed = passed && ok;
     }

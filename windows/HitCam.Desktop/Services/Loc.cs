@@ -85,10 +85,18 @@ public static class Loc
     public static string DenoiseHint => Russian
         ? "Нейросеть NVIDIA убирает шум при слабом свете, не размывая детали. Работает на видеокарте ПК, iPhone не нагружает."
         : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the iPhone.";
-    public static string DenoiseStrength => Russian ? "Сила" : "Strength";
-    public static string DenoiseStrengthHint => Russian
-        ? "Сколько шума убирать, когда он есть. На чистой картинке обработка выключается сама, чтобы не портить детали."
-        : "How much noise to remove when there is some. On a clean picture processing turns itself off to keep detail.";
+    public static string DenoiseFast => Russian ? "Быстрое" : "Fast";
+    public static string DenoiseGeneral => Russian ? "Общее" : "General";
+    public static string DenoiseMaximum => Russian ? "Максимальное" : "Maximum";
+    public static string DenoiseFastHint => Russian
+        ? "Включается только когда шум есть. Чистую картинку не трогает и видеокарту не нагружает."
+        : "Turns on only when there is noise. Leaves a clean picture alone and does not load the GPU.";
+    public static string DenoiseGeneralHint => Russian
+        ? "Мягкая модель на каждом кадре: убирает зерно и шум сжатия, сохраняет текстуру."
+        : "Gentle model on every frame: removes grain and compression noise, keeps texture.";
+    public static string DenoiseMaximumHint => Russian
+        ? "Сильная модель на каждом кадре: чище всего, но сглаживает и мелкие детали."
+        : "Strong model on every frame: cleanest, but also smooths fine detail.";
     public static string DenoiseLoading => Russian ? "Загружаем модель…" : "Loading the model…";
     public static string DenoiseIdle(double noise) => Russian
         ? $"Шум {noise:0.0} — картинка чистая, обработка не нужна"

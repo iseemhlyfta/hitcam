@@ -240,14 +240,17 @@
                             </DockPanel>
                             <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseHint}" TextWrapping="Wrap" />
 
-                            <StackPanel IsVisible="{Binding IsDenoiseEnabled}">
-                                <DockPanel>
-                                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding DenoiseStrengthText}" />
-                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.DenoiseStrength}" />
-                                </DockPanel>
-                                <Slider Maximum="1" Minimum="0.05" Value="{Binding DenoiseStrength}" ToolTip.Tip="{x:Static svc:Loc.DenoiseStrengthHint}"
-                                        IsEnabled="{Binding IsDenoiseAvailable}" AutomationProperties.Name="{x:Static svc:Loc.DenoiseStrength}" />
-                                <TextBlock Classes="muted" Text="{Binding DenoiseStatus}" />
+                            <StackPanel Spacing="8" IsVisible="{Binding IsDenoiseEnabled}">
+                                <ListBox Classes="segmented" ItemsSource="{Binding DenoiseModes}" SelectedItem="{Binding SelectedDenoiseMode}"
+                                         IsEnabled="{Binding IsDenoiseAvailable}" AutomationProperties.Name="{x:Static svc:Loc.Denoise}">
+                                    <ListBox.ItemTemplate>
+                                        <DataTemplate x:DataType="vm:DenoiseModeOption">
+                                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" ToolTip.Tip="{Binding Hint}" />
+                                        </DataTemplate>
+                                    </ListBox.ItemTemplate>
+                                </ListBox>
+                                <TextBlock Classes="muted" Text="{Binding SelectedDenoiseMode.Hint}" TextWrapping="Wrap" />
+                                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding DenoiseStatus}" TextWrapping="Wrap" />
                             </StackPanel>
 
                             <StackPanel Spacing="6" IsVisible="{Binding IsDenoiseMissing}">

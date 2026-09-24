@@ -15,7 +15,7 @@ public sealed class VideoPipeline : IDisposable
     // Guards the handle against destruction while the UI thread copies the preview.
     private readonly Lock _bridgeLock = new();
     private IntPtr _bridge;
-    private float _denoise;
+    private DenoiseMode _denoise;
     private int _dropped;
     private long _decodedFrames;
     private volatile bool _isLinked;
@@ -46,16 +46,14 @@ public sealed class VideoPipeline : IDisposable
 
     public void ClearSignal() => TryAdd(null);
 
-    /// <summary>
-    /// NVIDIA AI noise removal strength, 0 (off) to 1. Kept across decoder restarts; applied once the decoder exists.
-    /// </summary>
-    public void SetDenoise(float strength)
+    /// <summary>NVIDIA AI noise removal mode. Kept across decoder restarts; applied once the decoder exists.</summary>
+    public void SetDenoise(DenoiseMode mode)
     {
         lock (_bridgeLock)
         {
-            _denoise = strength;
+            _denoise = mode;
             if (_bridge != IntPtr.Zero)
-                NativeMethods.HitCam_BridgeSetDenoise(_bridge, strength);
+                NativeMethods.HitCam_BridgeSetDenoiseMode(_bridge, (int)mode);
         }
     }
 
@@ -145,7 +143,7 @@ public sealed class VideoPipeline : IDisposable
         lock (_bridgeLock)
         {
             _bridge = bridge;
-            NativeMethods.HitCam_BridgeSetDenoise(bridge, _denoise);
+            NativeMethods.HitCam_BridgeSetDenoiseMode(bridge, (int)_denoise);
         }
         try
         {
@@ -208,3 +206,15 @@ public sealed class VideoPipeline : IDisposable
 
 /// <summary>AI noise removal state of the last frame (see <see cref="VideoPipeline.DenoiseStats"/>).</summary>
 public readonly record struct DenoiseStats(double? Milliseconds, int Error, double? Noise, float Amount);
+
+/// <summary>AI noise removal modes; the numbers match HitCam_BridgeSetDenoiseMode.</summary>
+public enum DenoiseMode
+{
+    Off = 0,
+    /// <summary>Gentle model only as far as noise is measured; a clean picture is left untouched.</summary>
+    Fast = 1,
+    /// <summary>Gentle model on every frame.</summary>
+    General = 2,
+    /// <summary>Strong model on every frame.</summary>
+    Maximum = 3,
+}

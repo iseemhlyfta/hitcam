@@ -33,7 +33,7 @@ internal static class NativeMethods
     public static extern bool HitCam_DenoiseAvailable();
 
     [DllImport(Library)]
-    public static extern void HitCam_BridgeSetDenoise(IntPtr handle, float strength);
+    public static extern void HitCam_BridgeSetDenoiseMode(IntPtr handle, int mode);
 
     [DllImport(Library)]
     public static extern void HitCam_BridgeDenoiseStats(IntPtr handle, out double milliseconds, out int error, out double noise, out float amount);

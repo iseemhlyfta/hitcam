@@ -388,9 +388,10 @@ __declspec(dllexport) BOOL __stdcall HitCam_DenoiseAvailable() {
     return hitcam::Denoiser::IsAvailable();
 }
 
-// Upper limit of noise removal, 0 (off) to 1; the applied amount follows the measured noise. Any thread.
-__declspec(dllexport) void __stdcall HitCam_BridgeSetDenoise(void* handle, float strength) {
-    if (handle) static_cast<hitcam::Bridge*>(handle)->sink.denoiser.SetStrength(strength);
+// Noise removal mode: 0 off, 1 fast (only as much as the measured noise needs), 2 general (gentle model on every
+// frame), 3 maximum (strong model on every frame). Any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetDenoiseMode(void* handle, int mode) {
+    if (handle && mode >= 0 && mode <= 3) static_cast<hitcam::Bridge*>(handle)->sink.denoiser.SetMode(static_cast<hitcam::Denoiser::Mode>(mode));
 }
 
 // Time the last denoised frame took (ms, -1 if none), the NvCV status of a failed model load (0 if none),

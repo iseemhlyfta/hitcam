@@ -22,8 +22,8 @@ public sealed record AppSettings
     public int Port { get; set; } = Core.Protocol.ProtocolInfo.DefaultPort;
     /// <summary>NVIDIA AI noise removal (PC-side, RTX only).</summary>
     public bool DenoiseEnabled { get; set; }
-    /// <summary>0..1: upper limit; the applied amount follows the measured noise (none on a clean picture).</summary>
-    public double DenoiseStrength { get; set; } = 1.0;
+    /// <summary>"fast", "general" or "maximum" (see <see cref="Services.DenoiseMode"/>); unknown values mean "general".</summary>
+    public string DenoiseMode { get; set; } = "general";
 
     public static AppSettings Load()
     {

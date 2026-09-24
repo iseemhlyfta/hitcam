@@ -144,20 +144,26 @@ double Denoiser::EstimateNoise(const uint8_t* luma, uint32_t width, uint32_t hei
 }
 
 bool Denoiser::Process(uint8_t* nv12, uint32_t width, uint32_t height) {
-    const float strength = strength_.load();
-    if (strength <= 0 || !IsAvailable()) return false;
+    const auto mode = static_cast<Mode>(mode_.load());
+    if (mode == Mode::Off || !IsAvailable()) return false;
 
-    // How noisy is the picture? Smoothed over ~20 frames so the amount does not flicker.
+    // How noisy is the picture? Smoothed over ~20 frames so the amount does not flicker. Shown in every mode.
     const double sigma = EstimateNoise(nv12, width, height);
     noise_ = noise_ < 0 ? sigma : noise_ * 0.95 + sigma * 0.05;
     lastNoise_ = noise_;
-    // The strong model removes about a third of fine detail and, measured on textured scenes, is worse than the
-    // gentle one even in a dark room (noise ~16); it is kept for extreme noise only. Hysteresis avoids reloading.
-    if (strongModel_ ? noise_ < kStrongModelOff : noise_ > kStrongModelOn) strongModel_ = !strongModel_;
-    const unsigned model = strongModel_ ? 1 : 0;
-    // A clean picture is left alone: the network has nothing to remove there and only adds its own artifacts.
-    const double need = std::clamp((noise_ - kNoiseIgnored) / (kNoiseFull - kNoiseIgnored), 0.0, 1.0);
-    const float amount = static_cast<float>(strength * need);
+
+    unsigned model = 0;
+    float amount = 1.0f;
+    if (mode == Mode::Maximum) {
+        model = 1;
+    } else if (mode == Mode::Fast) {
+        // The strong model removes about a third of fine detail and, measured on textured scenes, is worse than
+        // the gentle one even in a dark room (noise ~16), so here it is kept for extreme noise only.
+        if (strongModel_ ? noise_ < kStrongModelOff : noise_ > kStrongModelOn) strongModel_ = !strongModel_;
+        model = strongModel_ ? 1 : 0;
+        // A clean picture is left alone: the network has nothing to remove there and only adds its own artifacts.
+        amount = static_cast<float>(std::clamp((noise_ - kNoiseIgnored) / (kNoiseFull - kNoiseIgnored), 0.0, 1.0));
+    }
     lastAmount_ = amount;
 
     {
