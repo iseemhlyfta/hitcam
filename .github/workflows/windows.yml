@@ -4,9 +4,9 @@ on:
   # Branches only: a release tag builds through release.yml, not a second time here.
   push:
     branches: ["**"]
-    paths: ["windows/**", "docs/protocol.md", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "vision/export_default.py", "vision/common.py", "vision/requirements-export.txt", "docs/protocol.md", ".github/workflows/windows.yml"]
   pull_request:
-    paths: ["windows/**", "docs/protocol.md", ".github/workflows/windows.yml"]
+    paths: ["windows/**", "vision/export_default.py", "vision/common.py", "vision/requirements-export.txt", "docs/protocol.md", ".github/workflows/windows.yml"]
   workflow_dispatch:
   workflow_call:
 
@@ -28,6 +28,7 @@ jobs:
         run: |
           dotnet test HitCam.Core.Tests -c Release
           dotnet test HitCam.Desktop.Tests -c Release
+          dotnet test HitCam.Vision.Tests -c Release
       # Also builds the C++ virtual camera (HitCam.VCam) through build.ps1.
       - name: Publish desktop app
         run: dotnet publish HitCam.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ../out/HitCam
@@ -36,6 +37,24 @@ jobs:
         run: |
           foreach ($dll in "HitCamVCam.dll", "HitCamDShow.dll", "HitCamDShow32.dll") {
             if (-not (Test-Path "../out/HitCam/$dll")) { throw "$dll is missing from the published app" }
+          }
+      # The default object detection model (RF-DETR Nano, Apache 2.0) is exported here rather than committed.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: vision/requirements-export.txt
+      - name: Export default vision model
+        working-directory: vision
+        run: |
+          python -m pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install --quiet -r requirements-export.txt
+          python export_default.py --cpu --out ../out/HitCam/models
+      - name: Check vision model
+        shell: pwsh
+        run: |
+          foreach ($file in "models/rfdetr-nano.onnx", "models/rfdetr-nano.labels.json", "onnxruntime.dll", "DirectML.dll") {
+            if (-not (Test-Path "../out/HitCam/$file")) { throw "$file is missing from the published app" }
           }
       - uses: actions/upload-artifact@v4
         with:

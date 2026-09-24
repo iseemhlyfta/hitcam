@@ -57,6 +57,17 @@ try {
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     Copy-Item -Path (Join-Path $publishDir "*") -Destination $installDir -Recurse -Force
     Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $installDir "install.ps1") -Force
+
+    # Object detection models are not in git (release builds get them from CI): take the ones exported locally.
+    $models = Get-ChildItem -Path (Join-Path $PSScriptRoot "..\vision\output\models") -File -ErrorAction SilentlyContinue |
+        Where-Object { $_.Name -match '^rfdetr-(nano|small)\.(onnx|labels\.json)$' }
+    if ($models) {
+        $modelsDir = New-Item -ItemType Directory -Force -Path (Join-Path $installDir "models")
+        $models | Copy-Item -Destination $modelsDir -Force
+    } else {
+        Write-Host "No object detection model found. To enable 'Анализ объектов', run from the vision folder:"
+        Write-Host "  python export_default.py --out $installDir\models   (see vision\README.md)"
+    }
 }
 finally {
     Remove-Item -LiteralPath $buildDir, $publishDir -Recurse -Force -ErrorAction SilentlyContinue
