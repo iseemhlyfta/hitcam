@@ -11,7 +11,7 @@ namespace hitcam {
 
 // AI video noise removal with the NVIDIA Video Effects SDK ("Denoising" effect) on RTX GPUs.
 // The SDK is a separate NVIDIA install; without it Process() passes frames through untouched.
-// Used from the decoder thread; SetMode may be called from any thread.
+// Used from the decoder thread; SetMode and the statistics may be called from any thread.
 class Denoiser {
 public:
     enum class Mode : int {
@@ -25,6 +25,7 @@ public:
     };
 
     Denoiser();
+    // Waits for a model load in progress (can take seconds); holds no lock meanwhile.
     ~Denoiser();
 
     void SetMode(Mode mode) { mode_.store(static_cast<int>(mode)); }
@@ -43,16 +44,26 @@ public:
     static constexpr double kNoiseFull = 4.0;
     static constexpr double kStrongModelOn = 20.0;
     static constexpr double kStrongModelOff = 15.0;
+    // Consecutive failed frames after which the model is unloaded and the failure reported.
+    static constexpr int kMaxRunFailures = 30;
 
     bool IsEnabled() const { return mode_.load() != static_cast<int>(Mode::Off); }
 
     // Denoises a contiguous NV12 frame (pitch == width) in place. Returns true if the frame was changed.
     bool Process(uint8_t* nv12, uint32_t width, uint32_t height);
 
+    // Decoder thread, for frames that are not passed to Process: once switched off, frees the model and its GPU
+    // memory, and forgets a failure so switching on again retries.
+    void ReleaseIfOff();
+
+    // Decoder thread: the picture was interrupted (phone disconnected); the next frames start a new scene.
+    void Reset();
+
     // Milliseconds the last denoised frame took, or -1.
     double LastMilliseconds() const { return lastMs_.load(); }
 
-    // NvCV status of the last failed load (0 = none): lets the UI explain why it does not work.
+    // NvCV status of the last failed load, or of processing that kept failing (0 = none): lets the UI explain
+    // why it does not work instead of waiting for the model forever.
     int LastError() const { return lastError_.load(); }
 
     // Whether the NVIDIA runtime is installed and can create the effect (loads the libraries once; cached).
@@ -62,23 +73,30 @@ private:
     struct Effect;
 
     void StartLoad(uint32_t width, uint32_t height, unsigned model);
+    void Unload();
 
     std::atomic<int> mode_{0};
     std::atomic<double> lastMs_{-1};
     std::atomic<int> lastError_{0};
     std::atomic<double> lastNoise_{-1};
     std::atomic<float> lastAmount_{0};
+
+    // Decoder thread only.
     double noise_ = -1;
     bool strongModel_ = false;
-
-    std::mutex lock_;
-    std::unique_ptr<Effect> effect_;   // ready to run, owned by the decoder thread while in use
-    std::unique_ptr<Effect> loaded_;   // handed over by the loader thread
+    bool skipped_ = false;
+    int runFailures_ = 0;
+    std::unique_ptr<Effect> effect_;
     std::thread loader_;
-    std::atomic<bool> loading_{false};
     uint32_t wantedWidth_ = 0, wantedHeight_ = 0;
     unsigned wantedModel_ = 0;
     std::vector<uint8_t> original_;
+
+    // Shared with the loader thread. A load started before the latest Unload (older generation) is discarded.
+    std::mutex lock_;
+    std::unique_ptr<Effect> loaded_;
+    bool loading_ = false;
+    uint64_t generation_ = 0;
 };
 
 }  // namespace hitcam

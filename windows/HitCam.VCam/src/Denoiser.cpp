@@ -27,6 +27,8 @@ std::string SdkDirectory() {
 
 // The SDK has no stream sync of its own, and it links the CUDA runtime statically (no cudart DLL to borrow from).
 // The driver API is always there with an NVIDIA driver and takes the same stream handle.
+// Anything but CUDA_SUCCESS (0) is a failure; CUDA_ERROR_INVALID_CONTEXT (201) in particular means this thread
+// has no context for the stream, so the frame was never waited for and must not be published.
 bool SynchronizeStream(CUstream stream) {
     using Sync = int(__stdcall*)(CUstream);
     static const Sync sync = [] {
@@ -85,11 +87,20 @@ struct Denoiser::Effect {
         if (status == NVCV_SUCCESS && !SynchronizeStream(stream)) status = NVCV_ERR_CUDA;
         return status;
     }
+
+    // The effect is temporal: frames from before a cut would otherwise bleed into the new picture.
+    void ResetState() {
+        if (handle && state) NvVFX_ResetState(handle, state);
+    }
 };
 
 Denoiser::Denoiser() = default;
 
 Denoiser::~Denoiser() {
+    {
+        std::lock_guard guard(lock_);
+        ++generation_;  // a load still running is thrown away (and freed) by the loader itself
+    }
     if (loader_.joinable()) loader_.join();
 }
 
@@ -101,24 +112,86 @@ bool Denoiser::IsAvailable() {
     return available;
 }
 
+// Called only while no load runs (loading_ was false under lock_); only this thread sets it back to true.
 void Denoiser::StartLoad(uint32_t width, uint32_t height, unsigned model) {
+    // The previous loader has already finished, so this join is immediate.
     if (loader_.joinable()) loader_.join();
     wantedWidth_ = width;
     wantedHeight_ = height;
     wantedModel_ = model;
-    loading_ = true;
-    loader_ = std::thread([this, width, height, model] {
-        auto effect = std::make_unique<Effect>();
-        const NvCV_Status status = effect->Load(width, height, model);
-        if (status == NVCV_SUCCESS) {
-            std::lock_guard guard(lock_);
-            loaded_ = std::move(effect);
-            lastError_ = 0;
-        } else {
-            lastError_ = status;
-        }
+    uint64_t generation = 0;
+    {
+        std::lock_guard guard(lock_);
+        loading_ = true;
+        generation = generation_;
+    }
+    try {
+        loader_ = std::thread([this, width, height, model, generation] {
+            std::unique_ptr<Effect> effect;
+            NvCV_Status status = NVCV_ERR_MEMORY;
+            try {
+                effect = std::make_unique<Effect>();
+                status = effect->Load(width, height, model);
+            } catch (...) {
+                status = NVCV_ERR_MEMORY;
+            }
+            std::unique_ptr<Effect> discarded;
+            {
+                std::lock_guard guard(lock_);
+                loading_ = false;
+                if (generation != generation_) {
+                    // Switched off (or destroyed) meanwhile: nobody wants this model any more.
+                    discarded = std::move(effect);
+                } else if (status == NVCV_SUCCESS) {
+                    discarded = std::move(loaded_);
+                    loaded_ = std::move(effect);
+                    lastError_ = 0;
+                } else {
+                    discarded = std::move(effect);
+                    lastError_ = status;
+                }
+            }
+            // GPU memory is released outside the lock.
+        });
+    } catch (...) {
+        std::lock_guard guard(lock_);
         loading_ = false;
-    });
+        lastError_ = NVCV_ERR_MEMORY;
+    }
+}
+
+void Denoiser::Unload() {
+    std::unique_ptr<Effect> pending;
+    {
+        std::lock_guard guard(lock_);
+        ++generation_;
+        pending = std::move(loaded_);
+    }
+    effect_.reset();
+    pending.reset();
+    wantedWidth_ = wantedHeight_ = 0;
+    wantedModel_ = 0;
+    runFailures_ = 0;
+    skipped_ = false;
+    lastMs_ = -1;
+}
+
+void Denoiser::ReleaseIfOff() {
+    if (IsEnabled()) return;
+    bool pending = false;
+    {
+        std::lock_guard guard(lock_);
+        pending = loaded_ != nullptr || loading_;
+    }
+    if (effect_ || pending) Unload();
+    // Switching on again starts afresh: a load that failed before is retried.
+    lastError_ = 0;
+    strongModel_ = false;
+}
+
+void Denoiser::Reset() {
+    if (effect_) effect_->ResetState();
+    skipped_ = false;
 }
 
 double Denoiser::EstimateNoise(const uint8_t* luma, uint32_t width, uint32_t height) {
@@ -166,28 +239,54 @@ bool Denoiser::Process(uint8_t* nv12, uint32_t width, uint32_t height) {
     }
     lastAmount_ = amount;
 
+    std::unique_ptr<Effect> replaced;
+    bool loading = false;
     {
         std::lock_guard guard(lock_);
-        if (loaded_) effect_ = std::move(loaded_);
+        if (loaded_) {
+            replaced = std::move(effect_);
+            effect_ = std::move(loaded_);
+            runFailures_ = 0;
+        }
+        loading = loading_;
     }
+    replaced.reset();
 
     const bool wantedChanged = wantedWidth_ != width || wantedHeight_ != height || wantedModel_ != model;
     const bool effectMatches = effect_ && effect_->width == width && effect_->height == height && effect_->model == model;
-    // A failed load is not retried until the size or model changes.
-    if (!effectMatches && !loading_ && (wantedChanged || lastError_ == 0)) StartLoad(width, height, model);
+    // A failed load (or a model that kept failing) is not retried until the size or model changes.
+    if (!effectMatches && !loading && (wantedChanged || lastError_ == 0)) StartLoad(width, height, model);
     // While the other model loads, keep using the current one if it fits this frame size.
     if (!effect_ || effect_->width != width || effect_->height != height) return false;
-    if (amount < 0.02f) return false;
+    if (amount < 0.02f) {
+        skipped_ = true;
+        return false;
+    }
+    if (skipped_) {
+        // Fast mode resumes after frames it left alone: the effect's memory of the scene is out of date.
+        effect_->ResetState();
+        skipped_ = false;
+    }
 
     // Mixing with the original gives a continuous amount on top of the effect's two levels.
     const size_t size = static_cast<size_t>(width) * height * 3 / 2;
     if (amount < 0.999f) original_.assign(nv12, nv12 + size);
 
     const auto start = std::chrono::steady_clock::now();
-    if (effect_->Run(nv12) != NVCV_SUCCESS) {
+    const NvCV_Status status = effect_->Run(nv12);
+    if (status != NVCV_SUCCESS) {
         if (amount < 0.999f) std::memcpy(nv12, original_.data(), size);
+        if (++runFailures_ >= kMaxRunFailures) {
+            // The GPU keeps failing (driver reset, lost context, out of memory): report it instead of retrying
+            // forever. wanted* stay as they are, so the error holds until the size, model or mode changes.
+            effect_.reset();
+            runFailures_ = 0;
+            lastMs_ = -1;
+            lastError_ = status;
+        }
         return false;
     }
+    runFailures_ = 0;
     if (amount < 0.999f) {
         const int weight = static_cast<int>(amount * 256);
         for (size_t i = 0; i < size; ++i) {
