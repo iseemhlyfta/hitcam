@@ -1,6 +1,6 @@
 name: Release
 
-# Push a tag like v0.1.0 to build both apps and publish them as a GitHub release.
+# Push a tag like v0.1.0 to build all apps and publish them as a GitHub release.
 on:
   push:
     tags: ["v*"]
@@ -16,8 +16,13 @@ jobs:
   ios:
     uses: ./.github/workflows/ios.yml
 
+  # Secrets carry the Android release signing key (see android.yml).
+  android:
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+
   publish:
-    needs: [windows, ios]
+    needs: [windows, ios, android]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -30,13 +35,18 @@ jobs:
         with:
           name: HitCam-ios-unsigned-ipa
           path: ios
+      - uses: actions/download-artifact@v4
+        with:
+          name: HitCam-android-apk
+          path: android
 
       - name: Package
         run: |
           test -f HitCam/HitCam.exe && test -f HitCam/HitCamVCam.dll
           (cd HitCam && zip -r ../HitCam-windows-x64.zip .)
           cp ios/HitCam-unsigned.ipa HitCam-ios-unsigned.ipa
-          ls -la *.zip *.ipa
+          cp android/HitCam-android.apk HitCam-android.apk
+          ls -la *.zip *.ipa *.apk
 
       - name: Create release
         env:
@@ -49,6 +59,9 @@ jobs:
 
           **iPhone:** установите `HitCam-ios-unsigned.ipa` через Sideloadly —
           см. [docs/install-ios.md](https://github.com/${{ github.repository }}/blob/main/docs/install-ios.md).
+
+          **Android 8.0+:** скачайте `HitCam-android.apk` на телефон и установите —
+          см. [docs/install-android.md](https://github.com/${{ github.repository }}/blob/main/docs/install-android.md).
           EOF
-          gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa \
+          gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
             --repo "${{ github.repository }}" --title "HitCam $TAG" --notes-file notes.md --generate-notes

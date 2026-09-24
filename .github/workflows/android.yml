@@ -1,0 +1,75 @@
+name: Android
+
+on:
+  # Branches only: a release tag builds through release.yml, not a second time here.
+  push:
+    branches: ["**"]
+    paths: ["android/**", ".github/workflows/android.yml"]
+  pull_request:
+    paths: ["android/**", ".github/workflows/android.yml"]
+  workflow_dispatch:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash   # -eo pipefail
+        working-directory: android
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      # The Android SDK is preinstalled on ubuntu runners (ANDROID_HOME).
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Without the secret (e.g. pull requests from forks) Gradle signs the release APK with the debug key.
+      - name: Decode release keystore
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hitcam.jks"
+            echo "HITCAM_KEYSTORE=$RUNNER_TEMP/hitcam.jks" >> "$GITHUB_ENV"
+            echo "::notice::Release APK is signed with the release key"
+          else
+            echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: release APK is signed with the debug key"
+          fi
+
+      - name: Unit tests and release APK
+        env:
+          HITCAM_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          HITCAM_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          HITCAM_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon testDebugUnitTest assembleRelease
+
+      - name: Package APK
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk HitCam-android.apk
+          SIZE=$(du -h HitCam-android.apk | cut -f1)
+          if [ -n "${HITCAM_KEYSTORE:-}" ]; then SIGNED="release key"; else SIGNED="debug key"; fi
+          echo "::notice::HitCam-android.apk: $SIZE, signed with the $SIGNED"
+          echo "### HitCam-android.apk: $SIZE, signed with the $SIGNED" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: HitCam-android-apk
+          path: android/HitCam-android.apk
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: android-test-reports
+          path: android/app/build/reports/
+          if-no-files-found: ignore
