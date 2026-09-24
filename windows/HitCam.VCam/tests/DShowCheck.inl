@@ -161,7 +161,96 @@ bool Feed(void* bridge, UINT32 width, UINT32 height, uint8_t luma, int rounds) {
 }
 
 // `installed`: the camera registered in the system (--dshow-installed) instead of the DLL next to this test.
+// How long converting one frame takes (the sender does it for every frame; above ~30 ms the camera loses frames).
+void MeasureConversion() {
+    struct Case { uint32_t width, height; const char* name; };
+    for (const Case c : {Case{1920, 1080, "1080p"}, Case{1280, 720, "720p"}, Case{1080, 1920, "portrait 1080p"}}) {
+        std::vector<uint8_t> nv12(static_cast<size_t>(c.width) * c.height * 3 / 2, 128);
+        std::vector<uint8_t> bgr(static_cast<size_t>(kWidth) * kHeight * 3);
+        HitCam_DShowConvert(nv12.data(), c.width, c.height, bgr.data());  // warm-up
+        LARGE_INTEGER frequency, start, end;
+        QueryPerformanceFrequency(&frequency);
+        QueryPerformanceCounter(&start);
+        constexpr int kRounds = 20;
+        for (int i = 0; i < kRounds; ++i) HitCam_DShowConvert(nv12.data(), c.width, c.height, bgr.data());
+        QueryPerformanceCounter(&end);
+        const double ms = (end.QuadPart - start.QuadPart) * 1000.0 / frequency.QuadPart / kRounds;
+        char what[96];
+        std::snprintf(what, sizeof(what), "%s converts in %.1f ms (limit 10 ms)", c.name, ms);
+        Check(ms < 10.0, what);
+    }
+}
+
+// Records when each frame passes the grabber. The grabber hands the frame on to the renderer in the same call,
+// so a renderer holding frames (bad timestamps) shows up as gaps here too.
+class ArrivalLog : public ISampleGrabberCB {
+public:
+    STDMETHODIMP QueryInterface(REFIID riid, void** out) override {
+        if (riid == IID_IUnknown || riid == __uuidof(ISampleGrabberCB)) {
+            *out = static_cast<ISampleGrabberCB*>(this);
+            return S_OK;
+        }
+        *out = nullptr;
+        return E_NOINTERFACE;
+    }
+    STDMETHODIMP_(ULONG) AddRef() override { return 2; }
+    STDMETHODIMP_(ULONG) Release() override { return 1; }
+    STDMETHODIMP SampleCB(double, IMediaSample*) override { return S_OK; }
+    STDMETHODIMP BufferCB(double, BYTE*, long) override {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        std::lock_guard guard(lock_);
+        times_.push_back(now.QuadPart);
+        return S_OK;
+    }
+
+    std::vector<LONGLONG> Take() {
+        std::lock_guard guard(lock_);
+        return std::exchange(times_, {});
+    }
+
+private:
+    std::mutex lock_;
+    std::vector<LONGLONG> times_;
+};
+
+// 5 s of steady 30 fps from the decoder bridge: how many frames the app gets and the longest pause between them.
+void MeasureSmoothness(Graph& graph, void* bridge) {
+    TestEncoder encoder;
+    if (FAILED(encoder.Initialize(1920, 1080))) return;
+    // Encode first, so the encoder's speed does not disturb the timing.
+    std::vector<std::vector<uint8_t>> frames;
+    for (int i = 0; i < 160; ++i) {
+        std::vector<std::vector<uint8_t>> units;
+        if (FAILED(encoder.Encode(static_cast<uint8_t>(60 + (i % 2) * 100), units))) return;
+        for (auto& unit : units) frames.push_back(std::move(unit));
+    }
+    ArrivalLog log;
+    graph.grabber->SetCallback(&log, 1);
+    LARGE_INTEGER frequency, start, now;
+    QueryPerformanceFrequency(&frequency);
+    QueryPerformanceCounter(&start);
+    for (size_t i = 0; i < frames.size() && i < 150; ++i) {
+        HitCam_BridgeDecode(bridge, frames[i].data(), static_cast<uint32_t>(frames[i].size()), static_cast<int64_t>(i) * 333'333);
+        // Next frame exactly 1/30 s after the previous one (real time, like the phone).
+        const LONGLONG due = start.QuadPart + static_cast<LONGLONG>((i + 1) * frequency.QuadPart / 30);
+        do {
+            Sleep(1);
+            QueryPerformanceCounter(&now);
+        } while (now.QuadPart < due);
+    }
+    Sleep(300);
+    graph.grabber->SetCallback(nullptr, 1);
+    const auto times = log.Take();
+    double maxGap = 0;
+    for (size_t i = 1; i < times.size(); ++i) maxGap = std::max(maxGap, (times[i] - times[i - 1]) * 1000.0 / frequency.QuadPart);
+    char what[128];
+    std::snprintf(what, sizeof(what), "steady 30 fps: %zu of 150 frames delivered, longest pause %.0f ms", times.size(), maxGap);
+    Check(times.size() >= 135 && maxGap < 120, what);
+}
+
 int Run(bool installed) {
+    MeasureConversion();
     HRESULT hr = HitCam_DShowStart();
     if (FAILED(hr)) return Fail("HitCam_DShowStart", hr);
     Check(HitCam_DShowStart() == S_OK, "starting again is harmless");
@@ -218,6 +307,8 @@ int Run(bool installed) {
               "picture is upright and not mirrored");
         std::printf("      left top %d, left bottom %d, right %d\n", Gray(bgr, 480, 80), Gray(bgr, 480, 1000), Gray(bgr, 1440, 540));
     }
+
+    MeasureSmoothness(graph, bridge);
 
     // Phone gone: back to "no signal".
     HitCam_BridgeClearSignal(bridge);

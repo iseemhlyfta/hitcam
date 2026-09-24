@@ -9,5 +9,8 @@ Used for the "HitCam" camera on Windows 10, which has no Media Foundation virtua
 Changes from upstream:
 - `src/softcamcore/FrameBuffer.cpp`: the shared memory and mutex are named `HitCam DirectShow/...`, so HitCam never
   exchanges frames with other Softcam-based cameras.
+- `src/softcamcore/DShowSoftcam.cpp/.h`: frames are stamped with the graph's stream time (live source) instead of a
+  fixed per-frame interval that drifted from real time (renderers then held or dropped frames); frames prepared
+  before the graph runs carry no timestamps. An unpaced camera advertises 30 fps instead of 60.
 - Not copied: `src/softcam` (the DLL entry, replaced by `../../src/dshow/HitCamDShow.cpp` with HitCam's own CLSID
   and name), the Visual Studio projects, examples and tests.

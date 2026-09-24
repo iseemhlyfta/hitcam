@@ -31,6 +31,8 @@
 #include <cstdio>
 #include <cstring>
 #include <string>
+#include <mutex>
+#include <utility>
 #include <vector>
 
 #include "../src/Shared.h"
@@ -45,6 +47,7 @@ extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
 extern "C" void __stdcall HitCam_BridgeClearSignal(void* handle);
 extern "C" HRESULT __stdcall HitCam_DShowStart();
 extern "C" void __stdcall HitCam_DShowStop();
+extern "C" void __stdcall HitCam_DShowConvert(const uint8_t* nv12, uint32_t width, uint32_t height, uint8_t* bgr);
 extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
 extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 extern "C" BOOL __stdcall HitCam_DenoiseAvailable();

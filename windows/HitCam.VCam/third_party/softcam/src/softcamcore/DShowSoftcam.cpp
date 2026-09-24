@@ -107,7 +107,7 @@ void fillMediaType(AM_MEDIA_TYPE* amt, int width, int height, float framerate)
 
     if (framerate <= 0.0f)
     {
-        framerate = 60.0f;
+        framerate = 30.0f;  // HitCam: the phone streams 30 fps by default (upstream: 60)
     }
     const float bit_rate = (float)width * (float)height * 24 * framerate;
     const float period = 10 * 1000 * 1000 / framerate;
@@ -358,6 +358,32 @@ FrameBuffer* Softcam::getFrameBuffer()
     }
 }
 
+bool
+Softcam::streamTime(REFERENCE_TIME* out_time)
+{
+    // Not under the filter lock: Stop() holds it while waiting for the streaming thread that calls this.
+    // Until the graph runs there is no start time yet: those frames go without timestamps (shown right away).
+    if (m_State != State_Running)
+    {
+        return false;
+    }
+    IReferenceClock* clock = m_pClock;
+    if (!clock)
+    {
+        return false;
+    }
+    clock->AddRef();
+    REFERENCE_TIME now = 0;
+    const bool ok = SUCCEEDED(clock->GetTime(&now));
+    clock->Release();
+    if (!ok)
+    {
+        return false;
+    }
+    *out_time = now - m_tStart;
+    return true;
+}
+
 void
 Softcam::releaseFrameBuffer()
 {
@@ -450,10 +476,20 @@ HRESULT SoftcamStream::FillBuffer(IMediaSample *pms)
             std::memcpy(pData, m_screenshot.get(), size);
         }
 
-        CAutoLock lock(&m_critsec);
-        CRefTime start = m_sample_time;
-        m_sample_time += (LONG)m_interval_time_msec;
-        pms->SetTime((REFERENCE_TIME*)&start,(REFERENCE_TIME*)&m_sample_time);
+        // HitCam: a live source stamps each frame with the stream time it was captured at. Upstream added a
+        // fixed interval (1/60 s by default) per frame instead, which drifts from real time when frames come at
+        // another rate, so renderers dropped or held frames: stutter and growing delay.
+        REFERENCE_TIME now = 0;
+        if (getParent()->streamTime(&now))
+        {
+            REFERENCE_TIME end = now + 10'000'000 / 30;
+            pms->SetTime(&now, &end);
+        }
+        else
+        {
+            // No reference clock: the graph renders frames as they come.
+            pms->SetTime(nullptr, nullptr);
+        }
     }
     pms->SetSyncPoint(TRUE);
     //LOG("-> NOERROR\n");
@@ -533,7 +569,7 @@ HRESULT SoftcamStream::OnThreadCreate()
     float framerate = getParent()->framerate();
     if (framerate <= 0.0f)
     {
-        framerate = 60.0f;
+        framerate = 30.0f;  // HitCam: the phone streams 30 fps by default (upstream: 60)
     }
     framerate = (std::min)((std::max)(framerate, 1.0f), 1000.0f);
     m_interval_time_msec = (long)std::round(1000.0f / framerate);

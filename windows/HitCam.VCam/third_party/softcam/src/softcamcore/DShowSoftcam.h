@@ -32,6 +32,8 @@ public:
     int             height() const { return m_height; }
     float           framerate() const { return m_framerate; }
     void            releaseFrameBuffer();
+    // HitCam: the graph's current stream time, for live timestamps; false without a reference clock.
+    bool            streamTime(REFERENCE_TIME* out_time);
 
 private:
     CCritSec    m_critsec;

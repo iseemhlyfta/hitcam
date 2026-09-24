@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstring>
+#include <execution>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -147,7 +148,42 @@ void Submit(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t
 
 void ClearSignal() { Instance().ClearSignal(); }
 
+namespace {
+
+// BT.709, video range (what phone H.264 uses for HD), as in the preview.
+inline void StorePixel(uint8_t* out, int lumaValue, int d, int e) {
+    const int c = 298 * (lumaValue - 16);
+    out[0] = Clamp((c + 541 * d + 128) >> 8);
+    out[1] = Clamp((c - 55 * d - 136 * e + 128) >> 8);
+    out[2] = Clamp((c + 459 * e + 128) >> 8);
+}
+
+// Same size (the usual 1920x1080): no scaling, two pixels per chroma sample.
+void ConvertRowDirect(const uint8_t* lumaRow, const uint8_t* chromaRow, uint32_t width, uint8_t* out) {
+    for (uint32_t x = 0; x + 1 < width; x += 2) {
+        const int d = chromaRow[x] - 128;
+        const int e = chromaRow[x + 1] - 128;
+        StorePixel(out + x * 3, lumaRow[x], d, e);
+        StorePixel(out + x * 3 + 3, lumaRow[x + 1], d, e);
+    }
+}
+
+}  // namespace
+
 void ConvertToBgr(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height, uint8_t* bgr) {
+    // Rows are converted in parallel: a 1080p frame is ~2 million pixels, too many for one core of a slow PC at 30 fps.
+    std::vector<int> rows;
+
+    if (width == static_cast<uint32_t>(kWidth) && height == static_cast<uint32_t>(kHeight)) {
+        rows.resize(kHeight);
+        for (int y = 0; y < kHeight; ++y) rows[y] = y;
+        std::for_each(std::execution::par, rows.begin(), rows.end(), [&](int y) {
+            ConvertRowDirect(luma + static_cast<size_t>(y) * pitch, chroma + static_cast<size_t>(y / 2) * pitch, width,
+                             bgr + static_cast<size_t>(y) * kWidth * 3);
+        });
+        return;
+    }
+
     // Fit inside the output keeping the aspect ratio; the rest stays black.
     const double scale = std::min(static_cast<double>(kWidth) / width, static_cast<double>(kHeight) / height);
     const int outWidth = std::clamp(static_cast<int>(width * scale + 0.5), 1, kWidth);
@@ -165,7 +201,9 @@ void ConvertToBgr(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, ui
     }
     const double stepY = static_cast<double>(height) / outHeight;
 
-    for (int y = 0; y < outHeight; ++y) {
+    rows.resize(outHeight);
+    for (int y = 0; y < outHeight; ++y) rows[y] = y;
+    std::for_each(std::execution::par, rows.begin(), rows.end(), [&](int y) {
         const double sourceY = std::clamp((y + 0.5) * stepY - 0.5, 0.0, static_cast<double>(height - 1));
         const uint32_t y0 = static_cast<uint32_t>(sourceY);
         const uint32_t y1 = std::min(y0 + 1, height - 1);
@@ -182,15 +220,9 @@ void ConvertToBgr(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, ui
             const uint32_t bottom2 = row1[x0] * (256 - fx) + row1[x1] * fx;
             const int lumaValue = static_cast<int>((top2 * (256 - fy) + bottom2 * fy + 32768) >> 16);
             const uint32_t chromaX = std::min<uint32_t>(x0 + (fx >= 128 ? 1 : 0), width - 1) & ~1u;
-            // BT.709, video range (what phone H.264 uses for HD), as in the preview.
-            const int c = 298 * (lumaValue - 16);
-            const int d = chromaRow[chromaX] - 128;
-            const int e = chromaRow[chromaX + 1] - 128;
-            out[x * 3 + 0] = Clamp((c + 541 * d + 128) >> 8);
-            out[x * 3 + 1] = Clamp((c - 55 * d - 136 * e + 128) >> 8);
-            out[x * 3 + 2] = Clamp((c + 459 * e + 128) >> 8);
+            StorePixel(out + x * 3, lumaValue, chromaRow[chromaX] - 128, chromaRow[chromaX + 1] - 128);
         }
-    }
+    });
 }
 
 }  // namespace hitcam::dshow

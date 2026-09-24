@@ -525,6 +525,12 @@ __declspec(dllexport) HRESULT __stdcall HitCam_DShowStart() {
     return hr;
 }
 
+// For HitCamVCamTest: converts one packed NV12 frame to the DirectShow camera's 1920x1080 BGR24 (measures its cost).
+__declspec(dllexport) void __stdcall HitCam_DShowConvert(const uint8_t* nv12, uint32_t width, uint32_t height, uint8_t* bgr) {
+    if (!nv12 || !bgr || width < 2 || height < 2) return;
+    hitcam::Quietly([&] { hitcam::dshow::ConvertToBgr(nv12, nv12 + static_cast<size_t>(width) * height, width, width, height, bgr); });
+}
+
 __declspec(dllexport) void __stdcall HitCam_DShowStop() {
     hitcam::Quietly([] { hitcam::dshow::Stop(); });
 }
