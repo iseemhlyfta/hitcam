@@ -10,6 +10,7 @@
 //   --denoise-scene   the same on a textured scene, per mode
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
+//   --dshow           the DirectShow camera (Windows 10) of the DLLs built next to this test, without registration
 
 #include <windows.h>
 #include <aclapi.h>
@@ -40,6 +41,9 @@ extern "C" void __stdcall HitCam_VirtualCameraStop(void* handle);
 extern "C" HRESULT __stdcall HitCam_BridgeCreate(void** handle);
 extern "C" HRESULT __stdcall HitCam_BridgeDecode(void* handle, const uint8_t* data, uint32_t length, int64_t timestamp);
 extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
+extern "C" void __stdcall HitCam_BridgeClearSignal(void* handle);
+extern "C" HRESULT __stdcall HitCam_DShowStart();
+extern "C" void __stdcall HitCam_DShowStop();
 extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
 extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 extern "C" BOOL __stdcall HitCam_DenoiseAvailable();
@@ -773,6 +777,8 @@ int RunSourceCheck() {
     return source_check::g_passed ? 0 : 1;
 }
 
+#include "DShowCheck.inl"
+
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
     HRESULT hr = MFStartup(MF_VERSION);
@@ -787,6 +793,7 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--denoise") == 0) return RunDenoiseCheck();
     if (argc > 1 && std::strcmp(argv[1], "--denoise-scene") == 0) return RunSceneCheck();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
+    if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run();
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {

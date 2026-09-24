@@ -17,6 +17,7 @@
 #include <mutex>
 #include <vector>
 
+#include "DShowOutput.h"
 #include "Denoiser.h"
 #include "ErrorGuard.h"
 #include "Shared.h"
@@ -188,12 +189,18 @@ struct FrameSink {
                 pitch = width;
             }
         }
-        writer.Publish(luma, chroma, pitch, width, height);
+        // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
+        if (dshow::IsActive()) {
+            dshow::Submit(luma, chroma, pitch, width, height);
+        } else {
+            writer.Publish(luma, chroma, pitch, width, height);
+        }
         preview.Update(luma, chroma, pitch, width, height);
     }
 
     void ClearSignal() {
         writer.ClearSignal();
+        dshow::ClearSignal();
         denoiser.Reset();
     }
 };
@@ -423,7 +430,7 @@ __declspec(dllexport) void __stdcall HitCam_BridgeClearSignal(void* handle) {
 // True once frames can reach the camera (an app has opened it at least once since the service started).
 __declspec(dllexport) BOOL __stdcall HitCam_BridgeIsLinked(void* handle) {
     BOOL linked = FALSE;
-    if (handle) hitcam::Quietly([&] { linked = static_cast<hitcam::Bridge*>(handle)->sink.writer.IsMapped(); });
+    if (handle) hitcam::Quietly([&] { linked = hitcam::dshow::IsActive() || static_cast<hitcam::Bridge*>(handle)->sink.writer.IsMapped(); });
     return linked;
 }
 
@@ -508,6 +515,18 @@ __declspec(dllexport) HRESULT __stdcall HitCam_VirtualCameraStart(const wchar_t*
     }
     *handle = camera.Detach();
     return S_OK;
+}
+
+// Windows 10: starts sending to the DirectShow "HitCam" camera (HitCamDShow.dll, registered with regsvr32) for the
+// lifetime of this process. Fails with ERROR_ALREADY_EXISTS while another process sends.
+__declspec(dllexport) HRESULT __stdcall HitCam_DShowStart() {
+    HRESULT hr = E_UNEXPECTED;
+    hitcam::Quietly([&] { hr = hitcam::dshow::Start(); });
+    return hr;
+}
+
+__declspec(dllexport) void __stdcall HitCam_DShowStop() {
+    hitcam::Quietly([] { hitcam::dshow::Stop(); });
 }
 
 __declspec(dllexport) void __stdcall HitCam_VirtualCameraStop(void* handle) {

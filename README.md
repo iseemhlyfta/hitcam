@@ -2,8 +2,8 @@
 
 # HitCam
 
-**Камера iPhone или Android-телефона как веб-камера для Windows 11** — открытая локальная замена iVCam.
-**Use your iPhone or Android phone camera as a Windows 11 webcam** — an open, local-only alternative to iVCam.
+**Камера iPhone или Android-телефона как веб-камера для Windows 10 и 11** — открытая локальная замена iVCam.
+**Use your iPhone or Android phone camera as a Windows 10/11 webcam** — an open, local-only alternative to iVCam.
 
 - Полностью локально: телефон подключается напрямую к ПК по Wi-Fi. Никаких серверов, аккаунтов и телеметрии.
 - Подключение: IP-адрес, QR-код, PIN при первом сопряжении.
@@ -21,6 +21,7 @@
 | ПК: настройки камеры телефона | ✅ работает, покрыто тестами |
 | ПК: декодирование H.264 | ✅ работает (Media Foundation) |
 | ПК: виртуальная камера (MF, Windows 11) | ✅ работает (`MFCreateVirtualCamera`) |
+| ПК: виртуальная камера (DirectShow, Windows 10) | 🧪 новое: проверено тестом на Windows 11, ждёт проверки на Windows 10 |
 | ПК: ИИ-шумоподавление (NVIDIA) | 🧪 экспериментально: на сжатом видео пока не помогает, идёт доработка |
 | ПК: превью в окне, дизайн (светлая и тёмная тема) | ✅ |
 | iOS: захват, H.264, подключение, PIN, QR, управление | 🧪 написано, сборка только в CI (нет Mac) |
@@ -67,6 +68,18 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 в Zoom, Discord, Teams, OBS и браузерах, пока открыт HitCam для ПК. Без телефона камера показывает тёмно-серый кадр.
 
 Удаление: `regsvr32 /u "C:\Program Files\HitCam\HitCamVCam.dll"` (от администратора), затем удалить папку.
+
+### Windows 10
+
+В Windows 10 нет виртуальных камер Media Foundation, поэтому там HitCam ставит камеру **DirectShow** на основе
+[Softcam](https://github.com/tshino/softcam) (MIT): `HitCamDShow.dll` для 64-битных программ и `HitCamDShow32.dll`
+для 32-битных. Кнопка та же — «Установить камеру». Камеру видят Zoom, Discord, Teams, Skype, OBS, Chrome, Edge,
+Firefox и сайты вроде Google Meet; не видят приложение «Камера» Windows и часть приложений из Microsoft Store.
+Кадр всегда 1920×1080: 720p растягивается, вертикальная картинка показывается с чёрными полями.
+
+Удаление (от администратора): `regsvr32 /u` для `HitCamDShow-*.dll` и `%WINDIR%\SysWOW64\regsvr32 /u` для
+`HitCamDShow32-*.dll` в `C:\Program Files\HitCam`, затем удалить папку.
+Проверить DirectShow-камеру в Windows 11 можно, запустив HitCam с переменной окружения `HITCAM_CAMERA=directshow`.
 
 ## ИИ-шумоподавление (NVIDIA RTX)
 

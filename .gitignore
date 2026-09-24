@@ -484,6 +484,7 @@ $RECYCLE.BIN/
 # HitCam: C++ / CMake / Xcode
 out/
 build/
+build32/
 CMakeUserPresets.json
 *.xcodeproj/
 DerivedData/

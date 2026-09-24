@@ -43,9 +43,12 @@
   <PropertyGroup>
     <VCamDir>$(MSBuildThisFileDirectory)..\HitCam.VCam\</VCamDir>
     <VCamDll>$(VCamDir)build\Release\HitCamVCam.dll</VCamDll>
+    <!-- The DirectShow camera for Windows 10: 64-bit, and 32-bit for 32-bit apps. -->
+    <VCamDShowDll>$(VCamDir)build\Release\HitCamDShow.dll</VCamDShowDll>
+    <VCamDShow32Dll>$(VCamDir)build32\Release\HitCamDShow32.dll</VCamDShow32Dll>
   </PropertyGroup>
   <ItemGroup>
-    <VCamSource Include="$(VCamDir)src\**;$(VCamDir)CMakeLists.txt" />
+    <VCamSource Include="$(VCamDir)src\**;$(VCamDir)CMakeLists.txt;$(VCamDir)build.ps1;$(VCamDir)third_party\softcam\**" />
   </ItemGroup>
   <Target Name="BuildVirtualCamera" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT' And '$(SkipVirtualCamera)' != 'true'"
           Inputs="@(VCamSource)" Outputs="$(VCamDll)">
@@ -54,20 +57,37 @@
   <Target Name="CopyVirtualCamera" AfterTargets="BuildVirtualCamera" BeforeTargets="BeforeBuild" Condition="Exists('$(VCamDll)')">
     <ItemGroup>
       <None Include="$(VCamDll)" Link="HitCamVCam.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+      <None Include="$(VCamDShowDll)" Link="HitCamDShow.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(VCamDShowDll)')" />
+      <None Include="$(VCamDShow32Dll)" Link="HitCamDShow32.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" Condition="Exists('$(VCamDShow32Dll)')" />
     </ItemGroup>
   </Target>
   <!--
     The app only ever installs (with admin rights) the exact DLL it was built with: its SHA-256 goes into HitCam.exe
     as [AssemblyMetadata("HitCamVCamSha256", ...)]. Without the DLL there is no hash and installing is not offered.
+    The DirectShow camera's two DLLs get HitCamDShowSha256 and HitCamDShow32Sha256 the same way.
   -->
   <Target Name="EmbedVirtualCameraHash" AfterTargets="CopyVirtualCamera" BeforeTargets="BeforeBuild" Condition="Exists('$(VCamDll)')">
     <GetFileHash Files="$(VCamDll)" Algorithm="SHA256" HashEncoding="hex">
       <Output TaskParameter="Hash" PropertyName="VCamSha256" />
     </GetFileHash>
+    <GetFileHash Files="$(VCamDShowDll)" Algorithm="SHA256" HashEncoding="hex" Condition="Exists('$(VCamDShowDll)')">
+      <Output TaskParameter="Hash" PropertyName="VCamDShowSha256" />
+    </GetFileHash>
+    <GetFileHash Files="$(VCamDShow32Dll)" Algorithm="SHA256" HashEncoding="hex" Condition="Exists('$(VCamDShow32Dll)')">
+      <Output TaskParameter="Hash" PropertyName="VCamDShow32Sha256" />
+    </GetFileHash>
     <ItemGroup>
       <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
         <_Parameter1>HitCamVCamSha256</_Parameter1>
         <_Parameter2>$(VCamSha256)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(VCamDShowSha256)' != ''">
+        <_Parameter1>HitCamDShowSha256</_Parameter1>
+        <_Parameter2>$(VCamDShowSha256)</_Parameter2>
+      </AssemblyAttribute>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute" Condition="'$(VCamDShow32Sha256)' != ''">
+        <_Parameter1>HitCamDShow32Sha256</_Parameter1>
+        <_Parameter2>$(VCamDShow32Sha256)</_Parameter2>
       </AssemblyAttribute>
     </ItemGroup>
   </Target>

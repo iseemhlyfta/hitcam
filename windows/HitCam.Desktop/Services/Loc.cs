@@ -158,6 +158,9 @@ public static class Loc
     public static string MediaFoundationMissing => Russian
         ? "В этой Windows нет компонентов мультимедиа (выпуск N или KN). Установите их: Параметры → Приложения → Дополнительные компоненты → Добавить компонент → «Пакет компонентов мультимедиа», затем перезагрузите ПК."
         : "This Windows has no media components (an N or KN edition). Install them: Settings → Apps → Optional features → Add a feature → Media Feature Pack, then restart the PC.";
+    public static string CameraBusy => Russian
+        ? "Камера «HitCam» уже занята другим запущенным HitCam. Закройте его и перезапустите этот."
+        : "The “HitCam” camera is already used by another running HitCam. Close it and restart this one.";
     public static string VirtualCameraNeedsWindows11 => Russian
         ? "Виртуальная камера работает только в Windows 11. Превью в HitCam будет работать, но в других программах камеры «HitCam» не будет."
         : "The virtual camera needs Windows 11. The preview in HitCam works, but other apps will not see the “HitCam” camera.";

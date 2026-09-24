@@ -42,7 +42,7 @@ jobs:
 
       - name: Package
         run: |
-          test -f HitCam/HitCam.exe && test -f HitCam/HitCamVCam.dll
+          test -f HitCam/HitCam.exe && test -f HitCam/HitCamVCam.dll && test -f HitCam/HitCamDShow.dll && test -f HitCam/HitCamDShow32.dll
           (cd HitCam && zip -r ../HitCam-windows-x64.zip .)
           cp ios/HitCam-unsigned.ipa HitCam-ios-unsigned.ipa
           cp android/HitCam-android.apk HitCam-android.apk
@@ -54,8 +54,9 @@ jobs:
           TAG: ${{ github.ref_name }}
         run: |
           cat > notes.md <<'EOF'
-          **Windows 11:** распакуйте `HitCam-windows-x64.zip` и запустите `HitCam.exe`. При первом запуске нажмите
-          «Установить камеру» — после этого камера **HitCam** появится в Zoom, Discord, Teams, OBS и браузерах.
+          **Windows 10 и 11:** распакуйте `HitCam-windows-x64.zip` целиком и запустите `HitCam.exe` из распакованной
+          папки. При первом запуске нажмите «Установить камеру» — после этого камера **HitCam** появится в Zoom,
+          Discord, Teams, OBS и браузерах. В Windows 10 её не видят приложение «Камера» и часть приложений Microsoft Store.
 
           **iPhone:** установите `HitCam-ios-unsigned.ipa` через Sideloadly —
           см. [docs/install-ios.md](https://github.com/${{ github.repository }}/blob/main/docs/install-ios.md).

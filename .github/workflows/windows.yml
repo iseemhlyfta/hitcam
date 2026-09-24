@@ -33,7 +33,10 @@ jobs:
         run: dotnet publish HitCam.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ../out/HitCam
       - name: Check virtual camera DLL
         shell: pwsh
-        run: if (-not (Test-Path ../out/HitCam/HitCamVCam.dll)) { throw "HitCamVCam.dll is missing from the published app" }
+        run: |
+          foreach ($dll in "HitCamVCam.dll", "HitCamDShow.dll", "HitCamDShow32.dll") {
+            if (-not (Test-Path "../out/HitCam/$dll")) { throw "$dll is missing from the published app" }
+          }
       - uses: actions/upload-artifact@v4
         with:
           name: HitCam-windows-x64

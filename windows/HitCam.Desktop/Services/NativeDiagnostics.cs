@@ -5,6 +5,7 @@ internal static class NativeDiagnostics
 {
     private const int ModuleNotFound = unchecked((int)0x8007007E);
     private const int ProcedureNotFound = unchecked((int)0x8007007F);
+    private const int AlreadyExists = unchecked((int)0x800700B7);
 
     /// <summary>Why HitCamVCam.dll (or what it needs from Windows) could not be loaded.</summary>
     public static string ExplainLoadFailure(Exception error)
@@ -25,6 +26,8 @@ internal static class NativeDiagnostics
         ModuleNotFound when !File.Exists(Path.Combine(Environment.SystemDirectory, "mfplat.dll")) => Loc.MediaFoundationMissing,
         // mfsensorgroup.dll or its MFCreateVirtualCamera is missing: Windows 10 or older.
         ModuleNotFound or ProcedureNotFound => Loc.VirtualCameraNeedsWindows11,
+        // Windows 10: another HitCam (another user's, or a second copy) already sends to the DirectShow camera.
+        AlreadyExists => Loc.CameraBusy,
         _ => null,
     };
 }
