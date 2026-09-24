@@ -1,5 +1,7 @@
 # Builds HitCamVCam.dll (x64, Release) with the CMake that ships with Visual Studio or one from PATH.
-param([string]$Configuration = "Release")
+#   build.ps1          the DLL only (what the HitCam.Desktop build runs)
+#   build.ps1 -Tests   the DLL and the HitCamVCamTest.exe check harness
+param([string]$Configuration = "Release", [switch]$Tests)
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
@@ -15,5 +17,7 @@ if (-not $cmake) { throw "CMake not found: install Visual Studio with 'Desktop d
 
 & $cmake -S $root -B "$root\build" -A x64
 if ($LASTEXITCODE) { exit $LASTEXITCODE }
-& $cmake --build "$root\build" --config $Configuration
+$targets = @("HitCamVCam")
+if ($Tests) { $targets += "HitCamVCamTest" }
+& $cmake --build "$root\build" --config $Configuration --target $targets
 exit $LASTEXITCODE

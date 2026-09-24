@@ -1,9 +1,19 @@
 // End-to-end check of the installed virtual camera without a phone:
 // adds the camera, opens it like a video app would, checks that frames written to shared memory come out,
 // then sends real H.264 through the decoder bridge and checks the decoded picture reaches the camera.
-// Requires the COM class to be registered (HitCam: "Install camera", or regsvr32 as admin).
+// Requires the COM class to be registered: HitCam's "Install camera", or as admin a copy of HitCamVCam.dll in
+// %ProgramFiles%\HitCam and `regsvr32 "%ProgramFiles%\HitCam\HitCamVCam.dll"` (the DLL refuses to register from
+// any other folder, since the frame server service would load it). The camera then uses that registered copy,
+// not the one built next to this test.
+//   --list            print the cameras apps can see
+//   --denoise         NVIDIA noise removal through the decoder bridge (no camera needed)
+//   --denoise-scene   the same on a textured scene, per mode
+//   --source          the media source of the DLL built next to this test, created in-process without
+//                     registration; also checks the shared-memory permissions with the registered camera
 
 #include <windows.h>
+#include <aclapi.h>
+#include <sddl.h>
 #include <mfapi.h>
 #include <mferror.h>
 #include <mfidl.h>
@@ -407,8 +417,360 @@ int RunDenoiseCheck() {
         passed = passed && ok;
     }
 
+    // Off frees the model (the next frame unloads it); on again loads it anew.
+    {
+        HitCam_BridgeSetDenoiseMode(bridge, 0);
+        hr = feed(3);
+        double milliseconds = 0, noiseLevel = -1;
+        int error = 0;
+        float amount = 0;
+        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &amount);
+        const bool released = SUCCEEDED(hr) && milliseconds < 0 && error == 0;
+        HitCam_BridgeSetDenoiseMode(bridge, 2);
+        const ULONGLONG start = GetTickCount64();
+        while (GetTickCount64() < start + 60'000 && SUCCEEDED(hr) && milliseconds < 0 && error == 0) {
+            hr = feed(3);
+            HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &amount);
+            if (milliseconds < 0) Sleep(50);
+        }
+        const bool reloaded = milliseconds >= 0 && error == 0;
+        std::printf("%s: off releases the model (%s), on again reloads it in %llu ms (%s)\n", released && reloaded ? "OK" : "FAIL",
+                    released ? "yes" : "no", GetTickCount64() - start, reloaded ? "yes" : "no");
+        passed = passed && released && reloaded;
+    }
+
     HitCam_BridgeDestroy(bridge);
     return passed ? 0 : 1;
+}
+
+// MARK: --source
+
+namespace source_check {
+
+bool g_passed = true;
+
+void Check(bool ok, const char* what, double value = 0, double expected = 0) {
+    std::printf("%s: %s (%.1f, expected %.1f)\n", ok ? "OK" : "FAIL", what, value, expected);
+    g_passed = g_passed && ok;
+}
+
+// The class factory of the DLL loaded into this process (the one built next to the test), without the registry.
+HRESULT CreateLocalActivate(IMFActivate** activate) {
+    using GetClassObject = HRESULT(__stdcall*)(REFCLSID, REFIID, void**);
+    const HMODULE module = GetModuleHandleW(L"HitCamVCam.dll");
+    const auto get = module ? reinterpret_cast<GetClassObject>(GetProcAddress(module, "DllGetClassObject")) : nullptr;
+    if (!get) return E_NOINTERFACE;
+    ComPtr<IClassFactory> factory;
+    HRESULT hr = get(hitcam::kMediaSourceClsid, IID_PPV_ARGS(&factory));
+    if (SUCCEEDED(hr)) hr = factory->CreateInstance(nullptr, IID_PPV_ARGS(activate));
+    return hr;
+}
+
+HRESULT WaitEvent(IMFMediaEventGenerator* generator, MediaEventType wanted, IMFMediaEvent** result, DWORD timeoutMs = 2000) {
+    const ULONGLONG deadline = GetTickCount64() + timeoutMs;
+    while (GetTickCount64() < deadline) {
+        ComPtr<IMFMediaEvent> event;
+        HRESULT hr = generator->GetEvent(MF_EVENT_FLAG_NO_WAIT, &event);
+        if (hr == MF_E_NO_EVENTS_AVAILABLE) {
+            Sleep(2);
+            continue;
+        }
+        if (FAILED(hr)) return hr;
+        MediaEventType type = MEUnknown;
+        event->GetType(&type);
+        if (type == MEError) {
+            HRESULT status = S_OK;
+            event->GetStatus(&status);
+            return FAILED(status) ? status : E_FAIL;
+        }
+        if (type == wanted) {
+            if (result) *result = event.Detach();
+            return S_OK;
+        }
+    }
+    return HRESULT_FROM_WIN32(ERROR_TIMEOUT);
+}
+
+HRESULT StartWithType(IMFMediaSource* source, UINT32 width, UINT32 height, const GUID& subtype = MFVideoFormat_NV12) {
+    ComPtr<IMFMediaType> type;
+    HRESULT hr = MFCreateMediaType(&type);
+    if (SUCCEEDED(hr)) hr = type->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
+    if (SUCCEEDED(hr)) hr = type->SetGUID(MF_MT_SUBTYPE, subtype);
+    if (SUCCEEDED(hr)) hr = MFSetAttributeSize(type.Get(), MF_MT_FRAME_SIZE, width, height);
+    if (SUCCEEDED(hr)) hr = MFSetAttributeRatio(type.Get(), MF_MT_FRAME_RATE, 30, 1);
+    IMFMediaType* types[] = {type.Get()};
+    ComPtr<IMFStreamDescriptor> stream;
+    if (SUCCEEDED(hr)) hr = MFCreateStreamDescriptor(0, 1, types, &stream);
+    ComPtr<IMFMediaTypeHandler> handler;
+    if (SUCCEEDED(hr)) hr = stream->GetMediaTypeHandler(&handler);
+    if (SUCCEEDED(hr)) hr = handler->SetCurrentMediaType(type.Get());
+    ComPtr<IMFPresentationDescriptor> descriptor;
+    if (SUCCEEDED(hr)) hr = MFCreatePresentationDescriptor(1, stream.GetAddressOf(), &descriptor);
+    if (SUCCEEDED(hr)) hr = descriptor->SelectStream(0);
+    PROPVARIANT start;
+    PropVariantInit(&start);
+    if (SUCCEEDED(hr)) hr = source->Start(descriptor.Get(), &GUID_NULL, &start);
+    return hr;
+}
+
+// Starts at width x height and returns the stream from MENewStream.
+HRESULT StartStream(IMFMediaSource* source, UINT32 width, UINT32 height, IMFMediaStream** stream) {
+    HRESULT hr = StartWithType(source, width, height);
+    ComPtr<IMFMediaEvent> event;
+    if (SUCCEEDED(hr)) hr = WaitEvent(source, MENewStream, &event);
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    if (SUCCEEDED(hr)) hr = event->GetValue(&value);
+    if (SUCCEEDED(hr)) hr = value.vt == VT_UNKNOWN && value.punkVal ? value.punkVal->QueryInterface(IID_PPV_ARGS(stream)) : E_UNEXPECTED;
+    PropVariantClear(&value);
+    if (SUCCEEDED(hr)) hr = WaitEvent(*stream, MEStreamStarted, nullptr);
+    return hr;
+}
+
+HRESULT SampleLuma(IMFMediaEvent* event, UINT32 width, UINT32 height, double* luma) {
+    PROPVARIANT value;
+    PropVariantInit(&value);
+    HRESULT hr = event->GetValue(&value);
+    ComPtr<IMFSample> sample;
+    if (SUCCEEDED(hr)) hr = value.vt == VT_UNKNOWN && value.punkVal ? value.punkVal->QueryInterface(IID_PPV_ARGS(&sample)) : E_UNEXPECTED;
+    PropVariantClear(&value);
+    ComPtr<IMFMediaBuffer> buffer;
+    if (SUCCEEDED(hr)) hr = sample->ConvertToContiguousBuffer(&buffer);
+    BYTE* data = nullptr;
+    DWORD length = 0;
+    if (SUCCEEDED(hr)) hr = buffer->Lock(&data, nullptr, &length);
+    if (FAILED(hr)) return hr;
+    unsigned long long sum = 0;
+    if (length >= width * height * 3 / 2) {
+        for (UINT32 i = 0; i < width * height; ++i) sum += data[i];
+    } else {
+        hr = E_UNEXPECTED;
+    }
+    buffer->Unlock();
+    *luma = static_cast<double>(sum) / (static_cast<double>(width) * height);
+    return hr;
+}
+
+HRESULT RequestLuma(IMFMediaStream* stream, UINT32 width, UINT32 height, double* luma) {
+    HRESULT hr = stream->RequestSample(nullptr);
+    ComPtr<IMFMediaEvent> event;
+    if (SUCCEEDED(hr)) hr = WaitEvent(stream, MEMediaSample, &event);
+    if (SUCCEEDED(hr)) hr = SampleLuma(event.Get(), width, height, luma);
+    return hr;
+}
+
+void Publish(hitcam::SharedHeader* header, uint32_t width, uint32_t height, uint8_t luma) {
+    InterlockedIncrement64(&header->sequence);
+    MemoryBarrier();
+    std::memset(hitcam::FrameData(header), luma, static_cast<size_t>(width) * height);
+    std::memset(hitcam::FrameData(header) + static_cast<size_t>(width) * height, 128, static_cast<size_t>(width) * height / 2);
+    header->width = width;
+    header->height = height;
+    InterlockedExchange64(&header->updatedMs, static_cast<LONG64>(GetTickCount64()));
+    MemoryBarrier();
+    InterlockedIncrement64(&header->sequence);
+}
+
+std::wstring SectionSddl(HANDLE mapping) {
+    PSECURITY_DESCRIPTOR descriptor = nullptr;
+    if (GetSecurityInfo(mapping, SE_KERNEL_OBJECT, DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION, nullptr, nullptr,
+                        nullptr, nullptr, &descriptor) != ERROR_SUCCESS) {
+        return L"?";
+    }
+    wchar_t* text = nullptr;
+    std::wstring result = L"?";
+    if (ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, SDDL_REVISION_1,
+                                                             DACL_SECURITY_INFORMATION | LABEL_SECURITY_INFORMATION, &text, nullptr)) {
+        result = text;
+        LocalFree(text);
+    }
+    LocalFree(descriptor);
+    return result;
+}
+
+// Without the registered camera: registration guard, type checks, request queue, lifetime.
+void CheckLocalSource() {
+    {
+        // This copy is not in Program Files: it must refuse before touching the registry.
+        using Register = HRESULT(__stdcall*)();
+        const HMODULE module = GetModuleHandleW(L"HitCamVCam.dll");
+        const auto registerServer = module ? reinterpret_cast<Register>(GetProcAddress(module, "DllRegisterServer")) : nullptr;
+        const HRESULT hr = registerServer ? registerServer() : E_NOINTERFACE;
+        Check(hr == E_ACCESSDENIED, "DllRegisterServer outside Program Files refused", hr, E_ACCESSDENIED);
+    }
+
+    ComPtr<IMFActivate> activate;
+    HRESULT hr = CreateLocalActivate(&activate);
+    ComPtr<IMFMediaSource> source;
+    if (SUCCEEDED(hr)) hr = activate->ActivateObject(IID_PPV_ARGS(&source));
+    Check(SUCCEEDED(hr), "local media source created (DllGetClassObject of the built DLL)", hr, 0);
+    if (FAILED(hr)) return;
+
+    hr = StartWithType(source.Get(), 800, 600);
+    Check(hr == MF_E_INVALIDMEDIATYPE, "800x600 NV12 rejected with MF_E_INVALIDMEDIATYPE", hr, MF_E_INVALIDMEDIATYPE);
+    hr = StartWithType(source.Get(), 1280, 720, MFVideoFormat_YUY2);
+    Check(hr == MF_E_INVALIDMEDIATYPE, "1280x720 YUY2 rejected", hr, MF_E_INVALIDMEDIATYPE);
+    hr = StartWithType(source.Get(), 0xFFFF0000u, 0xFFFF0000u);
+    Check(hr == MF_E_INVALIDMEDIATYPE, "absurd size rejected", hr, MF_E_INVALIDMEDIATYPE);
+
+    ComPtr<IMFMediaStream> stream;
+    hr = StartStream(source.Get(), 640, 360, &stream);
+    Check(SUCCEEDED(hr), "640x360 NV12 started", hr, 0);
+    if (FAILED(hr)) return;
+
+    // Far more requests than the queue keeps: all accepted, the oldest dropped, the newest answered.
+    int accepted = 0;
+    for (int i = 0; i < 50; ++i) accepted += SUCCEEDED(stream->RequestSample(nullptr)) ? 1 : 0;
+    int samples = 0;
+    while (SUCCEEDED(WaitEvent(stream.Get(), MEMediaSample, nullptr, 600))) ++samples;
+    Check(accepted == 50 && samples == 8, "50 requests at once: samples delivered (queue limit 8)", samples, 8);
+
+    ComPtr<IMFMediaStream2> stream2;
+    stream.As(&stream2);
+    hr = source->Stop();
+    WaitEvent(stream.Get(), MEStreamStopped, nullptr);
+    if (stream2) stream2->SetStreamState(MF_STREAM_STATE_RUNNING);
+    hr = stream->RequestSample(nullptr);
+    Check(hr == MF_E_MEDIA_SOURCE_WRONGSTATE, "stopped source + SetStreamState(RUNNING): request refused", hr, MF_E_MEDIA_SOURCE_WRONGSTATE);
+
+    // Restart, then release the source without Shutdown: the stream must be shut down (worker stopped) too.
+    hr = StartWithType(source.Get(), 1280, 720);
+    if (SUCCEEDED(hr)) hr = WaitEvent(source.Get(), MEUpdatedStream, nullptr);
+    if (SUCCEEDED(hr)) hr = WaitEvent(stream.Get(), MEStreamStarted, nullptr);
+    Check(SUCCEEDED(hr), "restarted at 1280x720", hr, 0);
+    if (FAILED(hr)) return;
+    double luma = 0;
+    hr = RequestLuma(stream.Get(), 1280, 720, &luma);
+    Check(SUCCEEDED(hr), "sample after restart", luma, luma);
+    ComPtr<IMFMediaSource> parent;
+    hr = stream->GetMediaSource(&parent);
+    Check(SUCCEEDED(hr) && parent.Get() == source.Get(), "stream -> source", hr, 0);
+    parent.Reset();
+    activate->DetachObject();
+    activate.Reset();
+    source.Reset();
+    MF_STREAM_STATE state{};
+    hr = stream2 ? stream2->GetStreamState(&state) : E_NOINTERFACE;
+    Check(hr == MF_E_SHUTDOWN, "source released without Shutdown: stream shut down with it", hr, MF_E_SHUTDOWN);
+    hr = stream->GetMediaSource(&parent);
+    Check(hr == MF_E_SHUTDOWN, "stream no longer hands out the source", hr, MF_E_SHUTDOWN);
+}
+
+// With the registered camera running, the frame server creates the section; the local source reads it.
+void CheckSharedFrames() {
+    void* camera = nullptr;
+    HRESULT hr = HitCam_VirtualCameraStart(L"HitCam Source Test", &camera);
+    ComPtr<IMFSourceReader> reader;
+    if (SUCCEEDED(hr)) hr = OpenCamera(L"HitCam Source Test", &reader);
+    double luma = 0;
+    if (SUCCEEDED(hr)) hr = ReadAverageLuma(reader.Get(), 1920, 1080, &luma);
+    if (FAILED(hr)) {
+        std::printf("SKIP: registered camera not available (0x%08lX): shared-memory checks not run\n", static_cast<unsigned long>(hr));
+        if (camera) HitCam_VirtualCameraStop(camera);
+        return;
+    }
+
+    HANDLE mapping = nullptr;
+    hitcam::SharedHeader* header = nullptr;
+    for (int attempt = 0; attempt < 50 && !header; ++attempt) {
+        header = hitcam::MapSharedFrames(&mapping, hitcam::SharedAccess::Write);
+        if (!header) Sleep(100);
+    }
+    Check(header != nullptr, "writer mapped the frame server's section", header ? 1 : 0, 1);
+    if (!header) {
+        HitCam_VirtualCameraStop(camera);
+        return;
+    }
+    const std::wstring sddl = SectionSddl(mapping);
+    std::wprintf(L"  section: %s\n  frame server SID: %s\n", sddl.c_str(), hitcam::FrameServerSid());
+    Check(sddl.find(L";;;IU)") == std::wstring::npos && sddl.find(hitcam::FrameServerSid()) != std::wstring::npos,
+          "writer restricted the DACL (no interactive users, frame server kept)");
+
+    // A read-only view cannot be written through.
+    {
+        HANDLE readMapping = nullptr;
+        hitcam::SharedHeader* readHeader = hitcam::MapSharedFrames(&readMapping, hitcam::SharedAccess::Read);
+        MEMORY_BASIC_INFORMATION info{};
+        const bool readOnly = readHeader && VirtualQuery(readHeader, &info, sizeof(info)) && info.Protect == PAGE_READONLY;
+        Check(readOnly, "reader view is read-only", readHeader ? info.Protect : 0, PAGE_READONLY);
+        hitcam::UnmapSharedFrames(readHeader, readMapping);
+    }
+
+    ComPtr<IMFActivate> activate;
+    ComPtr<IMFMediaSource> source;
+    ComPtr<IMFMediaStream> stream;
+    hr = CreateLocalActivate(&activate);
+    if (SUCCEEDED(hr)) hr = activate->ActivateObject(IID_PPV_ARGS(&source));
+    if (SUCCEEDED(hr)) hr = StartStream(source.Get(), 640, 360, &stream);
+    Check(SUCCEEDED(hr), "local source started", hr, 0);
+
+    if (SUCCEEDED(hr)) {
+        Publish(header, 1280, 720, 200);
+        for (int i = 0; i < 20 && SUCCEEDED(hr) && std::abs(luma - 200) > 4; ++i) {
+            hr = RequestLuma(stream.Get(), 640, 360, &luma);
+            Publish(header, 1280, 720, 200);
+        }
+        Check(std::abs(luma - 200) < 4, "published frame reaches the local source", luma, 200);
+
+        // The writer is "in the middle of a frame" (odd sequence) but still alive: the last frame is repeated.
+        InterlockedIncrement64(&header->sequence);
+        InterlockedExchange64(&header->updatedMs, static_cast<LONG64>(GetTickCount64()));
+        const ULONGLONG before = GetTickCount64();
+        hr = RequestLuma(stream.Get(), 640, 360, &luma);
+        Check(SUCCEEDED(hr) && std::abs(luma - 200) < 4, "writer busy: last frame repeated, not \"no signal\"", luma, 200);
+        std::printf("  sample while busy took %llu ms\n", GetTickCount64() - before);
+
+        // Stuck writer: after kStaleAfterMs the camera shows "no signal".
+        Sleep(static_cast<DWORD>(hitcam::kStaleAfterMs) + 200);
+        hr = RequestLuma(stream.Get(), 640, 360, &luma);
+        Check(SUCCEEDED(hr) && std::abs(luma - 32) < 1, "stale frame: no signal", luma, 32);
+        InterlockedIncrement64(&header->sequence);
+
+        Publish(header, 1920, 1080, 100);
+        hr = RequestLuma(stream.Get(), 640, 360, &luma);
+        Check(SUCCEEDED(hr) && std::abs(luma - 100) < 4, "new frame after the stall", luma, 100);
+
+        // Cleared (phone disconnected): no signal at once.
+        InterlockedIncrement64(&header->sequence);
+        header->width = 0;
+        header->height = 0;
+        InterlockedIncrement64(&header->sequence);
+        hr = RequestLuma(stream.Get(), 640, 360, &luma);
+        Check(SUCCEEDED(hr) && std::abs(luma - 32) < 1, "cleared: no signal", luma, 32);
+    }
+    if (source) source->Shutdown();
+    stream.Reset();
+    source.Reset();
+    activate.Reset();
+
+    // The frame server must still be able to open the section after the DACL change: close the camera (its source
+    // unmaps; this process keeps the section alive), open it again and check a frame comes through.
+    reader.Reset();
+    HitCam_VirtualCameraStop(camera);
+    camera = nullptr;
+    Sleep(500);
+    hr = HitCam_VirtualCameraStart(L"HitCam Source Test", &camera);
+    if (SUCCEEDED(hr)) hr = OpenCamera(L"HitCam Source Test", &reader);
+    bool through = false;
+    for (int round = 0; round < 40 && SUCCEEDED(hr) && !through; ++round) {
+        Publish(header, 1280, 720, 90);
+        hr = ReadAverageLuma(reader.Get(), 1920, 1080, &luma);
+        through = std::abs(luma - 90) < 6;
+        if (!through) Sleep(100);
+    }
+    Check(through, "frame server reopened the restricted section (camera shows the frame)", luma, 90);
+
+    hitcam::UnmapSharedFrames(header, mapping);
+    reader.Reset();
+    if (camera) HitCam_VirtualCameraStop(camera);
+}
+
+}  // namespace source_check
+
+int RunSourceCheck() {
+    source_check::CheckLocalSource();
+    source_check::CheckSharedFrames();
+    return source_check::g_passed ? 0 : 1;
 }
 
 int main(int argc, char** argv) {
@@ -424,6 +786,7 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && std::strcmp(argv[1], "--denoise") == 0) return RunDenoiseCheck();
     if (argc > 1 && std::strcmp(argv[1], "--denoise-scene") == 0) return RunSceneCheck();
+    if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {
