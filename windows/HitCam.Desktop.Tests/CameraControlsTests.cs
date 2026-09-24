@@ -202,7 +202,7 @@ public sealed class CameraControlsTests
         _controls.SelectedStabilization = _controls.StabilizationOptions.Single(o => o.Id == StabilizationModes.Standard);
         Assert.Equal(StabilizationModes.Standard, Assert.Single(_sent).Stabilization);
 
-        // e.g. 1080p60 on some iPhones: no stabilization at all.
+        // e.g. 1080p60 on some phones: no stabilization at all.
         _controls.ApplyState(Initial with { Stabilization = StabilizationModes.Off, StabilizationModes = [StabilizationModes.Off] });
         // Right after the local choice the phone state is held back until editing settles.
         _time.AdvanceBy(TimeSpan.FromMilliseconds(1200));

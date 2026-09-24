@@ -356,7 +356,7 @@ public sealed class HitCamServer : IAsyncDisposable
         var hello = message.ReadJson(ProtocolJson.Default.Hello);
         if (string.IsNullOrWhiteSpace(hello.DeviceId) || hello.DeviceId.Length > 64)
             throw new ProtocolException("Hello.deviceId is missing or too long.");
-        var name = string.IsNullOrWhiteSpace(hello.DeviceName) ? "iPhone" : hello.DeviceName.Trim();
+        var name = string.IsNullOrWhiteSpace(hello.DeviceName) ? "Phone" : hello.DeviceName.Trim();
         return hello with { DeviceName = name.Length > 64 ? name[..64] : name };
     }
 

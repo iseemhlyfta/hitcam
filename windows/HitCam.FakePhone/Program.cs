@@ -1,4 +1,4 @@
-// Development tool: pretends to be the iPhone app so the PC side can be tested without a phone.
+// Development tool: pretends to be the phone app so the PC side can be tested without a phone.
 // Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30]
 // Frames are dummy (not decodable) H.264-shaped access units at 30 fps, ~8 Mbit/s.
 
@@ -68,7 +68,7 @@ else if (ack.Status != HelloStatus.Accepted)
 await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", 1920, 1080, 30, 8000), ProtocolJson.Default.StreamConfig, Now()));
 await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", 30, 8000, 0), ProtocolJson.Default.Status, Now()));
 
-// Cameras and state like an iPhone with three back lenses, so the PC's camera settings can be exercised.
+// Cameras and state like a phone with three back lenses, so the PC's camera settings can be exercised.
 var capabilities = new Capabilities(
     [
         new CameraInfo("back-wide", "Wide", "back", 1, 10, true, true, true, true),

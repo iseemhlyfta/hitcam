@@ -78,7 +78,7 @@ struct Denoiser::Effect {
 
     NvCV_Status Run(uint8_t* nv12) {
         NvCV_Status status = NvCVImage_Init(&frame, width, height, static_cast<int>(width), nv12, NVCV_YUV420, NVCV_U8, NVCV_NV12, NVCV_CPU);
-        // iPhone HD video: BT.709, limited range, MPEG-2 chroma siting.
+        // Phone HD video: BT.709, limited range, MPEG-2 chroma siting.
         frame.colorspace = NVCV_709 | NVCV_VIDEO_RANGE | NVCV_CHROMA_COSITED;
         if (status == NVCV_SUCCESS) status = NvCVImage_Transfer(&frame, &gpuInput, 1.0f / 255.0f, stream, &staging);
         if (status == NVCV_SUCCESS) status = NvVFX_Run(handle, 0);

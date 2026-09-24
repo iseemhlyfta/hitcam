@@ -53,7 +53,7 @@ int Fail(const char* step, HRESULT hr) {
     return 1;
 }
 
-// Produces real H.264 (Annex-B, like the iPhone sends) with the Windows software encoder.
+// Produces real H.264 (Annex-B, like the phone sends) with the Windows software encoder.
 class TestEncoder {
 public:
     HRESULT Initialize(UINT32 width, UINT32 height, UINT32 bitrate = 4'000'000) {

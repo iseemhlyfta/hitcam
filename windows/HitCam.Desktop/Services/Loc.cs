@@ -8,10 +8,10 @@ public static class Loc
     private static readonly bool Russian = CultureInfo.CurrentUICulture.TwoLetterISOLanguageName == "ru";
 
     // Waiting for a phone
-    public static string WaitingTitle => Russian ? "Подключите iPhone" : "Connect your iPhone";
+    public static string WaitingTitle => Russian ? "Подключите телефон" : "Connect your phone";
     public static string WaitingHint => Russian
-        ? "Откройте HitCam на iPhone в той же Wi-Fi сети и отсканируйте QR-код. Или введите адрес вручную:"
-        : "Open HitCam on your iPhone on the same Wi-Fi network and scan the QR code. Or enter the address manually:";
+        ? "Откройте HitCam на телефоне в той же Wi-Fi сети и отсканируйте QR-код. Или введите адрес вручную:"
+        : "Open HitCam on your phone on the same Wi-Fi network and scan the QR code. Or enter the address manually:";
     public static string OtherAddresses(string list) => Russian ? $"Другие адреса этого ПК: {list}" : $"Other addresses of this PC: {list}";
     public static string NoNetwork => Russian ? "Нет подключения к локальной сети" : "No local network connection";
     public static string CopyAddress => Russian ? "Скопировать адрес" : "Copy address";
@@ -24,10 +24,10 @@ public static class Loc
     // Pairing
     public static string PairingRequest(string device, string address) =>
         Russian ? $"Запрос сопряжения от «{device}» · {address}" : $"Pairing request from “{device}” · {address}";
-    public static string PairingTitle => Russian ? "Введите этот код на iPhone" : "Enter this code on the iPhone";
+    public static string PairingTitle => Russian ? "Введите этот код на телефоне" : "Enter this code on the phone";
     public static string PairingHint => Russian
-        ? "Код действует 2 минуты. После сопряжения iPhone\nбудет подключаться к этому ПК без кода."
-        : "The code is valid for 2 minutes. Once paired, the iPhone\nconnects to this PC without a code.";
+        ? "Код действует 2 минуты. После сопряжения телефон\nбудет подключаться к этому ПК без кода."
+        : "The code is valid for 2 minutes. Once paired, the phone\nconnects to this PC without a code.";
     public static string Cancel => Russian ? "Отменить" : "Cancel";
 
     // Streaming
@@ -47,7 +47,7 @@ public static class Loc
 
     // Camera settings
     public static string CameraSettings => Russian ? "Камера" : "Camera";
-    public static string CameraSettingsHint => Russian ? "Настройки сразу применяются на iPhone" : "Settings apply on the iPhone right away";
+    public static string CameraSettingsHint => Russian ? "Настройки сразу применяются на телефоне" : "Settings apply on the phone right away";
     public static string WaitingForPhoneSettings => Russian ? "Ждём настройки от телефона…" : "Waiting for the phone's settings…";
     public static string Lens => Russian ? "Объектив" : "Lens";
     public static string LensUltraWide => Russian ? "Ультра" : "Ultra";
@@ -83,8 +83,8 @@ public static class Loc
     // AI noise removal (on the PC)
     public static string Denoise => Russian ? "ИИ-шумоподавление" : "AI noise removal";
     public static string DenoiseHint => Russian
-        ? "Нейросеть NVIDIA убирает шум при слабом свете, не размывая детали. Работает на видеокарте ПК, iPhone не нагружает."
-        : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the iPhone.";
+        ? "Нейросеть NVIDIA убирает шум при слабом свете, не размывая детали. Работает на видеокарте ПК, телефон не нагружает."
+        : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the phone.";
     public static string DenoiseFast => Russian ? "Быстрое" : "Fast";
     public static string DenoiseGeneral => Russian ? "Общее" : "General";
     public static string DenoiseMaximum => Russian ? "Максимальное" : "Maximum";

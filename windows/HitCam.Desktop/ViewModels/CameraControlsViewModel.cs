@@ -15,7 +15,7 @@ public sealed record CameraOption(string Id, string Name, string Label)
 {
     public override string ToString() => Label;
 
-    // Known iPhone lenses, ordered by field of view; unknown ones keep the phone's name and go last.
+    // Known phone lenses, ordered by field of view; unknown ones keep the phone's name and go last.
     private static readonly string[] Order = ["back-ultrawide", "back-wide", "back-tele", "front"];
 
     public static IEnumerable<CameraOption> FromPhone(IEnumerable<CameraInfo> cameras) => cameras

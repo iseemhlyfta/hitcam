@@ -114,7 +114,7 @@ public:
             uint8_t* out = pixels_.data() + static_cast<size_t>(y) * outWidth * 4;
             for (uint32_t x = 0; x < outWidth; ++x) {
                 const uint32_t sourceX = static_cast<uint32_t>(static_cast<uint64_t>(x) * width / outWidth);
-                // BT.709, video range (what iPhone H.264 uses for HD).
+                // BT.709, video range (what phone H.264 uses for HD).
                 const int c = 298 * (lumaRow[sourceX] - 16);
                 const int d = chromaRow[sourceX & ~1u] - 128;
                 const int e = chromaRow[(sourceX & ~1u) + 1] - 128;

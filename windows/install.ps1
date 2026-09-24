@@ -67,7 +67,7 @@ foreach ($path in $links) {
     $link.TargetPath = $exe
     $link.WorkingDirectory = $installDir
     $link.IconLocation = "$exe,0"
-    $link.Description = "iPhone camera as a webcam"
+    $link.Description = "Phone camera as a webcam"
     $link.Save()
 }
 

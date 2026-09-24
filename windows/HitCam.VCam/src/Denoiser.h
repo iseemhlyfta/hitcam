@@ -37,7 +37,7 @@ public:
     // Luma noise standard deviation of an image, robust to edges and texture.
     static double EstimateNoise(const uint8_t* luma, uint32_t width, uint32_t height);
 
-    // Fast mode: noise below kNoiseIgnored is left alone (what a well-lit iPhone picture has after its own
+    // Fast mode: noise below kNoiseIgnored is left alone (what a well-lit phone picture has after its own
     // processing); the amount rises linearly to full at kNoiseFull. It switches to the strong model only for
     // extreme noise, with hysteresis so models are not reloaded back and forth.
     static constexpr double kNoiseIgnored = 1.5;
