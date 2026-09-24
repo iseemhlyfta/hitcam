@@ -2,8 +2,8 @@
 
 # HitCam
 
-**Камера iPhone как веб-камера для Windows 11** — открытая локальная замена iVCam.
-**Use your iPhone camera as a Windows 11 webcam** — an open, local-only alternative to iVCam.
+**Камера iPhone или Android-телефона как веб-камера для Windows 11** — открытая локальная замена iVCam.
+**Use your iPhone or Android phone camera as a Windows 11 webcam** — an open, local-only alternative to iVCam.
 
 - Полностью локально: телефон подключается напрямую к ПК по Wi-Fi. Никаких серверов, аккаунтов и телеметрии.
 - Подключение: IP-адрес, QR-код, PIN при первом сопряжении.
@@ -24,19 +24,21 @@
 | ПК: ИИ-шумоподавление (NVIDIA) | 🧪 экспериментально: на сжатом видео пока не помогает, идёт доработка |
 | ПК: превью в окне, дизайн (светлая и тёмная тема) | ✅ |
 | iOS: захват, H.264, подключение, PIN, QR, управление | 🧪 написано, сборка только в CI (нет Mac) |
+| Android: захват, H.264, подключение, PIN, QR, управление | 🧪 в разработке, APK собирается в CI |
 | Автопоиск в сети (Bonjour) | ⏳ фаза 6 |
 | Установка на ПК (ярлыки, «Приложения» Windows) | ✅ `windows\install.ps1` |
 
 ## Как это устроено
 
 ```
-iPhone ──(Wi-Fi, TCP 47800, H.264)──▶ HitCam для ПК ──(общая память)──▶ виртуальная камера Windows 11
+iPhone / Android ──(Wi-Fi, TCP 47800, H.264)──▶ HitCam для ПК ──(общая память)──▶ виртуальная камера Windows 11
 ```
 
 - `ios/` — приложение для iPhone (Swift, SwiftUI, iOS 17+). Проект генерируется [XcodeGen](https://github.com/yonaskolb/XcodeGen) из `project.yml`.
+- `android/` — приложение для Android (Android 8.0+), проект Gradle с модулем `app`.
 - `windows/HitCam.Core` — протокол, сопряжение, TCP-сервер (.NET 10).
 - `windows/HitCam.Desktop` — приложение для ПК (Avalonia).
-- `windows/HitCam.FakePhone` — эмулятор телефона для разработки без iPhone.
+- `windows/HitCam.FakePhone` — эмулятор телефона для разработки без телефона.
 - `windows/HitCam.VCam` — виртуальная камера и декодер (C++, Media Foundation). Источник камеры загружает служба
   «Windows Camera Frame Server»; кадры приходят к нему из HitCam через общую память `Global\HitCamVirtualCameraFrames`.
 
@@ -52,6 +54,12 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 
 Готовая сборка без Visual Studio — `HitCam-windows-x64.zip` на странице Releases: распакуйте и запустите `HitCam.exe`.
 
+## Установка на телефон
+
+- **iPhone** (iOS 17+): `HitCam-unsigned.ipa` ставится с Windows через Sideloadly — см. [docs/install-ios.md](docs/install-ios.md).
+- **Android** (8.0+): скачайте `HitCam-android.apk` со страницы Releases прямо на телефон и установите —
+  см. [docs/install-android.md](docs/install-android.md).
+
 ## Виртуальная камера
 
 При первом запуске HitCam для ПК нажмите **«Установить камеру»** и подтвердите запрос администратора:
@@ -63,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File windows\install.ps1
 ## ИИ-шумоподавление (NVIDIA RTX)
 
 В панели «Камера» есть переключатель **«ИИ-шумоподавление»**: нейросеть NVIDIA (эффект «Denoising» из NVIDIA Video
-Effects SDK) убирает шум, не размывая детали. Работает на видеокарте ПК после декодирования и iPhone не нагружает;
+Effects SDK) убирает шум, не размывая детали. Работает на видеокарте ПК после декодирования и телефон не нагружает;
 на RTX 3070 около 5–6 мс на кадр 1080p. Три режима:
 
 - **Быстрое** — мягкая модель, только когда в кадре есть шум (он измеряется в каждом кадре); чистую картинку не трогает;
@@ -94,9 +102,15 @@ dotnet run --project HitCam.FakePhone -- 127.0.0.1 47800
 
 iOS собирается в GitHub Actions (`.github/workflows/ios.yml`): артефакт `HitCam-unsigned.ipa`.
 
-Релиз: `git tag v0.1.0 && git push origin v0.1.0` — workflow **Release** собирает приложение для Windows и IPA
+Android собирается в GitHub Actions (`.github/workflows/android.yml`, JDK 21): артефакт `HitCam-android.apk`.
+Локально: `cd android && ./gradlew testDebugUnitTest assembleRelease`. Релизный ключ берётся из переменных окружения
+`HITCAM_KEYSTORE`, `HITCAM_KEYSTORE_PASSWORD`, `HITCAM_KEY_ALIAS`, `HITCAM_KEY_PASSWORD` (в CI — секреты
+`ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, `ANDROID_KEY_PASSWORD`); без них APK
+подписывается отладочным ключом.
+
+Релиз: `git tag v0.1.0 && git push origin v0.1.0` — workflow **Release** собирает приложение для Windows, IPA и APK
 и публикует их на странице Releases.
-Установка на iPhone без Mac — см. [docs/install-ios.md](docs/install-ios.md).
+Установка на iPhone без Mac — см. [docs/install-ios.md](docs/install-ios.md), на Android — [docs/install-android.md](docs/install-android.md).
 
 ## Лицензия / License
 
