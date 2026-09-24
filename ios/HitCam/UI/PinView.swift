@@ -7,6 +7,8 @@ struct PinView: View {
     let wrongPin: Bool
 
     @State private var pin = ""
+    /// Set once a PIN is sent; cleared when the PC answers, so one PIN never costs two attempts.
+    @State private var awaitingResult = false
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -35,16 +37,21 @@ struct PinView: View {
                 Button(L10n.cancel, role: .cancel) { session.disconnect() }
                 Button(L10n.pair, action: submit)
                     .buttonStyle(.borderedProminent)
-                    .disabled(pin.count != 6)
+                    .disabled(pin.count != 6 || awaitingResult)
             }
         }
         .padding(32)
         .onAppear { focused = true }
-        .onChange(of: attemptsLeft) { _, _ in pin = "" }
+        .onChange(of: attemptsLeft) { _, _ in
+            pin = ""
+            awaitingResult = false
+        }
+        .onChange(of: wrongPin) { _, _ in awaitingResult = false }
     }
 
     private func submit() {
-        guard pin.count == 6 else { return }
+        guard pin.count == 6, !awaitingResult else { return }
+        awaitingResult = true
         session.submitPin(pin)
     }
 }

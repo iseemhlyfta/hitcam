@@ -83,4 +83,11 @@ final class ProtocolTests: XCTestCase {
         XCTAssertNil(ServerAddress.parse("10.0.0.2:abc"))
         XCTAssertNil(ServerAddress.parse(""))
     }
+
+    func testQrCodeWithAnImpossiblePortIsRejected() {
+        XCTAssertNil(ServerAddress.parse("hitcam://192.168.1.5:99999?id=abc"))
+        XCTAssertNil(ServerAddress.parse("hitcam://192.168.1.5:0?id=abc"))
+        XCTAssertEqual(ServerAddress.parse("hitcam://192.168.1.5?id=abc")?.port, ProtocolInfo.defaultPort)
+        XCTAssertEqual(ServerAddress.parse("hitcam://192.168.1.5:65535?id=abc")?.port, 65535)
+    }
 }

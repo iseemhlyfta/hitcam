@@ -236,9 +236,14 @@ struct ServerAddress: Equatable, Codable, Hashable {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if let url = URL(string: trimmed), url.scheme == ProtocolInfo.uriScheme, let host = url.host, !host.isEmpty {
             let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
+            var port = ProtocolInfo.defaultPort
+            if let raw = url.port {
+                guard let exact = UInt16(exactly: raw), exact > 0 else { return nil }
+                port = exact
+            }
             return ServerAddress(
                 host: host,
-                port: UInt16(url.port ?? Int(ProtocolInfo.defaultPort)),
+                port: port,
                 serverId: items.first { $0.name == "id" }?.value,
                 name: items.first { $0.name == "name" }?.value)
         }

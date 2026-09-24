@@ -2,6 +2,7 @@ import SwiftUI
 
 struct StreamingView: View {
     @EnvironmentObject private var session: StreamSession
+    @Environment(\.scenePhase) private var scenePhase
     let serverName: String
 
     @State private var dimmed = false
@@ -41,6 +42,10 @@ struct StreamingView: View {
         }
         .statusBarHidden(dimmed)
         .onAppear { OrientationLock.set(.landscape) }
+        .onChange(of: scenePhase) { _, phase in
+            // The brightness outlives the app: restore it before leaving the foreground.
+            if phase != .active { setDimmed(false) }
+        }
         .onDisappear {
             setDimmed(false)
             OrientationLock.set(.allButUpsideDown)
