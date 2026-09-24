@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_subtitle">Your phone camera as a PC webcam</string>
+    <string name="address_placeholder">PC IP address, e.g. 192.168.1.5</string>
+    <string name="connect">Connect</string>
+    <string name="scan_qr">Scan QR code</string>
+    <string name="scan_prompt">Point the camera at the QR code in HitCam on the PC</string>
+    <string name="recent">Recent</string>
+    <string name="invalid_address">Invalid address</string>
+    <string name="connecting">Connecting…</string>
+    <string name="reconnecting">Connection lost, reconnecting…</string>
+    <string name="cancel">Cancel</string>
+    <string name="enter_pin">Enter the PIN shown on the PC</string>
+    <string name="wrong_pin">Wrong PIN, %1$d attempts left</string>
+    <string name="pair">Pair</string>
+    <string name="disconnect">Disconnect</string>
+    <string name="dim">Dim</string>
+    <string name="controls">Settings</string>
+    <string name="tap_to_wake">Streaming. Tap to wake the screen.</string>
+    <string name="mirror">Mirror</string>
+    <string name="torch">Torch</string>
+    <string name="rotate">Rotate</string>
+    <string name="quality">Quality</string>
+    <string name="zoom">Zoom</string>
+    <string name="exposure">Exposure</string>
+    <string name="auto_focus">Auto focus</string>
+    <string name="focus">Focus</string>
+    <string name="keep_app_open">Keep the app open: Android does not allow the camera in the background.</string>
+    <string name="busy">Another phone is already connected to this PC</string>
+    <string name="pairing_locked">Too many wrong PINs. Try again in 30 seconds.</string>
+    <string name="version_mismatch">HitCam versions on the PC and the phone don\'t match</string>
+    <string name="protocol_error">Unexpected response from the PC</string>
+    <string name="other_pc">This is a different PC: scan its QR code again</string>
+    <string name="closed_by_pc">The PC closed the connection</string>
+    <string name="connection_closed">Connection closed</string>
+    <string name="connection_failed">Could not connect: %1$s. Make sure the PC and the phone are on the same Wi-Fi and HitCam is running on the PC.</string>
+    <string name="camera_failed">Camera error: %1$s</string>
+    <string name="camera_denied">No camera access. Allow it in Settings → Apps → HitCam → Permissions.</string>
+    <string name="open_settings">Open settings</string>
+    <string name="camera_tele">Tele</string>
+    <string name="camera_front">Front</string>
+</resources>
