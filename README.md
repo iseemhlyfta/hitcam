@@ -1,4 +1,4 @@
-<img width="1920" height="960" alt="hitcam_00000" src="https://github.com/user-attachments/assets/7dad765f-a832-4b1b-ae0d-407609e5cead" />
+<img width="1920" height="960" alt="hitcam2_00000" src="https://github.com/user-attachments/assets/8b6087c7-444a-4e34-bef6-6c3792e59357" />
 
 # HitCam
 
