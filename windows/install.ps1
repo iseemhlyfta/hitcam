@@ -35,15 +35,29 @@ if ($Uninstall) {
 $project = Join-Path $PSScriptRoot "HitCam.Desktop"
 if (-not (Test-Path $project)) { throw "Run this script from the repository (windows\install.ps1)." }
 
-Stop-InstalledApp
 Write-Host "Building HitCam..."
-# A separate build folder: HitCam copies started from the repository's bin\ folders lock their files and must not
-# break the installation.
+# Separate temporary build and publish folders: HitCam copies started from the repository's bin\ folders lock their
+# files and must not break the installation, and the installed copy keeps running until the build has succeeded.
 $buildDir = Join-Path $env:TEMP "HitCam-install-build"
-& dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $installDir `
-    --artifacts-path $buildDir --nologo -v q
-if ($LASTEXITCODE) { throw "dotnet publish failed ($LASTEXITCODE)" }
-Copy-Item $PSCommandPath (Join-Path $installDir "install.ps1") -Force
+$publishDir = Join-Path $env:TEMP "HitCam-install-publish"
+try {
+    Remove-Item -LiteralPath $buildDir, $publishDir -Recurse -Force -ErrorAction SilentlyContinue
+    & dotnet publish $project -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o $publishDir `
+        --artifacts-path $buildDir --nologo -v q
+    if ($LASTEXITCODE) { throw "dotnet publish failed ($LASTEXITCODE)" }
+
+    Stop-InstalledApp
+    # Replace the installation as a whole, so files an older version shipped do not linger.
+    if (Test-Path -LiteralPath $installDir) {
+        Get-ChildItem -LiteralPath $installDir -Force | Remove-Item -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+    Copy-Item -Path (Join-Path $publishDir "*") -Destination $installDir -Recurse -Force
+    Copy-Item -LiteralPath $PSCommandPath -Destination (Join-Path $installDir "install.ps1") -Force
+}
+finally {
+    Remove-Item -LiteralPath $buildDir, $publishDir -Recurse -Force -ErrorAction SilentlyContinue
+}
 
 $shell = New-Object -ComObject WScript.Shell
 $links = @($startMenuLink)
