@@ -29,45 +29,72 @@ class H264Encoder(private val output: (EncodedFrame) -> Unit) {
     private var inputSurface: Surface? = null
     @Volatile private var generation = 0
 
-    /** Creates a new encoder session and returns the surface to draw frames into. */
+    /**
+     * Creates a new encoder session and returns the surface to draw frames into.
+     *
+     * Encoders are tried one by one, hardware first, each with the full low-latency setup, then without the High
+     * profile, then with only the required keys. MediaCodecList.findEncoderForFormat is not used: many phones
+     * (Xiaomi among them) under-report what their hardware encoder can do, so it finds none for plain 1080p30.
+     */
     fun configure(width: Int, height: Int, fps: Int, bitrateKbps: Int): Surface {
         release()
-        val name = MediaCodecList(MediaCodecList.REGULAR_CODECS).findEncoderForFormat(format(width, height, fps, bitrateKbps, high = false))
-            ?: throw IllegalStateException("No H.264 encoder for ${width}x$height@$fps")
-        val info = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.first { it.name == name }
-        val capabilities = info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        val supportsHigh = capabilities.profileLevels.any { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
-        val cbr = capabilities.encoderCapabilities?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true
-
         val current = ++generation
-        val codec = MediaCodec.createByCodecName(name)
-        codec.setCallback(Callback(current), handler)
-        // High profile without B-frames (Constrained High) where offered; otherwise the encoder's default profile.
-        val attempts = if (supportsHigh) listOf(true, false) else listOf(false)
         var lastError: Exception? = null
-        for (high in attempts) {
-            try {
-                val format = format(width, height, fps, bitrateKbps, high)
-                if (cbr) format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
-                codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-                lastError = null
-                break
+        for (info in encoders()) {
+            val capabilities = runCatching { info.getCapabilitiesForType(MediaFormat.MIMETYPE_VIDEO_AVC) }.getOrNull() ?: continue
+            val supportsHigh = capabilities.profileLevels.any { it.profile == MediaCodecInfo.CodecProfileLevel.AVCProfileHigh }
+            val cbr = capabilities.encoderCapabilities?.isBitrateModeSupported(MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR) == true
+            val variants = buildList {
+                if (supportsHigh) add(Variant.HIGH)
+                add(Variant.DEFAULT_PROFILE)
+                add(Variant.MINIMAL)
+            }
+            val codec = try {
+                MediaCodec.createByCodecName(info.name)
             } catch (e: Exception) {
                 lastError = e
-                codec.reset()
-                codec.setCallback(Callback(current), handler)
+                continue
             }
-        }
-        if (lastError != null) {
+            for (variant in variants) {
+                try {
+                    codec.setCallback(Callback(current), handler)
+                    val format = format(width, height, fps, bitrateKbps, variant)
+                    if (cbr && variant != Variant.MINIMAL) {
+                        format.setInteger(MediaFormat.KEY_BITRATE_MODE, MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_CBR)
+                    }
+                    codec.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
+                    val surface = codec.createInputSurface()
+                    codec.start()
+                    this.codec = codec
+                    inputSurface = surface
+                    return surface
+                } catch (e: Exception) {
+                    lastError = e
+                    runCatching { codec.reset() }
+                }
+            }
             codec.release()
-            throw lastError
         }
-        val surface = codec.createInputSurface()
-        codec.start()
-        this.codec = codec
-        inputSurface = surface
-        return surface
+        throw IllegalStateException("No H.264 encoder for ${width}x$height@$fps" + (lastError?.message?.let { ": $it" } ?: ""), lastError)
     }
+
+    /** H.264 encoders, hardware ones first. */
+    private fun encoders(): List<MediaCodecInfo> {
+        val all = MediaCodecList(MediaCodecList.REGULAR_CODECS).codecInfos.filter { info ->
+            info.isEncoder && info.supportedTypes.any { it.equals(MediaFormat.MIMETYPE_VIDEO_AVC, ignoreCase = true) }
+        }
+        return all.sortedBy { if (isSoftware(it)) 1 else 0 }
+    }
+
+    private fun isSoftware(info: MediaCodecInfo): Boolean =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            info.isSoftwareOnly
+        } else {
+            val name = info.name.lowercase()
+            name.startsWith("omx.google.") || name.startsWith("c2.android.") || name.contains(".sw.")
+        }
+
+    private enum class Variant { HIGH, DEFAULT_PROFILE, MINIMAL }
 
     fun setBitrate(kbps: Int) {
         codec?.setParameters(Bundle().apply { putInt(MediaCodec.PARAMETER_KEY_VIDEO_BITRATE, kbps * 1000) })
@@ -96,12 +123,14 @@ class H264Encoder(private val output: (EncodedFrame) -> Unit) {
         inputSurface = null
     }
 
-    private fun format(width: Int, height: Int, fps: Int, bitrateKbps: Int, high: Boolean) =
+    private fun format(width: Int, height: Int, fps: Int, bitrateKbps: Int, variant: Variant) =
         MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, width, height).apply {
             setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
             setInteger(MediaFormat.KEY_BIT_RATE, bitrateKbps * 1000)
             setInteger(MediaFormat.KEY_FRAME_RATE, fps)
             setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 2)
+            // Only the keys every encoder must accept; the rest is tuning some encoders reject.
+            if (variant == Variant.MINIMAL) return@apply
             setInteger(MediaFormat.KEY_PRIORITY, 0)
             setInteger(MediaFormat.KEY_COLOR_STANDARD, MediaFormat.COLOR_STANDARD_BT709)
             setInteger(MediaFormat.KEY_COLOR_RANGE, MediaFormat.COLOR_RANGE_LIMITED)
@@ -110,7 +139,7 @@ class H264Encoder(private val output: (EncodedFrame) -> Unit) {
             setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1_000_000L / fps * 3)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) setInteger(MediaFormat.KEY_LATENCY, 1)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0)
-            if (high) {
+            if (variant == Variant.HIGH) {
                 setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh)
                 setInteger(MediaFormat.KEY_LEVEL, if (width * height * fps > 1920 * 1080 * 30) MediaCodecInfo.CodecProfileLevel.AVCLevel42 else MediaCodecInfo.CodecProfileLevel.AVCLevel41)
             }
