@@ -38,7 +38,25 @@ object CameraRules {
         control.mirror?.let { next = next.copy(mirror = it) }
         control.rotation?.let { if (it in rotations) next = next.copy(rotation = it) }
         control.stabilization?.let { if (it in (state.stabilizationModes ?: listOf("off"))) next = next.copy(stabilization = it) }
+        control.noiseReduction?.let { if (it in state.noiseReductionModes.orEmpty()) next = next.copy(noiseReduction = it) }
         return next
+    }
+
+    /** Noise reduction modes in protocol order; the camera applies them before encoding. */
+    val noiseReductionOrder = listOf("off", "fast", "high")
+
+    /** The modes offered to the PC, or null when the camera gives no choice (a single mode or none). */
+    fun noiseReductionModes(supported: Collection<String>): List<String>? =
+        noiseReductionOrder.filter { it in supported }.takeIf { it.size > 1 }
+
+    /**
+     * The chosen mode if the camera offers it, otherwise the default: the best one offered ("high", then "fast", then "off").
+     * Used when a lens or format is (re)configured, so a choice survives switching to a camera that supports it.
+     */
+    fun noiseReduction(chosen: String?, modes: List<String>?): String? {
+        if (modes.isNullOrEmpty()) return null
+        if (chosen != null && chosen in modes) return chosen
+        return noiseReductionOrder.lastOrNull { it in modes } ?: modes.first()
     }
 
     /** Whether a stored state can be used to start the camera. */

@@ -72,6 +72,8 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
     private var wbGains: RggbChannelVector? = null
     private var wbTransform: ColorSpaceTransform? = null
     private var focusRegion: MeteringRectangle? = null
+    /** The noise reduction last chosen (by the PC, the phone or the stored state); kept across lenses without that mode. */
+    private var noiseReductionChoice: String? = null
 
     // Written by capture results on the camera thread.
     @Volatile private var lastGains: RggbChannelVector? = null
@@ -84,6 +86,7 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
         ops.execute {
             try {
                 state = initial
+                noiseReductionChoice = initial.noiseReduction
                 configureSession()
                 completion(Result.success(snapshot()))
             } catch (e: Exception) {
@@ -105,6 +108,8 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
             val needsReconfigure = next.cameraId != before.cameraId || next.width != before.width ||
                 next.height != before.height || next.fps != before.fps
             state = next
+            // Validated against the current lens, so it also holds when a failed format change restores that lens.
+            if (next.noiseReduction != before.noiseReduction) noiseReductionChoice = next.noiseReduction
             var failed = false
             if (needsReconfigure && device != null) {
                 try {
@@ -210,6 +215,8 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
             if (modes?.contains(CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON) == true) add("standard")
         }
         val stabilization = state.stabilization?.takeIf { it in stabilizationModes } ?: "off"
+        val noiseReductionModes = noiseReductionModes(spec)
+        val noiseReduction = CameraRules.noiseReduction(noiseReductionChoice, noiseReductionModes)
         wbCalibration = WhiteBalance.Calibration.NONE
         wbGains = null
         wbTransform = null
@@ -220,11 +227,38 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
             fps = fps, zoom = 1.0, torch = false, focusMode = "continuous", exposureBias = 0.0, exposureMode = "auto",
             whiteBalanceMode = "auto", whiteBalanceTemperature = state.whiteBalanceTemperature ?: 5000.0, whiteBalanceTint = 0.0,
             stabilization = stabilization, stabilizationModes = stabilizationModes,
+            noiseReduction = noiseReduction, noiseReductionModes = noiseReductionModes,
         )
         updateGeometry()
         submit(false)
         // Let auto white balance settle once so the reported temperature is the camera's, not a default.
         waitForFirstResult()
+    }
+
+    /**
+     * Noise reduction the camera can apply to video, or null without a choice (LEGACY devices list only FAST).
+     * The request goes to the opened camera while a physical lens produces the frames: both must support a mode.
+     * MINIMAL and ZERO_SHUTTER_LAG are not offered. HIGH_QUALITY may lower the frame rate at 60 fps on some phones;
+     * it stays selectable there, the user can switch to "fast".
+     */
+    private fun noiseReductionModes(spec: CameraSpec): List<String>? {
+        fun names(chars: CameraCharacteristics): Set<String>? =
+            chars.get(CameraCharacteristics.NOISE_REDUCTION_AVAILABLE_NOISE_REDUCTION_MODES)?.toList()?.mapNotNull {
+                when (it) {
+                    CameraMetadata.NOISE_REDUCTION_MODE_OFF -> "off"
+                    CameraMetadata.NOISE_REDUCTION_MODE_FAST -> "fast"
+                    CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY -> "high"
+                    else -> null
+                }
+            }?.toSet()
+        val device = names(spec.deviceCharacteristics)
+        val frames = if (spec.physicalId != null) names(spec.characteristics) else device
+        val supported = when {
+            device == null -> frames
+            frames == null -> device
+            else -> device intersect frames
+        }
+        return CameraRules.noiseReductionModes(supported.orEmpty())
     }
 
     private fun chooseSize(sizes: List<Size>, width: Int, height: Int): Size? {
@@ -378,6 +412,12 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
             CaptureRequest.CONTROL_VIDEO_STABILIZATION_MODE,
             if (state.stabilization == "standard") CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_ON else CameraMetadata.CONTROL_VIDEO_STABILIZATION_MODE_OFF,
         )
+        // Without a choice the template's default (FAST for TEMPLATE_RECORD) stays.
+        when (state.noiseReduction) {
+            "off" -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_OFF)
+            "fast" -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_FAST)
+            "high" -> builder.set(CaptureRequest.NOISE_REDUCTION_MODE, CameraMetadata.NOISE_REDUCTION_MODE_HIGH_QUALITY)
+        }
 
         // Zoom.
         val range = spec.zoomRatioRange

@@ -167,6 +167,10 @@ data class CameraState(
     // "off" | "standard"; `stabilizationModes` are those the active camera supports.
     val stabilization: String? = null,
     val stabilizationModes: List<String>? = null,
+    // Added in 0.3: camera noise reduction before encoding, "off" | "fast" | "high"; `noiseReductionModes` are those
+    // the active camera supports. Both absent when the camera offers no choice.
+    val noiseReduction: String? = null,
+    val noiseReductionModes: List<String>? = null,
 )
 
 /** Only non-null fields are applied. */
@@ -190,6 +194,7 @@ data class Control(
     val whiteBalanceTint: Double? = null,
     val exposureMode: String? = null,
     val stabilization: String? = null,
+    val noiseReduction: String? = null,
 )
 
 @Serializable

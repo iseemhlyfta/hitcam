@@ -1,5 +1,6 @@
 package io.github.hitnes.hitcam
 
+import io.github.hitnes.hitcam.camera.CameraRules
 import io.github.hitnes.hitcam.protocol.CameraState
 import io.github.hitnes.hitcam.protocol.Control
 import io.github.hitnes.hitcam.protocol.Hello
@@ -13,6 +14,7 @@ import io.github.hitnes.hitcam.protocol.ProtocolInfo
 import io.github.hitnes.hitcam.protocol.ProtocolJson
 import io.github.hitnes.hitcam.protocol.ServerAddress
 import io.github.hitnes.hitcam.protocol.pongPayload
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import org.junit.Assert.assertArrayEquals
@@ -94,6 +96,31 @@ class ProtocolTest {
         assertEquals("back-wide", state.cameraId)
         assertNull(state.whiteBalanceMode)
         assertNull(state.stabilization)
+        assertNull(state.noiseReduction)
+        assertNull(state.noiseReductionModes)
+    }
+
+    @Test
+    fun noiseReductionIsOmittedWhenTheCameraHasNoChoice() {
+        val state = CameraRules.defaultState
+        val plain = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(state)).jsonObject
+        assertFalse("noiseReduction" in plain)
+        assertFalse("noiseReductionModes" in plain)
+
+        val offered = state.copy(noiseReduction = "high", noiseReductionModes = listOf("off", "fast", "high"))
+        val json = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(offered)).jsonObject
+        assertEquals("high", json["noiseReduction"]!!.jsonPrimitive.content)
+        assertEquals(listOf("off", "fast", "high"), json["noiseReductionModes"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(offered, ProtocolJson.decodeFromString<CameraState>(ProtocolJson.encodeToString(offered)))
+    }
+
+    @Test
+    fun pcCanSetNoiseReduction() {
+        val control = ProtocolJson.decodeFromString<Control>("""{"noiseReduction":"fast"}""")
+        assertEquals("fast", control.noiseReduction)
+        assertNull(control.stabilization)
+        val encoded = ProtocolJson.parseToJsonElement(ProtocolJson.encodeToString(Control(zoom = 2.0))).jsonObject
+        assertFalse("noiseReduction" in encoded)
     }
 
     @Test

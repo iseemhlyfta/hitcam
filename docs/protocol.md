@@ -46,10 +46,10 @@ The PC checks `length` against a per-state limit before reading the payload:
 | 0x3F | Bye             | both       | JSON `{ "reason": "..." }` (optional)     |
 
 JSON payloads are UTF-8, camelCase, unknown fields are ignored. Optional fields are `Hello.model`,
-`Hello.appVersion`, `Hello.token`, `PairResult.token`, `Bye.reason`, the fields added in app 0.2 (see below) and
+`Hello.appVersion`, `Hello.token`, `PairResult.token`, `Bye.reason`, the fields added in app 0.2 and 0.3 (see below) and
 every `Control` field; all other fields are required and must not be `null`. The PC treats a missing or `null` required field as a protocol error and closes
 the connection. Arrays are bounded: `cameras` ≤ 16, `presets` ≤ 16, `presets[].fps` ≤ 8, `stabilizationModes` ≤ 8,
-and must not contain `null`.
+`noiseReductionModes` ≤ 8, and must not contain `null`.
 
 ## Session flow
 
@@ -126,14 +126,15 @@ phone                                   pc
 { "cameraId": "back-wide", "zoom": 1.0, "torch": false, "focusMode": "auto", "lensPosition": 0.5,
   "exposureBias": 0.0, "mirror": false, "rotation": 0, "width": 1920, "height": 1080, "fps": 30, "bitrateKbps": 8000,
   "whiteBalanceMode": "auto", "whiteBalanceTemperature": 5200, "whiteBalanceTint": 0, "exposureMode": "auto",
-  "stabilization": "off", "stabilizationModes": ["off", "standard", "cinematic"] }
+  "stabilization": "off", "stabilizationModes": ["off", "standard", "cinematic"],
+  "noiseReduction": "high", "noiseReductionModes": ["off", "fast", "high"] }
 
 // Control (every field optional; only present fields are applied)
 { "cameraId": "front", "zoom": 2.0, "torch": true, "focusMode": "locked", "lensPosition": 0.3,
   "focusPoint": { "x": 0.5, "y": 0.5 }, "exposureBias": -0.5, "mirror": true, "rotation": 90,
   "width": 1280, "height": 720, "fps": 60, "bitrateKbps": 6000,
   "whiteBalanceMode": "locked", "whiteBalanceTemperature": 4200, "whiteBalanceTint": -10, "exposureMode": "locked",
-  "stabilization": "standard" }
+  "stabilization": "standard", "noiseReduction": "fast" }
 
 // Status
 { "battery": 0.82, "charging": true, "thermal": "nominal", "fps": 29.9, "bitrateKbps": 7900, "droppedFrames": 3 }
@@ -148,6 +149,16 @@ without a mode means "locked at this value", the other one keeps its current val
 `exposureBias`. `stabilization` ∈ {"off", "standard", "cinematic"}, limited to `stabilizationModes`, which the
 phone recomputes for every format; stabilization adds latency. Switching lens or format resets white balance
 and exposure to "auto".
+
+Added in app 0.3 (optional, absent from older apps: hide the control then): `noiseReduction` ∈ {"off", "fast",
+"high"} is the noise reduction the camera applies before encoding (Android `NOISE_REDUCTION_MODE` OFF / FAST /
+HIGH_QUALITY); removing noise before H.264 compression gives a cleaner stream than filtering on the PC.
+`noiseReductionModes` lists the modes the active camera supports, in that order, and is recomputed for every lens
+and format; both fields are absent when the camera offers no choice. A `Control.noiseReduction` not in
+`noiseReductionModes` is ignored. The phone's default is "high" if supported, else "fast", else "off". Switching
+lens or format keeps the chosen mode if the new camera supports it, otherwise the default applies. "high" may lower
+the frame rate on some phones at 60 fps; it stays selectable. The iPhone never sends these fields: iOS gives no
+control over video noise reduction.
 
 `Hello.model` is a free-form device model string for display and diagnostics only, e.g. `"iPhone15,2"` or
 `"Xiaomi 23049PCD8G"`; the PC must not parse it. `whiteBalanceTint` units are device-specific: the value is on a

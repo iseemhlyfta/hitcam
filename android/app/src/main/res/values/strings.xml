@@ -39,4 +39,8 @@
     <string name="open_settings">Open settings</string>
     <string name="camera_tele">Tele</string>
     <string name="camera_front">Front</string>
+    <string name="noise_reduction">Noise reduction</string>
+    <string name="noise_reduction_off">Off</string>
+    <string name="noise_reduction_fast">Fast</string>
+    <string name="noise_reduction_high">Quality</string>
 </resources>

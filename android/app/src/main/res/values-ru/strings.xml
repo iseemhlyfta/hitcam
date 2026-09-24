@@ -39,4 +39,8 @@
     <string name="open_settings">Открыть настройки</string>
     <string name="camera_tele">Теле</string>
     <string name="camera_front">Фронт.</string>
+    <string name="noise_reduction">Шумоподавление</string>
+    <string name="noise_reduction_off">Выкл</string>
+    <string name="noise_reduction_fast">Быстрое</string>
+    <string name="noise_reduction_high">Качество</string>
 </resources>

@@ -53,6 +53,41 @@ class CameraRulesTest {
     }
 
     @Test
+    fun noiseReductionIsLimitedToTheOfferedModes() {
+        assertNull(CameraRules.applying(Control(noiseReduction = "off"), base, ids).noiseReduction)
+        val offered = base.copy(noiseReduction = "high", noiseReductionModes = listOf("off", "fast", "high"))
+        assertEquals("off", CameraRules.applying(Control(noiseReduction = "off"), offered, ids).noiseReduction)
+        assertEquals("fast", CameraRules.applying(Control(noiseReduction = "fast"), offered, ids).noiseReduction)
+        assertEquals("high", CameraRules.applying(Control(noiseReduction = "minimal"), offered, ids).noiseReduction)
+        val noHigh = base.copy(noiseReduction = "fast", noiseReductionModes = listOf("off", "fast"))
+        assertEquals("fast", CameraRules.applying(Control(noiseReduction = "high"), noHigh, ids).noiseReduction)
+    }
+
+    @Test
+    fun noiseReductionModesNeedAChoice() {
+        assertEquals(listOf("off", "fast", "high"), CameraRules.noiseReductionModes(setOf("high", "off", "fast")))
+        assertEquals(listOf("off", "fast"), CameraRules.noiseReductionModes(setOf("fast", "off")))
+        // LEGACY cameras list only FAST: nothing to choose.
+        assertNull(CameraRules.noiseReductionModes(setOf("fast")))
+        assertNull(CameraRules.noiseReductionModes(emptySet()))
+    }
+
+    @Test
+    fun noiseReductionDefaultsToTheBestModeAndSurvivesLensChanges() {
+        val all = listOf("off", "fast", "high")
+        val noHigh = listOf("off", "fast")
+        assertEquals("high", CameraRules.noiseReduction(null, all))
+        assertEquals("fast", CameraRules.noiseReduction(null, noHigh))
+        assertEquals("off", CameraRules.noiseReduction(null, listOf("off")))
+        assertNull(CameraRules.noiseReduction("high", null))
+        // A choice the new camera supports is kept, otherwise the new camera's default is used.
+        assertEquals("off", CameraRules.noiseReduction("off", noHigh))
+        assertEquals("fast", CameraRules.noiseReduction("high", noHigh))
+        assertEquals("fast", CameraRules.noiseReduction("fast", all))
+        assertEquals("high", CameraRules.noiseReduction("bogus", all))
+    }
+
+    @Test
     fun storedStateIsSanitized() {
         assertEquals(base, CameraRules.sanitized(null, ids))
         assertEquals(base, CameraRules.sanitized(base.copy(cameraId = "back-tele"), ids))

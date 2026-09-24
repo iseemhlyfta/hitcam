@@ -273,6 +273,22 @@ private fun Controls(app: HitCamApp, state: CameraState) {
         }
     }
 
+    val noiseReductionModes = state.noiseReductionModes
+    if (noiseReductionModes != null && noiseReductionModes.size > 1) {
+        Column {
+            Text(stringResource(R.string.noise_reduction), style = MaterialTheme.typography.bodySmall)
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                noiseReductionModes.forEach { mode ->
+                    FilterChip(
+                        selected = mode == state.noiseReduction,
+                        onClick = { session.apply(Control(noiseReduction = mode)) },
+                        label = { Text(noiseReductionLabel(mode)) },
+                    )
+                }
+            }
+        }
+    }
+
     Text(stringResource(R.string.keep_app_open), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 }
 
@@ -283,6 +299,14 @@ private fun cameraLabel(id: String, name: String): String = when (id) {
     "back-tele" -> stringResource(R.string.camera_tele)
     "front" -> stringResource(R.string.camera_front)
     else -> name
+}
+
+@Composable
+private fun noiseReductionLabel(mode: String): String = when (mode) {
+    "off" -> stringResource(R.string.noise_reduction_off)
+    "fast" -> stringResource(R.string.noise_reduction_fast)
+    "high" -> stringResource(R.string.noise_reduction_high)
+    else -> mode
 }
 
 /** A slider that follows the phone's state but keeps the finger's value while dragging. */
