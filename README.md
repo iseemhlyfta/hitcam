@@ -105,6 +105,21 @@ Firefox и сайты вроде Google Meet; не видят приложени
 
 Проверка без телефона: `windows\HitCam.VCam\build\Release\HitCamVCamTest.exe --process` (build.ps1 -Tests).
 
+## Анализ объектов (HitCam Vision)
+
+Раздел **«Анализ объектов»** в правой панели находит в кадре 80 видов объектов (люди, животные, транспорт, предметы)
+и обводит их рамками с подписью вида «person 92%». Рамки плавные: у каждого объекта свой цвет, пока он в кадре.
+Можно выбрать, какие классы искать, и порог уверенности. Переключатель «Показывать рамки в камере HitCam» добавляет
+рамки в само видео — их увидят в Zoom, Discord, OBS.
+
+Работает на ПК: нейросеть **RF-DETR** (Roboflow, Apache 2.0) через ONNX Runtime + DirectML — любая видеокарта
+(NVIDIA, AMD, Intel), без неё процессор. Модель «Быстрая» (Nano) — около 9–13 мс на кадр на RTX 3070, «Точная»
+(Small) — около 17 мс. Анализ идёт отдельно от видео и никогда его не замедляет. Стандартная модель входит в архив
+релиза (папка `models` рядом с `HitCam.exe`); свои модели кладутся в `%LOCALAPPDATA%\HitCam\models`.
+
+Как это устроено, теория для начинающих и дообучение на своих объектах (Python, папка `vision/`): см.
+[docs/vision.md](docs/vision.md) и [vision/README.md](vision/README.md).
+
 ## Разработка
 
 Нужны .NET 10 SDK и Visual Studio с «Разработкой классических приложений на C++» (MSVC, Windows 11 SDK):
@@ -114,6 +129,7 @@ Firefox и сайты вроде Google Meet; не видят приложени
 cd windows
 dotnet test HitCam.Core.Tests
 dotnet test HitCam.Desktop.Tests
+dotnet test HitCam.Vision.Tests
 dotnet run --project HitCam.Desktop
 # во втором терминале — эмулятор телефона (PIN с экрана ПК):
 dotnet run --project HitCam.FakePhone -- 127.0.0.1 47800
@@ -134,3 +150,7 @@ Android собирается в GitHub Actions (`.github/workflows/android.yml`,
 ## Лицензия / License
 
 MIT — см. [LICENSE](LICENSE).
+
+Сторонние компоненты: Softcam (MIT), DirectShow base classes (MIT), RF-DETR и его веса Nano/Small (Apache 2.0),
+ONNX Runtime (MIT), DirectML.dll (Microsoft, распространяется по лицензии Microsoft для DirectML), заголовки NVIDIA
+Video Effects SDK (MIT; сама среда NVIDIA ставится отдельно).
