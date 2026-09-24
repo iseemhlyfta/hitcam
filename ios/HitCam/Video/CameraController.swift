@@ -3,10 +3,9 @@ import Foundation
 
 /// Owns the AVCaptureSession. All configuration happens on `sessionQueue`; frames are delivered on `videoQueue`.
 final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate {
-    static let presets = [
-        VideoPreset(width: 1280, height: 720, fps: [30, 60]),
-        VideoPreset(width: 1920, height: 1080, fps: [30, 60]),
-    ]
+    static let presets = CameraRules.presets
+    /// Ids of the cameras this phone has; controls naming other ids are ignored.
+    static let availableCameraIds = CameraController.availableCameras().map(\.id)
 
     let session = AVCaptureSession()
     private let sessionQueue = DispatchQueue(label: "hitcam.camera.session")
@@ -25,9 +24,24 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
     /// Called on the video queue for every captured frame.
     var onFrame: ((CMSampleBuffer) -> Void)?
 
-    private(set) var state = CameraState(
-        cameraId: "back-wide", zoom: 1, torch: false, focusMode: "continuous", lensPosition: 0.5,
-        exposureBias: 0, mirror: false, rotation: 0, width: 1920, height: 1080, fps: 30, bitrateKbps: 8000)
+    /// Owned by `sessionQueue`; other threads get copies through completions.
+    private var state = CameraRules.defaultState
+
+    /// A consistent copy of the camera state and the matching encoder size.
+    struct Snapshot {
+        var state: CameraState
+        var outputSize: OutputSize
+    }
+
+    /// Result of a control request.
+    struct Update {
+        var snapshot: Snapshot
+        /// Frame size or rate changed: the encoder must be recreated.
+        var formatChanged: Bool
+        var bitrateChanged: Bool
+        /// The requested format could not be applied and the previous one was restored.
+        var failed: Bool
+    }
 
     // MARK: Cameras
 
@@ -65,13 +79,13 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
 
     // MARK: Lifecycle
 
-    func start(initial: CameraState, completion: @escaping (Result<CameraState, Error>) -> Void) {
+    func start(initial: CameraState, completion: @escaping (Result<Snapshot, Error>) -> Void) {
         sessionQueue.async {
             do {
                 self.state = initial
                 try self.configureSession()
                 if !self.session.isRunning { self.session.startRunning() }
-                completion(.success(self.state))
+                completion(.success(self.snapshot))
             } catch {
                 completion(.failure(error))
             }
@@ -85,26 +99,25 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         }
     }
 
-    /// Applies a control request; `completion` gets the new state and whether the stream format changed.
-    func apply(_ control: Control, completion: @escaping (CameraState, Bool) -> Void) {
+    /// Applies a control request; `completion` gets the resulting state and what changed.
+    func apply(_ control: Control, completion: @escaping (Update) -> Void) {
         sessionQueue.async {
             let before = self.state
-            var next = self.state
-            if let id = control.cameraId { next.cameraId = id }
-            if let width = control.width, let height = control.height { next.width = width; next.height = height }
-            if let fps = control.fps { next.fps = fps }
-            if let bitrate = control.bitrateKbps { next.bitrateKbps = max(500, min(bitrate, 50_000)) }
-            if let mirror = control.mirror { next.mirror = mirror }
-            if let rotation = control.rotation, [0, 90, 180, 270].contains(rotation) { next.rotation = rotation }
-            if let stabilization = control.stabilization, (before.stabilizationModes ?? ["off"]).contains(stabilization) {
-                next.stabilization = stabilization
-            }
+            let next = CameraRules.applying(control, to: before, cameraIds: Self.availableCameraIds)
 
             let needsReconfigure = next.cameraId != before.cameraId || next.width != before.width
                 || next.height != before.height || next.fps != before.fps
             self.state = next
+            var failed = false
             if needsReconfigure {
-                try? self.configureSession()
+                do {
+                    try self.configureSession()
+                } catch {
+                    // Not supported by this device after all: go back to the configuration that worked.
+                    failed = true
+                    self.state = before
+                    try? self.configureSession()
+                }
             } else if next.mirror != before.mirror || next.rotation != before.rotation || next.stabilization != before.stabilization {
                 self.configureConnection()
             }
@@ -127,16 +140,17 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
                 self.setFocus(mode: "locked", lensPosition: lens)
             }
 
-            let formatChanged = needsReconfigure || next.mirror != before.mirror || next.rotation != before.rotation
-                || next.bitrateKbps != before.bitrateKbps
-            completion(self.state, formatChanged)
+            // Mirroring and 180° turns change the picture, not the frame format, so the encoder keeps running.
+            let snapshot = self.snapshot
+            let formatChanged = snapshot.outputSize != CameraRules.outputSize(for: before) || snapshot.state.fps != before.fps
+            completion(Update(snapshot: snapshot, formatChanged: formatChanged,
+                              bitrateChanged: snapshot.state.bitrateKbps != before.bitrateKbps, failed: failed))
         }
     }
 
-    /// Output dimensions after rotation (portrait rotations swap width and height).
-    var outputSize: (width: Int32, height: Int32) {
-        let rotated = state.rotation == 90 || state.rotation == 270
-        return rotated ? (Int32(state.height), Int32(state.width)) : (Int32(state.width), Int32(state.height))
+    /// Session queue only.
+    private var snapshot: Snapshot {
+        Snapshot(state: state, outputSize: CameraRules.outputSize(for: state))
     }
 
     /// Attaches the on-screen preview (main thread).
@@ -156,7 +170,10 @@ final class CameraController: NSObject, AVCaptureVideoDataOutputSampleBufferDele
         defer { session.commitConfiguration() }
         session.sessionPreset = .inputPriority
 
-        if let input { session.removeInput(input) }
+        if let input {
+            session.removeInput(input)
+            self.input = nil
+        }
         let newInput = try AVCaptureDeviceInput(device: device)
         guard session.canAddInput(newInput) else {
             throw NSError(domain: "HitCam", code: 2, userInfo: [NSLocalizedDescriptionKey: "Cannot use this camera"])

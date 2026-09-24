@@ -39,9 +39,6 @@ final class H264Encoder {
     private var forceKeyframe = true
     private let lock = NSLock()
 
-    private(set) var width: Int32 = 0
-    private(set) var height: Int32 = 0
-
     init(output: @escaping (EncodedFrame) -> Void) {
         self.output = output
     }
@@ -82,8 +79,6 @@ final class H264Encoder {
 
         lock.lock()
         self.session = session
-        self.width = width
-        self.height = height
         forceKeyframe = true
         lock.unlock()
     }

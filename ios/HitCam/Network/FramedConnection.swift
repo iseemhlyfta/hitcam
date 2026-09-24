@@ -65,6 +65,23 @@ final class FramedConnection {
         connection.cancel()
     }
 
+    /// Sends a last message and closes once it has been written, or after `timeout` if the socket is stuck.
+    /// No events are delivered afterwards.
+    func close<T: Encodable>(sending type: MessageType, json value: T, timeout: TimeInterval = 0.3) {
+        // Capture the NWConnection itself: the owner usually drops this object right away.
+        let connection = self.connection
+        guard !closed, isReady, let payload = try? encoder.encode(value) else {
+            closed = true
+            connection.cancel()
+            return
+        }
+        closed = true
+        var packet = MessageHeader(type: type, length: UInt32(payload.count), timestamp: MonotonicClock.nowMicros()).encoded()
+        packet.append(payload)
+        connection.send(content: packet, completion: .contentProcessed { _ in connection.cancel() })
+        queue.asyncAfter(deadline: .now() + timeout) { connection.cancel() }
+    }
+
     func send(_ type: MessageType, flags: MessageFlags = [], timestamp: UInt64 = MonotonicClock.nowMicros(),
               payload: Data = Data(), isVideo: Bool = false) {
         guard !closed else { return }

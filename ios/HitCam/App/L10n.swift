@@ -36,6 +36,9 @@ enum L10n {
     }
     static var versionMismatch: String { ru ? "Версии HitCam на ПК и iPhone несовместимы" : "HitCam versions on the PC and iPhone don't match" }
     static var protocolError: String { ru ? "ПК ответил что-то непонятное" : "Unexpected response from the PC" }
+    static var otherPc: String {
+        ru ? "Это другой компьютер: отсканируйте его QR-код заново" : "This is a different PC: scan its QR code again"
+    }
     static var closedByPc: String { ru ? "ПК завершил соединение" : "The PC closed the connection" }
     static var connectionClosed: String { ru ? "Соединение закрыто" : "Connection closed" }
     static func connectionFailed(_ reason: String) -> String {

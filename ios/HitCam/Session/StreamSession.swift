@@ -28,18 +28,36 @@ final class StreamSession: ObservableObject {
     private var address: ServerAddress?
     private var encoder: H264Encoder!
     private var timers: [DispatchSourceTimer] = []
+    private var reconnectWork: DispatchWorkItem?
     private var lastReceived = Date()
     private var userStopped = true
     private var isStreaming = false
     private var needKeyframe = true
+    private var sentToken: String?
+
+    // Owned by `queue`: the session's copy of the camera state and the matching encoder size.
+    private var state: CameraState
+    private var outputSize: OutputSize
+
+    // Statistics, owned by `queue`.
     private var droppedFrames = 0
     private var framesThisSecond = 0
     private var bytesThisSecond = 0
+    private var lastFps: Double = 0
+    private var lastKbps = 0
+    private var batteryLevel: Double = 0
+    private var isCharging = false
 
     init() {
-        cameraState = LocalStore.cameraState ?? CameraState(
-            cameraId: "back-wide", zoom: 1, torch: false, focusMode: "continuous", lensPosition: 0.5,
-            exposureBias: 0, mirror: false, rotation: 0, width: 1920, height: 1080, fps: 30, bitrateKbps: 8000)
+        let stored = LocalStore.cameraState
+        let initial = CameraRules.sanitized(stored, cameraIds: CameraController.availableCameraIds)
+        if stored != nil, stored != initial {
+            // Saved by an older version or set to something this phone can't do.
+            LocalStore.cameraState = initial
+        }
+        state = initial
+        outputSize = CameraRules.outputSize(for: initial)
+        cameraState = initial
         encoder = H264Encoder { [weak self] frame in
             self?.queue.async { self?.send(frame) }
         }
@@ -69,6 +87,7 @@ final class StreamSession: ObservableObject {
 
     func submitPin(_ pin: String) {
         queue.async {
+            guard case .pairing = self.currentPhase else { return }
             self.connection?.send(.pairRequest, json: PairRequest(pin: pin))
         }
     }
@@ -76,8 +95,11 @@ final class StreamSession: ObservableObject {
     func disconnect() {
         queue.async {
             self.userStopped = true
-            self.connection?.send(.bye, json: Bye(reason: "user"))
+            // Keep the socket out of teardown so Bye is written before it closes.
+            let old = self.connection
+            self.connection = nil
             self.teardown()
+            old?.close(sending: .bye, json: Bye(reason: "user"))
             self.setPhase(.idle)
         }
     }
@@ -117,25 +139,31 @@ final class StreamSession: ObservableObject {
             let wasStreaming = isStreaming
             connectionId = nil
             teardown()
-            guard !userStopped, let address else { return }
-            if wasStreaming {
+            guard !userStopped, address != nil else { return }
+            if wasStreaming, let address {
                 // Wi-Fi hiccup or PC restarted: keep trying while the app is open.
                 setPhase(.reconnecting(address))
-                queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    guard let self, !self.userStopped else { return }
-                    self.openConnection(reconnecting: true)
-                }
+                scheduleReconnect()
             } else if case .reconnecting = currentPhase {
-                queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-                    guard let self, !self.userStopped else { return }
-                    self.openConnection(reconnecting: true)
-                }
+                scheduleReconnect()
             } else if case .failed = currentPhase {
                 // Keep the more specific message from the handshake.
             } else {
                 fail(error.map { L10n.connectionFailed($0.localizedDescription) } ?? L10n.connectionClosed)
             }
         }
+    }
+
+    /// Cancelled by `teardown`, so a new connection (another PC, a PIN being typed) is never replaced by a stale retry.
+    private func scheduleReconnect() {
+        reconnectWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, !self.userStopped else { return }
+            self.reconnectWork = nil
+            self.openConnection(reconnecting: true)
+        }
+        reconnectWork = work
+        queue.asyncAfter(deadline: .now() + 2, execute: work)
     }
 
     private var currentPhase: Phase = .idle
@@ -147,6 +175,7 @@ final class StreamSession: ObservableObject {
 
     private func sendHello() {
         let token = tokenKeys().lazy.compactMap { TokenStore.token(for: $0) }.first
+        sentToken = token
         let hello = Hello(
             protocolVersion: ProtocolInfo.version,
             deviceId: LocalStore.deviceId,
@@ -162,12 +191,17 @@ final class StreamSession: ObservableObject {
         switch header.type {
         case .helloAck:
             guard let ack = try? decoder.decode(HelloAck.self, from: payload) else { return fail(L10n.protocolError) }
+            if let expected = address?.serverId, expected != ack.serverId {
+                // The QR code (or an earlier session) named another PC: stop here and send nothing more.
+                return fail(L10n.otherPc)
+            }
             if address?.serverId == nil { address?.serverId = ack.serverId }
             if address?.name == nil { address?.name = ack.serverName }
             switch ack.status {
             case HelloStatus.accepted:
                 startStreaming(serverName: ack.serverName)
             case HelloStatus.pairingRequired:
+                forgetRejectedToken()
                 if let address { setPhase(.pairing(address, attemptsLeft: 5, wrongPin: false)) }
             case HelloStatus.busy:
                 fail(L10n.busy)
@@ -177,7 +211,8 @@ final class StreamSession: ObservableObject {
                 fail(L10n.versionMismatch)
             }
         case .pairResult:
-            guard let result = try? decoder.decode(PairResult.self, from: payload), let address else { return }
+            guard case .pairing = currentPhase,
+                  let result = try? decoder.decode(PairResult.self, from: payload), let address else { return }
             if result.ok, let token = result.token {
                 tokenKeys().forEach { TokenStore.save(token, for: $0) }
                 startStreaming(serverName: address.name ?? address.host)
@@ -189,13 +224,25 @@ final class StreamSession: ObservableObject {
         case .ping:
             connection?.send(.pong, payload: pongPayload(echo: header.timestamp))
         case .control:
-            if let control = try? decoder.decode(Control.self, from: payload) { handleControl(control) }
+            // Only a paired PC may control the camera.
+            guard isStreaming, let control = try? decoder.decode(Control.self, from: payload) else { return }
+            handleControl(control)
         case .requestKeyframe:
+            guard isStreaming else { return }
             encoder.requestKeyframe()
         case .bye:
             fail(L10n.closedByPc)
         default:
             break
+        }
+    }
+
+    /// The PC asked for a PIN although a token was sent: it was revoked there, so drop it here too.
+    private func forgetRejectedToken() {
+        guard let sent = sentToken else { return }
+        sentToken = nil
+        for key in tokenKeys() where TokenStore.token(for: key) == sent {
+            TokenStore.remove(for: key)
         }
     }
 
@@ -208,23 +255,39 @@ final class StreamSession: ObservableObject {
     // MARK: Streaming (queue)
 
     private func startStreaming(serverName: String) {
-        guard let address else { return }
+        guard let address, let id = connectionId else { return }
         LocalStore.remember(address)
-        camera.start(initial: cameraState) { [weak self] result in
+        refreshBattery()
+        startCamera(with: state, connection: id, address: address, serverName: serverName)
+    }
+
+    private func startCamera(with initial: CameraState, connection id: UUID, address: ServerAddress, serverName: String) {
+        camera.start(initial: initial) { [weak self] result in
             guard let self else { return }
             self.queue.async {
+                // The connection dropped or the user left while the camera was starting.
+                // Nothing to undo: teardown queued camera.stop() after this start.
+                guard self.connectionId == id, !self.userStopped else { return }
                 switch result {
                 case .failure(let error):
-                    self.fail(L10n.cameraFailed(error.localizedDescription))
-                case .success(let state):
-                    self.publish(state)
+                    if initial != CameraRules.defaultState {
+                        // The saved settings don't work on this phone: start over from the defaults.
+                        LocalStore.cameraState = nil
+                        self.startCamera(with: CameraRules.defaultState, connection: id, address: address, serverName: serverName)
+                    } else {
+                        self.fail(L10n.cameraFailed(error.localizedDescription))
+                    }
+                case .success(let snapshot):
+                    self.state = snapshot.state
+                    self.outputSize = snapshot.outputSize
+                    self.publish(snapshot.state)
                     do {
                         try self.configureEncoder()
                     } catch {
                         return self.fail(L10n.cameraFailed(error.localizedDescription))
                     }
                     self.connection?.send(.capabilities, json: self.capabilities)
-                    self.connection?.send(.cameraState, json: state)
+                    self.connection?.send(.cameraState, json: snapshot.state)
                     self.isStreamingFlag = true
                     self.startTimers()
                     self.setPhase(.streaming(address, serverName: serverName))
@@ -234,11 +297,10 @@ final class StreamSession: ObservableObject {
     }
 
     private func configureEncoder() throws {
-        let size = camera.outputSize
-        try encoder.configure(width: size.width, height: size.height, fps: cameraState.fps, bitrateKbps: cameraState.bitrateKbps)
+        try encoder.configure(width: outputSize.width, height: outputSize.height, fps: state.fps, bitrateKbps: state.bitrateKbps)
         needKeyframe = true
         connection?.send(.streamConfig, json: StreamConfig(
-            codec: "h264", width: Int(size.width), height: Int(size.height), fps: cameraState.fps, bitrateKbps: cameraState.bitrateKbps))
+            codec: "h264", width: Int(outputSize.width), height: Int(outputSize.height), fps: state.fps, bitrateKbps: state.bitrateKbps))
     }
 
     private func send(_ frame: EncodedFrame) {
@@ -261,13 +323,28 @@ final class StreamSession: ObservableObject {
     }
 
     private func handleControl(_ control: Control) {
-        camera.apply(control) { [weak self] state, formatChanged in
+        camera.apply(control) { [weak self] update in
             guard let self else { return }
             self.queue.async {
+                let state = update.snapshot.state
+                self.state = state
+                self.outputSize = update.snapshot.outputSize
                 self.publish(state)
-                LocalStore.cameraState = state
+                // A rejected format was rolled back; only a state the camera accepted is remembered.
+                if !update.failed, CameraRules.isValid(state, cameraIds: CameraController.availableCameraIds) {
+                    LocalStore.cameraState = state
+                }
                 guard self.isStreaming else { return }
-                if formatChanged { try? self.configureEncoder() }
+                if update.formatChanged {
+                    do {
+                        try self.configureEncoder()
+                    } catch {
+                        return self.fail(L10n.cameraFailed(error.localizedDescription))
+                    }
+                } else if update.bitrateChanged {
+                    // The PC reads the new bitrate from the camera state below; no new StreamConfig needed.
+                    self.encoder.setBitrate(kbps: state.bitrateKbps)
+                }
                 self.connection?.send(.cameraState, json: state)
             }
         }
@@ -282,6 +359,8 @@ final class StreamSession: ObservableObject {
             let kbps = self.bytesThisSecond * 8 / 1000
             self.framesThisSecond = 0
             self.bytesThisSecond = 0
+            self.lastFps = fps
+            self.lastKbps = kbps
             DispatchQueue.main.async {
                 self.sentFps = fps
                 self.sentKbps = kbps
@@ -295,8 +374,21 @@ final class StreamSession: ObservableObject {
         })
     }
 
+    /// UIDevice is read on the main thread; the values reach `queue` a moment later.
+    private func refreshBattery() {
+        DispatchQueue.main.async { [weak self] in
+            let device = UIDevice.current
+            let level = Double(max(device.batteryLevel, 0))
+            let charging = device.batteryState == .charging || device.batteryState == .full
+            guard let self else { return }
+            self.queue.async {
+                self.batteryLevel = level
+                self.isCharging = charging
+            }
+        }
+    }
+
     private func sendStatus() {
-        let device = UIDevice.current
         let thermal: String
         switch ProcessInfo.processInfo.thermalState {
         case .nominal: thermal = "nominal"
@@ -305,13 +397,11 @@ final class StreamSession: ObservableObject {
         case .critical: thermal = "critical"
         @unknown default: thermal = "nominal"
         }
-        let status = DispatchQueue.main.sync {
-            DeviceStatus(
-                battery: Double(max(device.batteryLevel, 0)),
-                charging: device.batteryState == .charging || device.batteryState == .full,
-                thermal: thermal, fps: sentFps, bitrateKbps: sentKbps, droppedFrames: droppedFrames)
-        }
+        let status = DeviceStatus(
+            battery: batteryLevel, charging: isCharging,
+            thermal: thermal, fps: lastFps, bitrateKbps: lastKbps, droppedFrames: droppedFrames)
         connection?.send(.status, json: status)
+        refreshBattery()
     }
 
     private func repeating(_ seconds: Double, _ body: @escaping () -> Void) -> DispatchSourceTimer {
@@ -329,6 +419,8 @@ final class StreamSession: ObservableObject {
 
     private func teardown() {
         isStreamingFlag = false
+        reconnectWork?.cancel()
+        reconnectWork = nil
         stopTimers()
         encoder.invalidate()
         camera.stop()
