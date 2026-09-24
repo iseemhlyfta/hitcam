@@ -71,6 +71,7 @@ add_library(HitCamVCam SHARED
     src/DShowOutput.cpp
     src/ArtifactReducer.cpp
     src/GpuProcessor.cpp
+    src/Overlay.cpp
     ${SHADER_HEADERS}
     src/DllMain.cpp
     src/HitCamVCam.def

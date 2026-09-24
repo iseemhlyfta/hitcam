@@ -21,6 +21,7 @@
 #include "ArtifactReducer.h"
 #include "ErrorGuard.h"
 #include "GpuProcessor.h"
+#include "Overlay.h"
 #include "Processing.h"
 #include "Shared.h"
 
@@ -168,8 +169,14 @@ struct FrameSink {
     ArtifactReducer artifacts;
     GpuProcessor gpu;
     std::vector<uint8_t> packed;
-    // HitCamVCamTest only: frames go to the preview alone, not to a camera.
+    // Detection boxes drawn into the camera's frames (not the preview).
+    Overlay overlay;
+    // HitCamVCamTest only: frames go to the preview alone, not to a camera; `testOutput` (if set) receives what
+    // the camera would get.
+    using TestOutput = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
     bool previewOnly = false;
+    TestOutput testOutput = nullptr;
+    void* testContext = nullptr;
 
     // Frames the camera could not show: larger than the shared section holds (kMaxSide).
     std::atomic<uint64_t> oversized{0};
@@ -229,13 +236,7 @@ struct FrameSink {
             gpuMs = -1;
         } else {
             // The stages need one contiguous NV12 image; the decoder's has padding rows between the planes.
-            packed.resize(static_cast<size_t>(width) * height * 3 / 2);
-            auto pack = [&] {
-                uint8_t* out = packed.data();
-                for (uint32_t y = 0; y < height; ++y) std::memcpy(out + static_cast<size_t>(y) * width, luma + static_cast<size_t>(y) * pitch, width);
-                out += static_cast<size_t>(width) * height;
-                for (uint32_t y = 0; y < height / 2; ++y) std::memcpy(out + static_cast<size_t>(y) * width, chroma + static_cast<size_t>(y) * pitch, width);
-            };
+            auto pack = [&] { Pack(luma, chroma, pitch, width, height); };
             pack();
             if (Process(packed.data(), width, height, current, pack)) {
                 luma = packed.data();
@@ -243,15 +244,40 @@ struct FrameSink {
                 pitch = width;
             }
         }
-        if (!previewOnly) {
-            // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
-            if (dshow::IsActive()) {
-                dshow::Submit(luma, chroma, pitch, width, height);
-            } else {
-                writer.Publish(luma, chroma, pitch, width, height);
+        // The preview first: the app draws its own overlay on it.
+        preview.Update(luma, chroma, pitch, width, height);
+        if (previewOnly && !testOutput) return;
+
+        // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
+        const bool toDShow = !previewOnly && dshow::IsActive();
+        if (fits || toDShow) {
+            if (const auto boxes = overlay.Current()) {
+                // Never into the decoder's buffer: into the packed copy (already the processed frame, if any).
+                if (luma != packed.data()) {
+                    Pack(luma, chroma, pitch, width, height);
+                    luma = packed.data();
+                    chroma = packed.data() + static_cast<size_t>(width) * height;
+                    pitch = width;
+                }
+                Overlay::Draw(*boxes, packed.data(), packed.data() + static_cast<size_t>(width) * height, width, width, height);
             }
         }
-        preview.Update(luma, chroma, pitch, width, height);
+        if (previewOnly) {
+            testOutput(testContext, luma, chroma, pitch, width, height);
+        } else if (toDShow) {
+            dshow::Submit(luma, chroma, pitch, width, height);
+        } else {
+            writer.Publish(luma, chroma, pitch, width, height);
+        }
+    }
+
+    // Copies a frame into `packed` as one contiguous NV12 image (the decoder's has padding rows between the planes).
+    void Pack(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height) {
+        packed.resize(static_cast<size_t>(width) * height * 3 / 2);
+        uint8_t* out = packed.data();
+        for (uint32_t y = 0; y < height; ++y) std::memcpy(out + static_cast<size_t>(y) * width, luma + static_cast<size_t>(y) * pitch, width);
+        out += static_cast<size_t>(width) * height;
+        for (uint32_t y = 0; y < height / 2; ++y) std::memcpy(out + static_cast<size_t>(y) * width, chroma + static_cast<size_t>(y) * pitch, width);
     }
 
     void ClearSignal() {
@@ -537,6 +563,32 @@ __declspec(dllexport) void __stdcall HitCam_BridgeProcessFrame(void* handle, uin
 // For HitCamVCamTest: decoded frames of this bridge go to the preview only, never to a camera.
 __declspec(dllexport) void __stdcall HitCam_BridgePreviewOnly(void* handle) {
     if (handle) static_cast<hitcam::Bridge*>(handle)->sink.previewOnly = true;
+}
+
+// Object detection boxes to draw into the camera's frames (never into the preview), replacing the previous ones.
+// Any thread; copies everything. count 0 clears; more than 64 boxes: the first 64. Boxes not refreshed for over
+// a second are dropped.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count) {
+    if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.overlay.Set(boxes, count); });
+}
+
+// For HitCamVCamTest: makes the bridge preview-only (HitCam_BridgePreviewOnly) and hands what the camera would get
+// to `callback` (on the decoding thread) instead.
+__declspec(dllexport) void __stdcall HitCam_BridgeTestOutput(void* handle, hitcam::FrameSink::TestOutput callback, void* context) {
+    if (!handle) return;
+    auto& sink = static_cast<hitcam::Bridge*>(handle)->sink;
+    sink.previewOnly = true;
+    sink.testContext = context;
+    sink.testOutput = callback;
+}
+
+// For HitCamVCamTest: sends one NV12 frame through a preview-only bridge as if the decoder had produced it.
+// Call on the thread that decodes with this bridge (or instead of decoding).
+__declspec(dllexport) void __stdcall HitCam_BridgeTestPublish(void* handle, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch,
+                                                              uint32_t width, uint32_t height) {
+    if (!handle || !luma || !chroma || pitch < width) return;
+    auto& sink = static_cast<hitcam::Bridge*>(handle)->sink;
+    if (sink.previewOnly) hitcam::Quietly([&] { sink.Publish(luma, chroma, pitch, width, height); });
 }
 
 // Size and number of the newest preview frame (0x0 before the first one). Safe to call from any thread.

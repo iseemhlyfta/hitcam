@@ -8,6 +8,7 @@
 //   --list            print the cameras apps can see
 //   --process         picture processing (temporal noise reduction, colour, sharpness, NVIDIA artifact reduction)
 //                     of the decoder bridge; no camera and no camera output needed
+//   --overlay         detection boxes burnt into the camera frames (HitCam_BridgeSetOverlay); no camera output
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
 //   --dshow           the DirectShow camera (Windows 10) of the DLLs built next to this test, without registration
@@ -35,6 +36,7 @@
 #include <utility>
 #include <vector>
 
+#include "../src/Overlay.h"
 #include "../src/Processing.h"
 #include "../src/Shared.h"
 
@@ -56,6 +58,10 @@ extern "C" void __stdcall HitCam_BridgeSetProcessing(void* handle, const HitCamP
 extern "C" void __stdcall HitCam_BridgeProcessingStats(void* handle, double* gpuMs, double* artifactMs, int* artifactError);
 extern "C" void __stdcall HitCam_BridgeProcessFrame(void* handle, uint8_t* nv12, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgePreviewOnly(void* handle);
+extern "C" void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count);
+using TestOutputCallback = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
+extern "C" void __stdcall HitCam_BridgeTestOutput(void* handle, TestOutputCallback callback, void* context);
+extern "C" void __stdcall HitCam_BridgeTestPublish(void* handle, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
 
 namespace {
 
@@ -585,6 +591,7 @@ int RunSourceCheck() {
 
 #include "DShowCheck.inl"
 #include "ProcessCheck.inl"
+#include "OverlayCheck.inl"
 
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -598,6 +605,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0) return process_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--overlay") == 0) return overlay_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
     if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run(false);
     if (argc > 1 && std::strcmp(argv[1], "--dshow-installed") == 0) return dshow_check::Run(true);
