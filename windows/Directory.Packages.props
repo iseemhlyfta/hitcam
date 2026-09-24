@@ -5,6 +5,11 @@
     <PackageVersion Include="Avalonia.Themes.Fluent" Version="12.1.0" />
     <PackageVersion Include="ReactiveUI.Avalonia" Version="12.0.3" />
     <PackageVersion Include="QRCoder" Version="1.7.0" />
+    <PackageVersion Include="Microsoft.ML.OnnxRuntime.DirectML" Version="1.24.4" />
+    <!-- The DirectML redistributable that ONNX Runtime 1.24.4 is built against. -->
+    <PackageVersion Include="Microsoft.AI.DirectML" Version="1.15.4" />
+    <!-- The version Avalonia.Skia is built with: labels drawn into the camera picture, test images. -->
+    <PackageVersion Include="SkiaSharp" Version="3.119.4" />
     <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="18.7.0" />
     <PackageVersion Include="xunit.v3" Version="3.2.2" />
     <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.5" />

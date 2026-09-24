@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    HitCam Vision: object detection (RF-DETR exported to ONNX) on the preview frames, with tracking. No UI and no
+    dependency on the native camera DLL: frames come in through a callback.
+  -->
+  <PropertyGroup>
+    <RootNamespace>HitCam.Vision</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- ONNX Runtime with the DirectML provider (any DirectX 12 GPU); falls back to its CPU provider. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" />
+    <PackageReference Include="Microsoft.AI.DirectML" GeneratePathProperty="true" />
+  </ItemGroup>
+  <!--
+    The DirectML package copies its DLL only into C++ projects built for x64. Without it next to the app, ONNX Runtime
+    loads the much older DirectML.dll from System32 and the DirectML provider fails (E_INVALIDARG). It is loaded from
+    disk by onnxruntime.dll, so it stays out of the single-file bundle.
+  -->
+  <ItemGroup Condition="'$(PkgMicrosoft_AI_DirectML)' != ''">
+    <None Include="$(PkgMicrosoft_AI_DirectML)\bin\x64-win\DirectML.dll" Link="DirectML.dll" Visible="false"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+</Project>
