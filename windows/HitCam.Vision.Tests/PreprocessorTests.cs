@@ -102,14 +102,62 @@ public sealed class PreprocessorTests
     }
 
     [Fact]
-    public void Shrinking_averages_instead_of_skipping_pixels()
+    public void Halving_averages_each_pair_of_pixels()
     {
-        // A fine checkerboard shrunk 8 times is mid grey, not black or white (no aliasing).
-        var frame = Bgra(64, 64, (x, y) => (x + y) % 2 == 0 ? ((byte)255, (byte)255, (byte)255) : ((byte)0, (byte)0, (byte)0));
+        // One row 0, 100, 200, 250 → sampled at 0.5 and 2.5.
+        byte[] values = [0, 100, 200, 250];
+        var frame = Bgra(4, 1, (x, _) => (values[x], 0, 0));
 
-        var input = Run(frame, 64, 64, 8, 8);
+        var input = Run(frame, 4, 1, 2, 1);
 
-        Assert.All(input, v => Assert.InRange(v, 0.45f, 0.55f));
+        Assert.Equal(50 / 255f, input[0], 5);
+        Assert.Equal(225 / 255f, input[1], 5);
+    }
+
+    [Fact]
+    public void Shrinking_samples_two_pixels_without_a_prefilter()
+    {
+        // 8 → 2 samples at 1.5 and 5.5: only pixels 1, 2 and 5, 6 count; 0, 3, 4, 7 are skipped entirely (a PIL-style
+        // antialiased resize would blend them in and shift the model's scores).
+        byte[] values = [255, 10, 30, 255, 255, 50, 70, 255];
+        var frame = Bgra(8, 1, (x, _) => (values[x], 0, 0));
+
+        var input = Run(frame, 8, 1, 2, 1);
+
+        Assert.Equal(20 / 255f, input[0], 5);
+        Assert.Equal(60 / 255f, input[1], 5);
+    }
+
+    [Fact]
+    public void Enlarging_uses_half_pixel_centers_and_clamps_at_the_edges()
+    {
+        // 2 → 4 samples at -0.25 (clamped to 0), 0.25, 0.75, 1.25 (past the last pixel: the last pixel).
+        var frame = Bgra(2, 1, (x, _) => (x == 0 ? (byte)0 : (byte)200, 0, 0));
+
+        var input = Run(frame, 2, 1, 4, 1);
+
+        Assert.Equal([0f, 50 / 255f, 150 / 255f, 200 / 255f], input[..4].Select(v => MathF.Round(v, 5)), new FloatEquality());
+    }
+
+    [Fact]
+    public void Both_directions_are_resized()
+    {
+        // 2×2 → 3×3: the middle is the average of all four.
+        (byte, byte, byte)[] pixels = [(0, 0, 0), (40, 0, 0), (80, 0, 0), (120, 0, 0)];
+        var frame = Bgra(2, 2, (x, y) => pixels[y * 2 + x]);
+
+        var input = Run(frame, 2, 2, 3, 3);
+
+        Assert.Equal(60 / 255f, input[4], 5);
+        Assert.Equal(0f, input[0], 5);
+        Assert.Equal(120 / 255f, input[8], 5);
+    }
+
+    private sealed class FloatEquality : IEqualityComparer<float>
+    {
+        public bool Equals(float x, float y) => MathF.Abs(x - y) < 1e-4f;
+
+        public int GetHashCode(float value) => 0;
     }
 
     [Fact]

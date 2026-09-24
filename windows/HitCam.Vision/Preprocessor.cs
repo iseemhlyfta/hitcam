@@ -2,14 +2,16 @@ namespace HitCam.Vision;
 
 /// <summary>
 /// Turns a BGRA frame of any size into the network input: the whole frame stretched to the input size (no
-/// letterbox), RGB, <c>(v / 255 - mean) / std</c>, planar CHW. Resizing is bilinear with antialiasing when
-/// shrinking, like PIL's <c>Image.resize(BILINEAR)</c> the model was checked against. Reuses its buffers; not
-/// thread-safe.
+/// letterbox), RGB, <c>(v / 255 - mean) / std</c>, planar CHW. Resizing is plain bilinear without antialiasing, as in
+/// the model's own PyTorch pipeline (<c>F.interpolate(mode="bilinear", align_corners=False)</c>, like
+/// <c>cv2.INTER_LINEAR</c>): each output pixel samples the source at <c>(x + 0.5) * in / out - 0.5</c> from its 2×2
+/// neighbours, with no prefilter when shrinking. An antialiased resize shifts the scores by about 0.1. Reuses its
+/// buffers; not thread-safe.
 /// </summary>
 public sealed class Preprocessor
 {
-    private Coefficients? _horizontal;
-    private Coefficients? _vertical;
+    private Taps? _horizontal;
+    private Taps? _vertical;
     private float[] _rows = [];
 
     public void Run(
@@ -26,34 +28,34 @@ public sealed class Preprocessor
         if (destination.Length < plane * 3)
             throw new ArgumentException("The input tensor is too small.", nameof(destination));
 
-        var horizontal = _horizontal is { } h && h.InSize == width && h.OutSize == inputWidth ? h : _horizontal = new Coefficients(width, inputWidth);
-        var vertical = _vertical is { } v && v.InSize == height && v.OutSize == inputHeight ? v : _vertical = new Coefficients(height, inputHeight);
+        var horizontal = _horizontal is { } h && h.InSize == width && h.OutSize == inputWidth ? h : _horizontal = new Taps(width, inputWidth);
+        var vertical = _vertical is { } v && v.InSize == height && v.OutSize == inputHeight ? v : _vertical = new Taps(height, inputHeight);
 
-        // Pass 1: every source row resized horizontally, as interleaved RGB floats in 0..255.
+        // Pass 1: the source rows the output needs, resized horizontally, as interleaved RGB floats in 0..255.
+        // Plain bilinear touches at most two source rows per output row, so most rows of a large frame are skipped.
         var rowFloats = inputWidth * 3;
         if (_rows.Length < rowFloats * height)
             _rows = new float[rowFloats * height];
         var rows = _rows.AsSpan(0, rowFloats * height);
-        for (var y = 0; y < height; y++)
+        var lastRow = -1;
+        for (var o = 0; o < inputHeight; o++)
         {
-            var source = bgra.Slice(y * stride, width * 4);
-            var target = rows.Slice(y * rowFloats, rowFloats);
-            for (var x = 0; x < inputWidth; x++)
+            for (var y = vertical.First[o]; y <= vertical.Second[o]; y++)
             {
-                var start = horizontal.Start[x];
-                var weights = horizontal.WeightsOf(x);
-                float r = 0, g = 0, b = 0;
-                for (var k = 0; k < weights.Length; k++)
+                if (y <= lastRow)
+                    continue;
+                lastRow = y;
+                var source = bgra.Slice(y * stride, width * 4);
+                var target = rows.Slice(y * rowFloats, rowFloats);
+                for (var x = 0; x < inputWidth; x++)
                 {
-                    var p = (start + k) * 4;
-                    var w = weights[k];
-                    b += source[p] * w;
-                    g += source[p + 1] * w;
-                    r += source[p + 2] * w;
+                    var a = horizontal.First[x] * 4;
+                    var b = horizontal.Second[x] * 4;
+                    var w = horizontal.Weight[x];
+                    target[x * 3] = source[a + 2] + (source[b + 2] - source[a + 2]) * w;
+                    target[x * 3 + 1] = source[a + 1] + (source[b + 1] - source[a + 1]) * w;
+                    target[x * 3 + 2] = source[a] + (source[b] - source[a]) * w;
                 }
-                target[x * 3] = r;
-                target[x * 3 + 1] = g;
-                target[x * 3 + 2] = b;
             }
         }
 
@@ -70,21 +72,16 @@ public sealed class Preprocessor
         var blue = destination.Slice(plane * 2, plane);
         for (var y = 0; y < inputHeight; y++)
         {
-            var start = vertical.Start[y];
-            var weights = vertical.WeightsOf(y);
+            var top = rows.Slice(vertical.First[y] * rowFloats, rowFloats);
+            var bottom = rows.Slice(vertical.Second[y] * rowFloats, rowFloats);
+            var w = vertical.Weight[y];
             var output = y * inputWidth;
             for (var x = 0; x < inputWidth; x++)
             {
-                float r = 0, g = 0, b = 0;
-                var column = x * 3;
-                for (var k = 0; k < weights.Length; k++)
-                {
-                    var p = (start + k) * rowFloats + column;
-                    var w = weights[k];
-                    r += rows[p] * w;
-                    g += rows[p + 1] * w;
-                    b += rows[p + 2] * w;
-                }
+                var p = x * 3;
+                var r = top[p] + (bottom[p] - top[p]) * w;
+                var g = top[p + 1] + (bottom[p + 1] - top[p + 1]) * w;
+                var b = top[p + 2] + (bottom[p + 2] - top[p + 2]) * w;
                 red[output + x] = r * scale[0] + offset[0];
                 green[output + x] = g * scale[1] + offset[1];
                 blue[output + x] = b * scale[2] + offset[2];
@@ -92,51 +89,25 @@ public sealed class Preprocessor
         }
     }
 
-    /// <summary>Triangle filter taps for one axis, widened by the shrink factor (antialiasing).</summary>
-    private sealed class Coefficients
+    /// <summary>For each output position along one axis: the two source pixels and the weight of the second.</summary>
+    private sealed class Taps
     {
-        private readonly float[] _weights;
-        private readonly int[] _count;
-        private readonly int _taps;
-
-        public Coefficients(int inSize, int outSize)
+        public Taps(int inSize, int outSize)
         {
             InSize = inSize;
             OutSize = outSize;
+            First = new int[outSize];
+            Second = new int[outSize];
+            Weight = new float[outSize];
             var scale = (double)inSize / outSize;
-            var filterScale = Math.Max(scale, 1.0);
-            var support = filterScale;
-            _taps = (int)Math.Ceiling(support) * 2 + 1;
-            Start = new int[outSize];
-            _count = new int[outSize];
-            _weights = new float[outSize * _taps];
             for (var o = 0; o < outSize; o++)
             {
-                var center = (o + 0.5) * scale;
-                var min = Math.Max((int)(center - support + 0.5), 0);
-                var max = Math.Min((int)(center + support + 0.5), inSize);
-                var count = Math.Min(max - min, _taps);
-                double sum = 0;
-                for (var k = 0; k < count; k++)
-                {
-                    var w = Math.Max(0, 1 - Math.Abs((k + min - center + 0.5) / filterScale));
-                    _weights[o * _taps + k] = (float)w;
-                    sum += w;
-                }
-                if (sum > 0)
-                {
-                    for (var k = 0; k < count; k++)
-                        _weights[o * _taps + k] = (float)(_weights[o * _taps + k] / sum);
-                }
-                else
-                {
-                    // Cannot happen for sane sizes; take the nearest pixel.
-                    count = 1;
-                    min = Math.Clamp((int)center, 0, inSize - 1);
-                    _weights[o * _taps] = 1;
-                }
-                Start[o] = min;
-                _count[o] = count;
+                // Half-pixel centers; before the first pixel's center the edge pixel is used (as PyTorch does).
+                var source = Math.Max((o + 0.5) * scale - 0.5, 0);
+                var first = Math.Min((int)source, inSize - 1);
+                First[o] = first;
+                Second[o] = Math.Min(first + 1, inSize - 1);
+                Weight[o] = (float)(source - first);
             }
         }
 
@@ -144,8 +115,10 @@ public sealed class Preprocessor
 
         public int OutSize { get; }
 
-        public int[] Start { get; }
+        public int[] First { get; }
 
-        public ReadOnlySpan<float> WeightsOf(int output) => _weights.AsSpan(output * _taps, _count[output]);
+        public int[] Second { get; }
+
+        public float[] Weight { get; }
     }
 }

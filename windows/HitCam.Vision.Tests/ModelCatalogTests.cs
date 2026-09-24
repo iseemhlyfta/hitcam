@@ -57,6 +57,15 @@ public sealed class ModelCatalogTests : IDisposable
         Assert.Equal("Apache-2.0", model.License);
     }
 
+    [Fact]
+    public void Class_ids_may_start_at_zero()
+    {
+        var model = Parse(ValidJson.Replace("\"1\": \"person\"", "\"0\": \"hand\""), "hands");
+
+        Assert.Equal("hand", model.Classes[0]);
+        Assert.Equal(ModelRole.Custom, model.Role);
+    }
+
     [Theory]
     [InlineData("rfdetr-nano", ModelRole.Fast)]
     [InlineData("RFDETR-Small", ModelRole.Accurate)]

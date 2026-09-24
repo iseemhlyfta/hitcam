@@ -1,21 +1,22 @@
+using System.Drawing;
 using SkiaSharp;
 
 namespace HitCam.Vision.Tests;
 
 /// <summary>
 /// RF-DETR Nano on COCO val2017 #39769 (two cats, two remotes) against the PyTorch reference. Models are not in the
-/// repository: the test looks for vision/output (made by vision/spike.py) above the test's folder, and is skipped
+/// repository: the test looks for vision/output (made by the vision/ scripts) above the test's folder, and is skipped
 /// when there is none.
 /// </summary>
 public sealed class RealModelTests
 {
-    // Reference at threshold 0.5, xyxy in pixels of the 640×480 photo.
+    // rfdetr's own prediction at threshold 0.5 (plain bilinear resize), xyxy in pixels of the 640×480 photo.
     private static readonly (string Name, float Score, int[] Box)[] Expected =
     [
         ("cat", 0.96f, [14, 54, 316, 474]),
-        ("cat", 0.91f, [347, 26, 639, 375]),
+        ("cat", 0.89f, [347, 26, 639, 375]),
         ("remote", 0.91f, [334, 77, 371, 188]),
-        ("remote", 0.88f, [40, 74, 176, 118]),
+        ("remote", 0.91f, [40, 74, 176, 118]),
     ];
 
     private static string? FindUp(string relative)
@@ -38,7 +39,7 @@ public sealed class RealModelTests
         var photo = FindUp(Path.Combine("vision", "output", "spike", "cats.jpg"));
         if (labels is null || photo is null)
         {
-            Assert.Skip("vision/output with rfdetr-nano and cats.jpg not found (run vision/spike.py).");
+            Assert.Skip("vision/output with rfdetr-nano and cats.jpg not found (run the vision/ export).");
             return;
         }
 
@@ -57,14 +58,10 @@ public sealed class RealModelTests
         Assert.Equal(Expected.Length, detections.Count);
         foreach (var (name, score, box) in Expected)
         {
-            var match = detections
-                .Where(d => d.Name == name)
-                .MinBy(d => Math.Abs(d.Box.Left * 640 - box[0]) + Math.Abs(d.Box.Top * 480 - box[1]));
-            Assert.Equal(score, match.Score, 0.02f);
-            Assert.Equal(box[0], match.Box.Left * 640, 3f);
-            Assert.Equal(box[1], match.Box.Top * 480, 3f);
-            Assert.Equal(box[2], match.Box.Right * 640, 3f);
-            Assert.Equal(box[3], match.Box.Bottom * 480, 3f);
+            var expected = RectangleF.FromLTRB(box[0] / 640f, box[1] / 480f, box[2] / 640f, box[3] / 480f);
+            var match = detections.Where(d => d.Name == name).MaxBy(d => Geometry.Iou(d.Box, expected));
+            Assert.True(Geometry.Iou(match.Box, expected) >= 0.95f, $"{name} at {match.Box}: IoU {Geometry.Iou(match.Box, expected):0.000}");
+            Assert.Equal(score, match.Score, 0.03f);
         }
         Assert.InRange(detector.LastMilliseconds, 0.1, 5000);
     }

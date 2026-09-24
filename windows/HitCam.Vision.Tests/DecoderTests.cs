@@ -105,6 +105,24 @@ public sealed class DecoderTests
     }
 
     [Fact]
+    public void A_fine_tuned_model_counts_from_column_zero_and_its_no_object_column_is_ignored()
+    {
+        // Two classes: columns 0 and 1 have names, column 2 is RF-DETR's unnamed "no object".
+        var classes = new Dictionary<int, string> { [0] = "hand", [1] = "face" };
+        float[] boxes = [0.2f, 0.2f, 0.1f, 0.1f, 0.5f, 0.5f, 0.1f, 0.1f, 0.8f, 0.8f, 0.1f, 0.1f];
+        float[] logits =
+        [
+            3f, -5f, -5f,  // hand
+            -5f, 2f, -5f,  // face
+            1f, 0.5f, 4f,  // no object wins: nothing, although "hand" is above the threshold
+        ];
+
+        var detections = Decoder.Decode(boxes, logits, 3, 3, classes, DetectionOptions.Default);
+
+        Assert.Equal([(0, "hand"), (1, "face")], detections.Select(d => (d.ClassId, d.Name)));
+    }
+
+    [Fact]
     public void Overlapping_boxes_of_the_same_class_keep_only_the_best()
     {
         var detections = new Outputs()
