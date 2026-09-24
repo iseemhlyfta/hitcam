@@ -486,6 +486,13 @@ __declspec(dllexport) void __stdcall HitCam_BridgeDestroy(void* handle) {
 __declspec(dllexport) HRESULT __stdcall HitCam_VirtualCameraStart(const wchar_t* friendlyName, void** handle) {
     if (!handle) return E_POINTER;
     *handle = nullptr;
+    // mfsensorgroup.dll is delay-loaded (Windows 11 only): check for the API first, calling a missing one would crash.
+    const HMODULE sensorGroup = LoadLibraryExW(L"mfsensorgroup.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!sensorGroup) return HRESULT_FROM_WIN32(ERROR_MOD_NOT_FOUND);
+    const bool available = GetProcAddress(sensorGroup, "MFCreateVirtualCamera") != nullptr;
+    FreeLibrary(sensorGroup);
+    if (!available) return HRESULT_FROM_WIN32(ERROR_PROC_NOT_FOUND);
+
     HRESULT hr = MFStartup(MF_VERSION, MFSTARTUP_LITE);
     if (FAILED(hr)) return hr;
 

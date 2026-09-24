@@ -152,7 +152,16 @@ public static class Loc
     public static string CameraInstallFailedTitle => Russian ? "Камера не установлена" : "Camera not installed";
     public static string CameraInstallFailedDetail => Russian ? "Установка отменена или не удалась." : "The installation was cancelled or failed.";
     public static string DecoderFailed(string error) => Russian ? $"Декодер H.264 не запустился: {error}" : $"The H.264 decoder failed to start: {error}";
-    public static string InstallCamera => Russian ? "Установить камеру" : "Install camera";
+    public static string NativeDllMissing => Russian
+        ? "Рядом с HitCam.exe нет файла HitCamVCam.dll. Распакуйте архив HitCam целиком в папку (правой кнопкой → «Извлечь всё») и запускайте HitCam.exe оттуда, а не прямо из архива."
+        : "HitCamVCam.dll is missing next to HitCam.exe. Extract the whole HitCam archive to a folder (right-click → Extract All) and start HitCam.exe from there, not from inside the archive.";
+    public static string MediaFoundationMissing => Russian
+        ? "В этой Windows нет компонентов мультимедиа (выпуск N или KN). Установите их: Параметры → Приложения → Дополнительные компоненты → Добавить компонент → «Пакет компонентов мультимедиа», затем перезагрузите ПК."
+        : "This Windows has no media components (an N or KN edition). Install them: Settings → Apps → Optional features → Add a feature → Media Feature Pack, then restart the PC.";
+    public static string VirtualCameraNeedsWindows11 => Russian
+        ? "Виртуальная камера работает только в Windows 11. Превью в HitCam будет работать, но в других программах камеры «HitCam» не будет."
+        : "The virtual camera needs Windows 11. The preview in HitCam works, but other apps will not see the “HitCam” camera.";
+    public static string InstallCamera =>Russian ? "Установить камеру" : "Install camera";
     public static string UpdateCamera => Russian ? "Обновить камеру" : "Update camera";
     public static string ReinstallCamera => Russian ? "Переустановить" : "Reinstall";
 }

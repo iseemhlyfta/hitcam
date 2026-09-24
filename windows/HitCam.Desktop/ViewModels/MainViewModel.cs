@@ -434,7 +434,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
         var hr = _camera.Start();
         if (hr < 0)
-            SetCameraStatus(false, Loc.CameraFailedTitle, Loc.CameraFailedDetail($"0x{hr:X8}"), Loc.ReinstallCamera);
+        {
+            // A missing file or an older Windows is not fixed by reinstalling the camera.
+            var explanation = NativeDiagnostics.ExplainCameraFailure(hr);
+            SetCameraStatus(false, Loc.CameraFailedTitle, explanation ?? Loc.CameraFailedDetail($"0x{hr:X8}"), explanation is null ? Loc.ReinstallCamera : null);
+        }
         else if (setup is CameraSetup.Outdated)
             SetCameraStatus(false, Loc.CameraOutdatedTitle, Loc.CameraOutdatedDetail, Loc.UpdateCamera);
         else

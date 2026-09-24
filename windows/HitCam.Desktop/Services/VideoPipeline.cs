@@ -135,7 +135,7 @@ public sealed class VideoPipeline : IDisposable
         }
         catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
         {
-            _error = ex.Message;
+            _error = NativeDiagnostics.ExplainLoadFailure(ex);
             Discard();
             return;
         }

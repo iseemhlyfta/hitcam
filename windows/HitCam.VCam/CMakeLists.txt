@@ -23,7 +23,9 @@ set_source_files_properties(third_party/nvvfx/src/NVVideoEffectsProxy.cpp third_
 
 target_compile_definitions(HitCamVCam PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCam PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys shell32)
+target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys shell32 delayimp)
+# The virtual camera API exists only on Windows 11: loaded on first use, so decoding and the preview still work without it.
+target_link_options(HitCamVCam PRIVATE /DELAYLOAD:mfsensorgroup.dll)
 
 # Manual checks (build.ps1 -Tests); the end-to-end one needs the camera registered (not run in CI).
 add_executable(HitCamVCamTest tests/VCamTest.cpp src/Shared.cpp)
