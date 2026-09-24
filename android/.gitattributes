@@ -1,0 +1,3 @@
+# gradlew runs on Linux CI and macOS: keep Unix line endings on every checkout.
+gradlew text eol=lf
+*.bat text eol=crlf
