@@ -8,6 +8,7 @@
 
 #include <mutex>
 
+#include "ErrorGuard.h"
 #include "MediaSource.h"
 
 namespace hitcam {
@@ -24,25 +25,32 @@ public:
     IFACEMETHODIMP ActivateObject(REFIID riid, void** object) override {
         if (!object) return E_POINTER;
         *object = nullptr;
-        std::lock_guard guard(lock_);
-        if (!source_) {
-            HRESULT hr = Microsoft::WRL::MakeAndInitialize<MediaSource>(&source_, attributes_.Get());
-            if (FAILED(hr)) return hr;
-        }
-        return source_.CopyTo(riid, object);
+        return Guarded([&]() -> HRESULT {
+            std::lock_guard guard(lock_);
+            if (!source_) {
+                HRESULT hr = Microsoft::WRL::MakeAndInitialize<MediaSource>(&source_, attributes_.Get());
+                if (FAILED(hr)) return hr;
+            }
+            return source_.CopyTo(riid, object);
+        });
     }
 
     IFACEMETHODIMP ShutdownObject() override {
-        std::lock_guard guard(lock_);
-        if (source_) source_->Shutdown();
-        source_.Reset();
-        return S_OK;
+        return Guarded([&]() -> HRESULT {
+            std::lock_guard guard(lock_);
+            if (source_) source_->Shutdown();
+            source_.Reset();
+            return S_OK;
+        });
     }
 
+    // The source no longer needs us: it shuts itself down when its last reference goes, Shutdown or not.
     IFACEMETHODIMP DetachObject() override {
-        std::lock_guard guard(lock_);
-        source_.Reset();
-        return S_OK;
+        return Guarded([&]() -> HRESULT {
+            std::lock_guard guard(lock_);
+            source_.Reset();
+            return S_OK;
+        });
     }
 
     // IMFAttributes, delegated

@@ -23,9 +23,9 @@ set_source_files_properties(third_party/nvvfx/src/NVVideoEffectsProxy.cpp third_
 
 target_compile_definitions(HitCamVCam PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCam PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys)
+target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys shell32)
 
-# Manual end-to-end check; needs the camera registered (not run in CI).
+# Manual checks (build.ps1 -Tests); the end-to-end one needs the camera registered (not run in CI).
 add_executable(HitCamVCamTest tests/VCamTest.cpp src/Shared.cpp)
 target_compile_definitions(HitCamVCamTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCamTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

@@ -25,15 +25,29 @@ class MediaSource;
 class FrameReader {
 public:
     ~FrameReader();
-    // Fills a contiguous NV12 buffer (pitch == width); shows a dark frame when there is no signal.
+    // Fills a contiguous NV12 buffer (pitch == width). While the writer is busy (or a copy came out torn) it
+    // repeats the last complete frame; "no signal" only once there is no frame or it is older than kStaleAfterMs.
     void Compose(uint8_t* destination, uint32_t width, uint32_t height);
 
 private:
     bool EnsureMapped();
+    // Copies a newer complete frame out of shared memory into frame_, if there is one.
+    void Refresh();
+    void Fit(uint8_t* destination, uint32_t width, uint32_t height);
 
     SharedHeader* header_ = nullptr;
     HANDLE mapping_ = nullptr;
     ULONGLONG nextMapAttemptMs_ = 0;
+
+    // Last complete frame (pitch == width) and a scratch buffer the next copy goes to until it is verified.
+    std::vector<uint8_t> frame_, scratch_;
+    uint32_t frameWidth_ = 0, frameHeight_ = 0;
+    ULONGLONG frameUpdatedMs_ = 0;
+    LONG64 frameSequence_ = -1;
+
+    // Source column of every output column, for the current scale.
+    std::vector<uint32_t> columns_;
+    uint32_t columnsSourceWidth_ = 0, columnsOutWidth_ = 0;
 };
 
 class MediaStream : public Microsoft::WRL::RuntimeClass<
@@ -42,9 +56,11 @@ class MediaStream : public Microsoft::WRL::RuntimeClass<
                         IKsControl> {
 public:
     HRESULT RuntimeClassInitialize(MediaSource* source, IMFStreamDescriptor* descriptor);
+    ~MediaStream() override;
 
     HRESULT Start(IMFMediaType* type);
     HRESULT Stop();
+    // Also detaches the stream from its source; the source calls it from Shutdown and from its destructor.
     void Shutdown();
 
     // IMFMediaEventGenerator
@@ -68,14 +84,23 @@ public:
     IFACEMETHODIMP KsEvent(PKSEVENT event, ULONG eventLength, LPVOID data, ULONG dataLength, ULONG* bytesReturned) override;
 
 private:
+    // The sink asks a frame or two ahead; more than this means nobody is consuming, so the oldest are dropped.
+    static constexpr size_t kMaxPendingRequests = 8;
+
     void Run();
+    void RunLoop();
     HRESULT DeliverSample(IUnknown* token);
+    // Requires workerLock_.
     void StopWorker();
 
+    // Lock order: workerLock_, then lock_. The worker thread only takes lock_.
+    std::mutex workerLock_;
     std::mutex lock_;
     Microsoft::WRL::ComPtr<IMFMediaEventQueue> queue_;
     Microsoft::WRL::ComPtr<IMFStreamDescriptor> descriptor_;
-    Microsoft::WRL::ComPtr<IMFMediaSource> source_;
+    // Not a reference: the source owns the stream, and a counted back reference would keep both (and the worker)
+    // alive forever if the source is released without Shutdown. Cleared by Shutdown, under lock_.
+    MediaSource* parent_ = nullptr;
     MF_STREAM_STATE state_ = MF_STREAM_STATE_STOPPED;
     bool shutdown_ = false;
 
@@ -97,6 +122,7 @@ class MediaSource
 public:
     // `activationAttributes` come from the frame server through the Activator and become the source attributes.
     HRESULT RuntimeClassInitialize(IMFAttributes* activationAttributes);
+    ~MediaSource() override;
 
     // IMFMediaEventGenerator
     IFACEMETHODIMP GetEvent(DWORD flags, IMFMediaEvent** event) override;

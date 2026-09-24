@@ -6,6 +6,8 @@
 #include <chrono>
 #include <cstring>
 
+#include "ErrorGuard.h"
+
 using Microsoft::WRL::ComPtr;
 using Microsoft::WRL::MakeAndInitialize;
 
@@ -24,6 +26,12 @@ constexpr uint8_t kNoSignalLuma = 32;
 constexpr uint8_t kBlackLuma = 16;
 constexpr uint8_t kNeutralChroma = 128;
 
+// Seqlock read: spin briefly (the writer copies a frame in about a millisecond), then give the CPU away.
+constexpr int kSpinAttempts = 64;
+constexpr int kReadAttempts = 256;
+
+size_t Nv12Size(uint32_t width, uint32_t height) { return static_cast<size_t>(width) * height * 3 / 2; }
+
 HRESULT CreateVideoType(UINT32 width, UINT32 height, IMFMediaType** result) {
     ComPtr<IMFMediaType> type;
     HRESULT hr = MFCreateMediaType(&type);
@@ -35,11 +43,34 @@ HRESULT CreateVideoType(UINT32 width, UINT32 height, IMFMediaType** result) {
     if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
     if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_ALL_SAMPLES_INDEPENDENT, TRUE);
     if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_FIXED_SIZE_SAMPLES, TRUE);
-    if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_SAMPLE_SIZE, width * height * 3 / 2);
+    if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_SAMPLE_SIZE, static_cast<UINT32>(Nv12Size(width, height)));
     if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_DEFAULT_STRIDE, width);
     if (SUCCEEDED(hr)) hr = type->SetUINT32(MF_MT_AVG_BITRATE, width * height * 12 * kFps);
     if (SUCCEEDED(hr)) *result = type.Detach();
     return hr;
+}
+
+// Only the types the source declared: a sample size computed from anything else could be absurd.
+HRESULT CheckMediaType(IMFMediaType* type, UINT32* width, UINT32* height) {
+    if (!type) return MF_E_INVALIDMEDIATYPE;
+    GUID major{}, subtype{};
+    if (FAILED(type->GetGUID(MF_MT_MAJOR_TYPE, &major)) || major != MFMediaType_Video) return MF_E_INVALIDMEDIATYPE;
+    if (FAILED(type->GetGUID(MF_MT_SUBTYPE, &subtype)) || subtype != MFVideoFormat_NV12) return MF_E_INVALIDMEDIATYPE;
+    UINT32 w = 0, h = 0;
+    if (FAILED(MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &w, &h))) return MF_E_INVALIDMEDIATYPE;
+    UINT32 numerator = 0, denominator = 0;
+    if (SUCCEEDED(MFGetAttributeRatio(type, MF_MT_FRAME_RATE, &numerator, &denominator))
+        && (denominator == 0 || static_cast<UINT64>(numerator) != static_cast<UINT64>(kFps) * denominator)) {
+        return MF_E_INVALIDMEDIATYPE;
+    }
+    for (const auto& size : kSizes) {
+        if (size.width == w && size.height == h) {
+            *width = w;
+            *height = h;
+            return S_OK;
+        }
+    }
+    return MF_E_INVALIDMEDIATYPE;
 }
 
 void Fill(uint8_t* destination, uint32_t width, uint32_t height, uint8_t luma) {
@@ -47,23 +78,105 @@ void Fill(uint8_t* destination, uint32_t width, uint32_t height, uint8_t luma) {
     std::memset(destination + static_cast<size_t>(width) * height, kNeutralChroma, static_cast<size_t>(width) * height / 2);
 }
 
+bool IsValidFrameSize(uint32_t width, uint32_t height) {
+    return width >= 2 && height >= 2 && width <= kMaxSide && height <= kMaxSide && (width % 2) == 0 && (height % 2) == 0;
+}
+
+}  // namespace
+
+// MARK: FrameReader
+
+FrameReader::~FrameReader() { UnmapSharedFrames(header_, mapping_); }
+
+bool FrameReader::EnsureMapped() {
+    if (header_) return true;
+    const ULONGLONG now = GetTickCount64();
+    if (now < nextMapAttemptMs_) return false;
+    nextMapAttemptMs_ = now + 1000;
+    header_ = MapSharedFrames(&mapping_, SharedAccess::Read);
+    return header_ != nullptr;
+}
+
+void FrameReader::Refresh() {
+    for (int attempt = 0; attempt < kReadAttempts; ++attempt) {
+        const LONG64 before = header_->sequence;
+        if (before & 1) {
+            if (attempt < kSpinAttempts) YieldProcessor();
+            else SwitchToThread();
+            continue;
+        }
+        // Nothing new since the last copy: keep it (and skip copying the same frame again).
+        if (before == frameSequence_) return;
+        MemoryBarrier();
+        // Each field is read exactly once; only these copies are checked and used.
+        const uint32_t sourceWidth = header_->width;
+        const uint32_t sourceHeight = header_->height;
+        const ULONGLONG updatedMs = static_cast<ULONGLONG>(header_->updatedMs);
+
+        const bool valid = IsValidFrameSize(sourceWidth, sourceHeight);
+        if (valid) {
+            const size_t size = Nv12Size(sourceWidth, sourceHeight);
+            scratch_.resize(size);
+            std::memcpy(scratch_.data(), FrameData(header_), size);
+        }
+        MemoryBarrier();
+        if (header_->sequence != before) continue;  // torn: the writer started the next frame meanwhile
+
+        frameSequence_ = before;
+        if (!valid) {
+            // Cleared by the app (phone disconnected) or garbage: no signal.
+            frameWidth_ = frameHeight_ = 0;
+            return;
+        }
+        frame_.swap(scratch_);
+        frameWidth_ = sourceWidth;
+        frameHeight_ = sourceHeight;
+        frameUpdatedMs_ = updatedMs;
+        return;
+    }
+    // The writer kept us out; the last complete frame is repeated, which is what a late frame looks like anyway.
+}
+
+void FrameReader::Compose(uint8_t* destination, uint32_t width, uint32_t height) {
+    if (EnsureMapped()) {
+        if (frame_.capacity() < kMaxFrameBytes) {
+            // Once, so a resolution change never reallocates in the middle of streaming.
+            frame_.reserve(kMaxFrameBytes);
+            scratch_.reserve(kMaxFrameBytes);
+        }
+        Refresh();
+    }
+    if (frameWidth_ != 0 && GetTickCount64() - frameUpdatedMs_ < kStaleAfterMs) {
+        Fit(destination, width, height);
+        return;
+    }
+    Fill(destination, width, height, kNoSignalLuma);
+}
+
 // Nearest-neighbour scale of NV12 into the destination, keeping the aspect ratio (letterbox/pillarbox).
-void FitNv12(const uint8_t* source, uint32_t sourceWidth, uint32_t sourceHeight,
-             uint8_t* destination, uint32_t width, uint32_t height) {
+void FrameReader::Fit(uint8_t* destination, uint32_t width, uint32_t height) {
+    const uint8_t* source = frame_.data();
+    const uint32_t sourceWidth = frameWidth_;
+    const uint32_t sourceHeight = frameHeight_;
     if (sourceWidth == width && sourceHeight == height) {
-        std::memcpy(destination, source, static_cast<size_t>(width) * height * 3 / 2);
+        std::memcpy(destination, source, Nv12Size(width, height));
         return;
     }
 
     const double scale = std::min(static_cast<double>(width) / sourceWidth, static_cast<double>(height) / sourceHeight);
-    const uint32_t outWidth = std::max<uint32_t>(2, static_cast<uint32_t>(sourceWidth * scale) & ~1u);
-    const uint32_t outHeight = std::max<uint32_t>(2, static_cast<uint32_t>(sourceHeight * scale) & ~1u);
+    const uint32_t outWidth = std::clamp<uint32_t>(static_cast<uint32_t>(sourceWidth * scale) & ~1u, 2, width);
+    const uint32_t outHeight = std::clamp<uint32_t>(static_cast<uint32_t>(sourceHeight * scale) & ~1u, 2, height);
     const uint32_t left = ((width - outWidth) / 2) & ~1u;
     const uint32_t top = ((height - outHeight) / 2) & ~1u;
     if (outWidth != width || outHeight != height) Fill(destination, width, height, kBlackLuma);
 
-    std::vector<uint32_t> columns(outWidth);
-    for (uint32_t x = 0; x < outWidth; ++x) columns[x] = static_cast<uint32_t>(static_cast<uint64_t>(x) * sourceWidth / outWidth);
+    if (columnsSourceWidth_ != sourceWidth || columnsOutWidth_ != outWidth) {
+        columns_.resize(outWidth);
+        for (uint32_t x = 0; x < outWidth; ++x) columns_[x] = static_cast<uint32_t>(static_cast<uint64_t>(x) * sourceWidth / outWidth);
+        columnsSourceWidth_ = sourceWidth;
+        columnsOutWidth_ = outWidth;
+    }
+    const uint32_t* columns = columns_.data();
 
     for (uint32_t y = 0; y < outHeight; ++y) {
         const uint8_t* sourceRow = source + static_cast<size_t>(static_cast<uint64_t>(y) * sourceHeight / outHeight) * sourceWidth;
@@ -85,115 +198,101 @@ void FitNv12(const uint8_t* source, uint32_t sourceWidth, uint32_t sourceHeight,
     }
 }
 
-}  // namespace
-
-// MARK: FrameReader
-
-FrameReader::~FrameReader() { UnmapSharedFrames(header_, mapping_); }
-
-bool FrameReader::EnsureMapped() {
-    if (header_) return true;
-    const ULONGLONG now = GetTickCount64();
-    if (now < nextMapAttemptMs_) return false;
-    nextMapAttemptMs_ = now + 1000;
-    header_ = MapSharedFrames(&mapping_);
-    return header_ != nullptr;
-}
-
-void FrameReader::Compose(uint8_t* destination, uint32_t width, uint32_t height) {
-    if (EnsureMapped()) {
-        for (int attempt = 0; attempt < 3; ++attempt) {
-            const LONG64 before = header_->sequence;
-            if (before & 1) {
-                Sleep(1);
-                continue;
-            }
-            MemoryBarrier();
-            const uint32_t sourceWidth = header_->width;
-            const uint32_t sourceHeight = header_->height;
-            const ULONGLONG age = GetTickCount64() - static_cast<ULONGLONG>(header_->updatedMs);
-            const bool valid = sourceWidth >= 2 && sourceHeight >= 2 && sourceWidth <= kMaxSide && sourceHeight <= kMaxSide
-                               && (sourceWidth % 2) == 0 && (sourceHeight % 2) == 0 && age < kStaleAfterMs;
-            if (!valid) break;
-
-            FitNv12(FrameData(header_), sourceWidth, sourceHeight, destination, width, height);
-            MemoryBarrier();
-            if (header_->sequence == before) return;
-        }
-    }
-    Fill(destination, width, height, kNoSignalLuma);
-}
-
 // MARK: MediaStream
 
 HRESULT MediaStream::RuntimeClassInitialize(MediaSource* source, IMFStreamDescriptor* descriptor) {
-    HRESULT hr = MFCreateEventQueue(&queue_);
-    if (SUCCEEDED(hr)) hr = source->QueryInterface(IID_PPV_ARGS(&source_));
+    parent_ = source;
     descriptor_ = descriptor;
-    return hr;
+    return MFCreateEventQueue(&queue_);
+}
+
+MediaStream::~MediaStream() {
+    // Normally already stopped by Shutdown; a joinable std::thread in a destructor would be std::terminate.
+    std::lock_guard worker(workerLock_);
+    StopWorker();
 }
 
 HRESULT MediaStream::Start(IMFMediaType* type) {
-    StopWorker();
+    return Guarded([&]() -> HRESULT {
+        UINT32 width = 0, height = 0;
+        HRESULT hr = CheckMediaType(type, &width, &height);
+        if (FAILED(hr)) return hr;
 
-    UINT32 width = 0, height = 0, numerator = kFps, denominator = 1;
-    HRESULT hr = MFGetAttributeSize(type, MF_MT_FRAME_SIZE, &width, &height);
-    if (FAILED(hr)) return hr;
-    MFGetAttributeRatio(type, MF_MT_FRAME_RATE, &numerator, &denominator);
-    if (numerator == 0 || denominator == 0) {
-        numerator = kFps;
-        denominator = 1;
-    }
+        std::lock_guard worker(workerLock_);
+        StopWorker();
+        {
+            std::lock_guard guard(lock_);
+            if (shutdown_) return MF_E_SHUTDOWN;
+            width_ = width;
+            height_ = height;
+            frameDuration_ = 10'000'000LL / kFps;
+            tokens_.clear();
+            state_ = MF_STREAM_STATE_RUNNING;
+            running_ = true;
+        }
+        try {
+            worker_ = std::thread([this] { Run(); });
+        } catch (...) {
+            std::lock_guard guard(lock_);
+            running_ = false;
+            state_ = MF_STREAM_STATE_STOPPED;
+            throw;
+        }
 
-    {
-        std::lock_guard guard(lock_);
-        if (shutdown_) return MF_E_SHUTDOWN;
-        width_ = width;
-        height_ = height;
-        frameDuration_ = 10'000'000LL * denominator / numerator;
-        tokens_.clear();
-        state_ = MF_STREAM_STATE_RUNNING;
-    }
-
-    running_ = true;
-    worker_ = std::thread([this] { Run(); });
-
-    PROPVARIANT time;
-    PropVariantInit(&time);
-    time.vt = VT_I8;
-    time.hVal.QuadPart = MFGetSystemTime();
-    return queue_->QueueEventParamVar(MEStreamStarted, GUID_NULL, S_OK, &time);
+        PROPVARIANT time;
+        PropVariantInit(&time);
+        time.vt = VT_I8;
+        time.hVal.QuadPart = MFGetSystemTime();
+        return queue_->QueueEventParamVar(MEStreamStarted, GUID_NULL, S_OK, &time);
+    });
 }
 
 HRESULT MediaStream::Stop() {
-    StopWorker();
-    {
-        std::lock_guard guard(lock_);
-        if (shutdown_) return MF_E_SHUTDOWN;
-        state_ = MF_STREAM_STATE_STOPPED;
-        tokens_.clear();
-    }
-    return queue_->QueueEventParamVar(MEStreamStopped, GUID_NULL, S_OK, nullptr);
+    return Guarded([&]() -> HRESULT {
+        std::lock_guard worker(workerLock_);
+        StopWorker();
+        {
+            std::lock_guard guard(lock_);
+            if (shutdown_) return MF_E_SHUTDOWN;
+            state_ = MF_STREAM_STATE_STOPPED;
+            tokens_.clear();
+        }
+        return queue_->QueueEventParamVar(MEStreamStopped, GUID_NULL, S_OK, nullptr);
+    });
 }
 
 void MediaStream::Shutdown() {
+    // Held throughout, so a concurrent Start cannot slip a new worker in before shutdown_ is set.
+    std::lock_guard worker(workerLock_);
     StopWorker();
     std::lock_guard guard(lock_);
     if (shutdown_) return;
     shutdown_ = true;
     tokens_.clear();
     queue_->Shutdown();
-    // Breaks the source <-> stream reference cycle.
-    source_.Reset();
+    parent_ = nullptr;
 }
 
 void MediaStream::StopWorker() {
     running_ = false;
-    if (worker_.joinable()) worker_.join();
+    if (!worker_.joinable()) return;
+    // A thread cannot join itself (std::terminate). The worker holds no references, so this is only a guard.
+    if (worker_.get_id() == std::this_thread::get_id()) worker_.detach();
+    else worker_.join();
+}
+
+void MediaStream::Run() {
+    try {
+        RunLoop();
+    } catch (...) {
+        // Out of memory: tell the pipeline instead of taking the whole frame server process down.
+        running_ = false;
+        queue_->QueueEventParamVar(MEError, GUID_NULL, E_OUTOFMEMORY, nullptr);
+    }
 }
 
 // Paces delivery to the negotiated frame rate: at most one sample per frame interval, only when requested.
-void MediaStream::Run() {
+void MediaStream::RunLoop() {
     using namespace std::chrono;
     const auto interval = duration_cast<steady_clock::duration>(nanoseconds(frameDuration_ * 100));
     auto next = steady_clock::now();
@@ -213,25 +312,33 @@ void MediaStream::Run() {
                 requested = true;
             }
         }
-        if (requested) DeliverSample(token.Get());
+        if (!requested) continue;
+        const HRESULT hr = DeliverSample(token.Get());
+        // A request that cannot be answered is reported, not silently dropped: the sink would wait for it.
+        if (FAILED(hr) && hr != MF_E_SHUTDOWN) queue_->QueueEventParamVar(MEError, GUID_NULL, hr, nullptr);
     }
 }
 
 HRESULT MediaStream::DeliverSample(IUnknown* token) {
-    const DWORD size = width_ * height_ * 3 / 2;
+    const size_t size = Nv12Size(width_, height_);
     ComPtr<IMFMediaBuffer> buffer;
-    HRESULT hr = MFCreateMemoryBuffer(size, &buffer);
+    HRESULT hr = MFCreateMemoryBuffer(static_cast<DWORD>(size), &buffer);
     if (FAILED(hr)) return hr;
 
     BYTE* data = nullptr;
-    hr = buffer->Lock(&data, nullptr, nullptr);
+    DWORD capacity = 0;
+    hr = buffer->Lock(&data, &capacity, nullptr);
     if (FAILED(hr)) return hr;
+    if (capacity < size) {
+        buffer->Unlock();
+        return E_UNEXPECTED;
+    }
     reader_.Compose(data, width_, height_);
     buffer->Unlock();
-    buffer->SetCurrentLength(size);
+    hr = buffer->SetCurrentLength(static_cast<DWORD>(size));
 
     ComPtr<IMFSample> sample;
-    hr = MFCreateSample(&sample);
+    if (SUCCEEDED(hr)) hr = MFCreateSample(&sample);
     if (SUCCEEDED(hr)) hr = sample->AddBuffer(buffer.Get());
     if (SUCCEEDED(hr)) hr = sample->SetSampleTime(MFGetSystemTime());
     if (SUCCEEDED(hr)) hr = sample->SetSampleDuration(frameDuration_);
@@ -267,9 +374,13 @@ IFACEMETHODIMP MediaStream::QueueEvent(MediaEventType type, REFGUID extendedType
 
 IFACEMETHODIMP MediaStream::GetMediaSource(IMFMediaSource** source) {
     if (!source) return E_POINTER;
+    *source = nullptr;
     std::lock_guard guard(lock_);
-    if (shutdown_) return MF_E_SHUTDOWN;
-    return source_.CopyTo(source);
+    // parent_ is cleared under this lock before the source goes away (Shutdown or its destructor). Like
+    // Microsoft's SimpleMediaSource, this cannot help a caller that releases the last source reference on
+    // another thread at this very moment; such a caller has no source to ask about anyway.
+    if (shutdown_ || !parent_) return MF_E_SHUTDOWN;
+    return parent_->QueryInterface(IID_PPV_ARGS(source));
 }
 
 IFACEMETHODIMP MediaStream::GetStreamDescriptor(IMFStreamDescriptor** descriptor) {
@@ -280,11 +391,15 @@ IFACEMETHODIMP MediaStream::GetStreamDescriptor(IMFStreamDescriptor** descriptor
 }
 
 IFACEMETHODIMP MediaStream::RequestSample(IUnknown* token) {
-    std::lock_guard guard(lock_);
-    if (shutdown_) return MF_E_SHUTDOWN;
-    if (state_ != MF_STREAM_STATE_RUNNING) return MF_E_MEDIA_SOURCE_WRONGSTATE;
-    tokens_.emplace_back(token);
-    return S_OK;
+    return Guarded([&]() -> HRESULT {
+        std::lock_guard guard(lock_);
+        if (shutdown_) return MF_E_SHUTDOWN;
+        // SetStreamState(RUNNING) alone does not start the worker: without it nobody would ever answer.
+        if (state_ != MF_STREAM_STATE_RUNNING || !running_) return MF_E_MEDIA_SOURCE_WRONGSTATE;
+        if (tokens_.size() >= kMaxPendingRequests) tokens_.pop_front();
+        tokens_.emplace_back(token);
+        return S_OK;
+    });
 }
 
 IFACEMETHODIMP MediaStream::SetStreamState(MF_STREAM_STATE state) {
@@ -345,6 +460,12 @@ HRESULT MediaSource::RuntimeClassInitialize(IMFAttributes* activationAttributes)
     return hr;
 }
 
+MediaSource::~MediaSource() {
+    // Released without Shutdown: stop the worker and detach the stream, which may outlive us.
+    if (stream_) stream_->Shutdown();
+    if (queue_) queue_->Shutdown();
+}
+
 IFACEMETHODIMP MediaSource::GetEvent(DWORD flags, IMFMediaEvent** event) {
     ComPtr<IMFMediaEventQueue> queue;
     {
@@ -389,44 +510,51 @@ IFACEMETHODIMP MediaSource::Start(IMFPresentationDescriptor* descriptor, const G
     if (!descriptor || !startPosition) return E_INVALIDARG;
     if (timeFormat && *timeFormat != GUID_NULL) return MF_E_UNSUPPORTED_TIME_FORMAT;
 
-    std::lock_guard guard(lock_);
-    if (shutdown_) return MF_E_SHUTDOWN;
+    return Guarded([&]() -> HRESULT {
+        std::lock_guard guard(lock_);
+        if (shutdown_) return MF_E_SHUTDOWN;
 
-    BOOL selected = FALSE;
-    ComPtr<IMFStreamDescriptor> stream;
-    HRESULT hr = descriptor->GetStreamDescriptorByIndex(0, &selected, &stream);
-    if (FAILED(hr)) return hr;
+        BOOL selected = FALSE;
+        ComPtr<IMFStreamDescriptor> stream;
+        HRESULT hr = descriptor->GetStreamDescriptorByIndex(0, &selected, &stream);
+        if (FAILED(hr)) return hr;
 
-    if (selected) {
-        ComPtr<IMFMediaTypeHandler> handler;
-        ComPtr<IMFMediaType> type;
-        hr = stream->GetMediaTypeHandler(&handler);
-        if (SUCCEEDED(hr)) hr = handler->GetCurrentMediaType(&type);
-        if (SUCCEEDED(hr)) {
-            ComPtr<IUnknown> unknown;
-            stream_.As(&unknown);
-            hr = queue_->QueueEventParamUnk(started_ ? MEUpdatedStream : MENewStream, GUID_NULL, S_OK, unknown.Get());
+        if (selected) {
+            ComPtr<IMFMediaTypeHandler> handler;
+            ComPtr<IMFMediaType> type;
+            hr = stream->GetMediaTypeHandler(&handler);
+            if (SUCCEEDED(hr)) hr = handler->GetCurrentMediaType(&type);
+            // Rejected before any event is queued, so the pipeline sees a clean failure.
+            UINT32 width = 0, height = 0;
+            if (SUCCEEDED(hr)) hr = CheckMediaType(type.Get(), &width, &height);
+            if (SUCCEEDED(hr)) {
+                ComPtr<IUnknown> unknown;
+                stream_.As(&unknown);
+                hr = queue_->QueueEventParamUnk(started_ ? MEUpdatedStream : MENewStream, GUID_NULL, S_OK, unknown.Get());
+            }
+            if (SUCCEEDED(hr)) hr = stream_->Start(type.Get());
+        } else {
+            hr = stream_->Stop();
         }
-        if (SUCCEEDED(hr)) hr = stream_->Start(type.Get());
-    } else {
-        hr = stream_->Stop();
-    }
-    if (FAILED(hr)) return hr;
+        if (FAILED(hr)) return hr;
 
-    started_ = true;
-    PROPVARIANT time;
-    PropVariantInit(&time);
-    time.vt = VT_I8;
-    time.hVal.QuadPart = MFGetSystemTime();
-    return queue_->QueueEventParamVar(MESourceStarted, GUID_NULL, S_OK, &time);
+        started_ = true;
+        PROPVARIANT time;
+        PropVariantInit(&time);
+        time.vt = VT_I8;
+        time.hVal.QuadPart = MFGetSystemTime();
+        return queue_->QueueEventParamVar(MESourceStarted, GUID_NULL, S_OK, &time);
+    });
 }
 
 IFACEMETHODIMP MediaSource::Stop() {
-    std::lock_guard guard(lock_);
-    if (shutdown_) return MF_E_SHUTDOWN;
-    HRESULT hr = stream_->Stop();
-    if (FAILED(hr)) return hr;
-    return queue_->QueueEventParamVar(MESourceStopped, GUID_NULL, S_OK, nullptr);
+    return Guarded([&]() -> HRESULT {
+        std::lock_guard guard(lock_);
+        if (shutdown_) return MF_E_SHUTDOWN;
+        HRESULT hr = stream_->Stop();
+        if (FAILED(hr)) return hr;
+        return queue_->QueueEventParamVar(MESourceStopped, GUID_NULL, S_OK, nullptr);
+    });
 }
 
 IFACEMETHODIMP MediaSource::Pause() {
@@ -435,12 +563,14 @@ IFACEMETHODIMP MediaSource::Pause() {
 }
 
 IFACEMETHODIMP MediaSource::Shutdown() {
-    std::lock_guard guard(lock_);
-    if (shutdown_) return MF_E_SHUTDOWN;
-    shutdown_ = true;
-    if (stream_) stream_->Shutdown();
-    queue_->Shutdown();
-    return S_OK;
+    return Guarded([&]() -> HRESULT {
+        std::lock_guard guard(lock_);
+        if (shutdown_) return MF_E_SHUTDOWN;
+        shutdown_ = true;
+        if (stream_) stream_->Shutdown();
+        queue_->Shutdown();
+        return S_OK;
+    });
 }
 
 IFACEMETHODIMP MediaSource::GetSourceAttributes(IMFAttributes** attributes) {
