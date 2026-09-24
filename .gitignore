@@ -492,3 +492,18 @@ DerivedData/
 .DS_Store
 ios/HitCam/Info.plist
 ios/Payload/
+
+# HitCam: Android
+.gradle/
+local.properties
+*.jks
+*.keystore
+*.apk
+*.aab
+captures/
+.externalNativeBuild/
+.cxx/
+# Visual Studio patterns above ([Dd]ebug/, [Rr]elease/, [Ll]og/, ...) must not hide Android sources.
+!android/**/src/debug/
+!android/**/src/release/
+!android/**/src/**
