@@ -314,6 +314,46 @@ int Run(bool installed) {
     HitCam_BridgeClearSignal(bridge);
     Check(WaitFor(graph, bgr, [](auto& f) { return std::abs(Gray(f, 960, 540) - 19) <= 3; }), "cleared signal: dark gray again");
 
+    // HitCam restarts while apps keep the camera open without streaming (a stopped graph, a filter never run): the
+    // new start takes the shared frame buffer over instead of failing as if another HitCam were running.
+    // No frames are fed while the camera is stopped, so the Media Foundation section stays untouched.
+    graph.control->Stop();
+    ComPtr<IBaseFilter> idle;
+    hr = CreateFilter(&idle);
+    Check(SUCCEEDED(hr), "second filter instance created");
+    HitCam_DShowStop();
+    // A failed start leaves the DirectShow output off: frames would then go to the Media Foundation camera.
+    const bool restarted = HitCam_DShowStart() == S_OK;
+    Check(restarted, "restart right away while filters hold the camera");
+    if (!restarted) return 1;
+    graph.control->Run();
+    Feed(bridge, 1920, 1080, 120, 30);
+    Check(WaitFor(graph, bgr, [](auto& f) { return std::abs(Gray(f, 960, 540) - 121) <= 8; }), "stopped graph shows frames after the restart");
+    std::printf("      center %d\n", Gray(bgr, 960, 540));
+
+    // After a longer pause the filters' watchdogs have given up on the old stream.
+    graph.control->Stop();
+    HitCam_DShowStop();
+    Sleep(1000);
+    const bool restartedAgain = HitCam_DShowStart() == S_OK;
+    Check(restartedAgain, "restart after a pause while filters hold the camera");
+    if (!restartedAgain) return 1;
+    graph.control->Run();
+    Graph second;
+    if (idle) {
+        hr = BuildGraph(idle.Get(), second);
+        Check(SUCCEEDED(hr), "graph with the idle filter runs");
+    }
+    Feed(bridge, 1920, 1080, 200, 30);
+    Check(WaitFor(graph, bgr, [](auto& f) { return std::abs(Gray(f, 960, 540) - 214) <= 10; }), "stopped graph shows frames after the pause");
+    std::printf("      center %d\n", Gray(bgr, 960, 540));
+    if (second.control) {
+        Check(WaitFor(second, bgr, [](auto& f) { return std::abs(Gray(f, 960, 540) - 214) <= 10; }), "idle filter shows frames after the pause");
+        std::printf("      center %d\n", Gray(bgr, 960, 540));
+        second.control->Stop();
+        CoTaskMemFree(second.type.pbFormat);
+    }
+
     graph.control->Stop();
     HitCam_BridgeDestroy(bridge);
     HitCam_DShowStop();

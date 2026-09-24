@@ -45,6 +45,8 @@ class FrameBuffer
     static constexpr float WATCHDOG_HEARTBEAT_INTERVAL = 0.02f;
     static constexpr float WATCHDOG_MONITOR_INTERVAL = 0.02f;
     static constexpr float WATCHDOG_TIMEOUT = 0.5f;
+    // HitCam: how long a new sender watches an existing stream's heartbeat before taking the stream over.
+    static constexpr float TAKEOVER_WAIT = 0.2f;
 
  private:
     struct Header;

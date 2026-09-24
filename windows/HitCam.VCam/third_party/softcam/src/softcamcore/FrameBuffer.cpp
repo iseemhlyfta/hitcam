@@ -51,11 +51,10 @@ FrameBuffer FrameBuffer::create(
     }
 
     auto shmem_size = calcMemorySize((uint16_t)width, (uint16_t)height);
-    fb.m_shmem = SharedMemory::create(SharedMemoryName, shmem_size);
-    if (fb.m_shmem)
-    {
-        std::lock_guard<NamedMutex> lock(fb.m_mutex);
 
+    // Under the mutex: makes the header a fresh stream owned by this sender.
+    auto initialize = [&fb, width, height, framerate]()
+    {
         auto frame = fb.header();
         frame->m_image_offset = sizeof(Header);
         frame->m_width = (uint16_t)width;
@@ -64,7 +63,60 @@ FrameBuffer FrameBuffer::create(
         frame->m_is_active = 1;
         frame->m_connected = 0;
         frame->m_frame_counter = 0;
+        // HitCam: a heartbeat right away, so another sender checking for a takeover sees this one as alive.
+        frame->m_watchdog_heartbeat += 1;
+    };
 
+    fb.m_shmem = SharedMemory::create(SharedMemoryName, shmem_size);
+    if (fb.m_shmem)
+    {
+        std::lock_guard<NamedMutex> lock(fb.m_mutex);
+        initialize();
+    }
+    else
+    {
+        // HitCam: the section outlives its sender while any receiver (a filter an app created but does not stream
+        // from) keeps it open, and after a crash. Take it over when no live sender owns it: deactivated, or its
+        // heartbeat does not move. A live sender keeps it, so two senders never share one camera.
+        fb.m_shmem = SharedMemory::open(SharedMemoryName);
+        if (!fb.m_shmem || fb.m_shmem.size() < shmem_size)
+        {
+            fb.m_shmem = {};
+            return fb;
+        }
+        bool taken = false;
+        uint8_t heartbeat = 0;
+        {
+            std::lock_guard<NamedMutex> lock(fb.m_mutex);
+            if (!fb.header()->m_is_active)
+            {
+                initialize();
+                taken = true;
+            }
+            else
+            {
+                heartbeat = fb.header()->m_watchdog_heartbeat;
+            }
+        }
+        if (!taken)
+        {
+            Timer::sleep(TAKEOVER_WAIT);
+            std::lock_guard<NamedMutex> lock(fb.m_mutex);
+            if (!fb.header()->m_is_active || fb.header()->m_watchdog_heartbeat == heartbeat)
+            {
+                initialize();
+                taken = true;
+            }
+        }
+        if (!taken)
+        {
+            fb.m_shmem = {};
+            return fb;
+        }
+    }
+    if (fb.m_shmem)
+    {
+        auto frame = fb.header();
         auto mutex = fb.m_mutex;
         fb.m_watchdog = Watchdog::createHeartbeat(
             WATCHDOG_HEARTBEAT_INTERVAL,
