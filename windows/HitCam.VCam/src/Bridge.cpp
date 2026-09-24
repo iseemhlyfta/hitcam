@@ -18,8 +18,10 @@
 #include <vector>
 
 #include "DShowOutput.h"
-#include "Denoiser.h"
+#include "ArtifactReducer.h"
 #include "ErrorGuard.h"
+#include "GpuProcessor.h"
+#include "Processing.h"
 #include "Shared.h"
 
 using Microsoft::WRL::ComPtr;
@@ -157,15 +159,61 @@ private:
     uint64_t frame_ = 0;
 };
 
-// Every decoded frame goes (optionally denoised) to the virtual camera and to the preview.
+// Every decoded frame goes, optionally processed, to the virtual camera and to the preview:
+// NVIDIA artifact reduction (if on), then the Direct3D 11 stage (if any setting is not neutral). With everything
+// off the decoder's frame goes out untouched, without a copy or any GPU work.
 struct FrameSink {
     FrameWriter writer;
     PreviewBuffer preview;
-    Denoiser denoiser;
+    ArtifactReducer artifacts;
+    GpuProcessor gpu;
     std::vector<uint8_t> packed;
+    // HitCamVCamTest only: frames go to the preview alone, not to a camera.
+    bool previewOnly = false;
 
     // Frames the camera could not show: larger than the shared section holds (kMaxSide).
     std::atomic<uint64_t> oversized{0};
+
+    // Settings from any thread; the decoder thread takes a copy per frame.
+    std::mutex settingsLock;
+    HitCamProcessing settings{};
+    std::atomic<double> gpuMs{-1};
+
+    void SetProcessing(const HitCamProcessing& value) {
+        const HitCamProcessing clamped = ClampProcessing(value);
+        {
+            std::lock_guard guard(settingsLock);
+            settings = clamped;
+        }
+        artifacts.SetMode(static_cast<ArtifactReducer::Mode>(clamped.artifactReduction));
+    }
+
+    HitCamProcessing Settings() {
+        std::lock_guard guard(settingsLock);
+        return settings;
+    }
+
+    // Runs the processing stages on a contiguous NV12 frame in place. Returns true if the frame was changed.
+    // `restore` repacks the original frame: a failed NVIDIA run may leave it half written.
+    template <class Restore>
+    bool Process(uint8_t* nv12, uint32_t width, uint32_t height, const HitCamProcessing& current, Restore&& restore) {
+        bool changed = false;
+        if (artifacts.IsEnabled()) {
+            const auto result = artifacts.Process(nv12, width, height);
+            changed = result == ArtifactReducer::Result::Changed;
+            if (result == ArtifactReducer::Result::Failed) restore();
+        } else {
+            artifacts.ReleaseIfOff();
+        }
+        if (NeedsGpu(current)) {
+            changed = gpu.Process(nv12, width, height, current) || changed;
+            gpuMs = gpu.LastMilliseconds();
+        } else {
+            gpu.Reset();
+            gpuMs = -1;
+        }
+        return changed;
+    }
 
     void Publish(const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height) {
         width &= ~1u;
@@ -173,27 +221,35 @@ struct FrameSink {
         if (width < 2 || height < 2) return;
         const bool fits = width <= kMaxSide && height <= kMaxSide;
         if (!fits) ++oversized;
-        // No GPU time for a frame only the preview will show.
-        if (!fits || !denoiser.IsEnabled()) {
-            denoiser.ReleaseIfOff();
+        const HitCamProcessing current = Settings();
+        // No GPU time for a frame only the preview will show, nor with everything off.
+        if (!fits || (!artifacts.IsEnabled() && !NeedsGpu(current))) {
+            artifacts.ReleaseIfOff();
+            gpu.Reset();
+            gpuMs = -1;
         } else {
-            // The effect needs one contiguous NV12 image; the decoder's has padding rows between the planes.
+            // The stages need one contiguous NV12 image; the decoder's has padding rows between the planes.
             packed.resize(static_cast<size_t>(width) * height * 3 / 2);
-            uint8_t* out = packed.data();
-            for (uint32_t y = 0; y < height; ++y) std::memcpy(out + static_cast<size_t>(y) * width, luma + static_cast<size_t>(y) * pitch, width);
-            out += static_cast<size_t>(width) * height;
-            for (uint32_t y = 0; y < height / 2; ++y) std::memcpy(out + static_cast<size_t>(y) * width, chroma + static_cast<size_t>(y) * pitch, width);
-            if (denoiser.Process(packed.data(), width, height)) {
+            auto pack = [&] {
+                uint8_t* out = packed.data();
+                for (uint32_t y = 0; y < height; ++y) std::memcpy(out + static_cast<size_t>(y) * width, luma + static_cast<size_t>(y) * pitch, width);
+                out += static_cast<size_t>(width) * height;
+                for (uint32_t y = 0; y < height / 2; ++y) std::memcpy(out + static_cast<size_t>(y) * width, chroma + static_cast<size_t>(y) * pitch, width);
+            };
+            pack();
+            if (Process(packed.data(), width, height, current, pack)) {
                 luma = packed.data();
                 chroma = packed.data() + static_cast<size_t>(width) * height;
                 pitch = width;
             }
         }
-        // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
-        if (dshow::IsActive()) {
-            dshow::Submit(luma, chroma, pitch, width, height);
-        } else {
-            writer.Publish(luma, chroma, pitch, width, height);
+        if (!previewOnly) {
+            // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
+            if (dshow::IsActive()) {
+                dshow::Submit(luma, chroma, pitch, width, height);
+            } else {
+                writer.Publish(luma, chroma, pitch, width, height);
+            }
         }
         preview.Update(luma, chroma, pitch, width, height);
     }
@@ -201,7 +257,7 @@ struct FrameSink {
     void ClearSignal() {
         writer.ClearSignal();
         dshow::ClearSignal();
-        denoiser.Reset();
+        gpu.Reset();
     }
 };
 
@@ -439,29 +495,48 @@ __declspec(dllexport) uint64_t __stdcall HitCam_BridgeOversizedFrames(void* hand
     return handle ? static_cast<hitcam::Bridge*>(handle)->sink.oversized.load() : 0;
 }
 
-// True if the NVIDIA Video Effects runtime is installed (AI noise removal can be offered).
-__declspec(dllexport) BOOL __stdcall HitCam_DenoiseAvailable() {
+// True if the NVIDIA Video Effects runtime and its artifact reduction models are installed (the option can be
+// offered). Loads the NVIDIA libraries once; cached.
+__declspec(dllexport) BOOL __stdcall HitCam_ArtifactReductionAvailable() {
     BOOL available = FALSE;
-    hitcam::Quietly([&] { available = hitcam::Denoiser::IsAvailable(); });
+    hitcam::Quietly([&] { available = hitcam::ArtifactReducer::IsAvailable(); });
     return available;
 }
 
-// Noise removal mode: 0 off, 1 fast (only as much as the measured noise needs), 2 general (gentle model on every
-// frame), 3 maximum (strong model on every frame). Any thread. Switching off frees the model with the next frame.
-__declspec(dllexport) void __stdcall HitCam_BridgeSetDenoiseMode(void* handle, int mode) {
-    if (handle && mode >= 0 && mode <= 3) static_cast<hitcam::Bridge*>(handle)->sink.denoiser.SetMode(static_cast<hitcam::Denoiser::Mode>(mode));
+// Picture processing settings (see Processing.h); values are clamped. Any thread; the next frame uses them.
+// Switching artifact reduction off frees the NVIDIA model with the next frame.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetProcessing(void* handle, const HitCamProcessing* settings) {
+    if (handle && settings) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.SetProcessing(*settings); });
 }
 
-// Time the last denoised frame took (ms, -1 if none), the NvCV status of a failed model load or of processing that
-// kept failing (0 if none), the measured noise level (-1 before the first frame) and the amount applied to the
-// last frame (0..1).
-__declspec(dllexport) void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error, double* noise, float* amount) {
-    if (!handle || !milliseconds || !error || !noise || !amount) return;
-    const auto& denoiser = static_cast<hitcam::Bridge*>(handle)->sink.denoiser;
-    *milliseconds = denoiser.LastMilliseconds();
-    *error = denoiser.LastError();
-    *noise = denoiser.LastNoise();
-    *amount = denoiser.LastAmount();
+// Statistics of the last frame: milliseconds of the Direct3D 11 stage and of the NVIDIA artifact reduction (-1
+// when that stage did not run), and the NvCV status of an artifact reduction that failed to load or kept failing
+// to run (0 if none; for example -16 NVCV_ERR_RESOLUTION for a size the model does not take). Any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgeProcessingStats(void* handle, double* gpuMs, double* artifactMs, int* artifactError) {
+    if (!handle) return;
+    hitcam::Quietly([&] {
+        auto& sink = static_cast<hitcam::Bridge*>(handle)->sink;
+        if (gpuMs) *gpuMs = sink.gpuMs.load();
+        if (artifactMs) *artifactMs = sink.artifacts.LastMilliseconds();
+        if (artifactError) *artifactError = sink.artifacts.LastError();
+    });
+}
+
+// For HitCamVCamTest: runs the bridge's processing on one packed NV12 frame in place (no camera, no preview).
+// Call on the thread that decodes with this bridge (or instead of decoding).
+__declspec(dllexport) void __stdcall HitCam_BridgeProcessFrame(void* handle, uint8_t* nv12, uint32_t width, uint32_t height) {
+    if (!handle || !nv12 || width < 2 || height < 2 || ((width | height) & 1) != 0) return;
+    hitcam::Quietly([&] {
+        auto& sink = static_cast<hitcam::Bridge*>(handle)->sink;
+        const HitCamProcessing current = sink.Settings();
+        std::vector<uint8_t> original(nv12, nv12 + static_cast<size_t>(width) * height * 3 / 2);
+        sink.Process(nv12, width, height, current, [&] { std::memcpy(nv12, original.data(), original.size()); });
+    });
+}
+
+// For HitCamVCamTest: decoded frames of this bridge go to the preview only, never to a camera.
+__declspec(dllexport) void __stdcall HitCam_BridgePreviewOnly(void* handle) {
+    if (handle) static_cast<hitcam::Bridge*>(handle)->sink.previewOnly = true;
 }
 
 // Size and number of the newest preview frame (0x0 before the first one). Safe to call from any thread.
@@ -483,7 +558,7 @@ __declspec(dllexport) void __stdcall HitCam_BridgeDestroy(void* handle) {
     if (!handle) return;
     auto* bridge = static_cast<hitcam::Bridge*>(handle);
     const bool comInitialized = bridge->comInitialized;
-    // Waits for a model load in progress (~Denoiser); nothing here holds a lock meanwhile.
+    // Never waits for a model load in progress (~ArtifactReducer).
     delete bridge;
     MFShutdown();
     if (comInitialized) CoUninitialize();

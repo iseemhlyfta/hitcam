@@ -37,13 +37,41 @@ if(HITCAM_DSHOW_ONLY)
     return()
 endif()
 
+# ---- Compute shaders of the picture processing, compiled with the Windows SDK's fxc into headers ----
+set(PROGRAM_FILES_X86 "ProgramFiles(x86)")
+file(GLOB FXC_CANDIDATES "$ENV{${PROGRAM_FILES_X86}}/Windows Kits/10/bin/*/x64/fxc.exe")
+list(SORT FXC_CANDIDATES COMPARE NATURAL ORDER DESCENDING)
+# The newest SDK first; a developer prompt's PATH otherwise.
+set(FXC_NEWEST_DIR)
+if(FXC_CANDIDATES)
+    list(GET FXC_CANDIDATES 0 FXC_NEWEST)
+    get_filename_component(FXC_NEWEST_DIR "${FXC_NEWEST}" DIRECTORY)
+endif()
+find_program(FXC fxc HINTS ${FXC_NEWEST_DIR})
+if(NOT FXC)
+    message(FATAL_ERROR "fxc.exe (Windows SDK) not found")
+endif()
+set(SHADER_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/Process.hlsl)
+set(SHADER_HEADERS)
+foreach(entry TemporalLuma TemporalChroma AdjustLuma AdjustChroma)
+    set(header ${CMAKE_CURRENT_BINARY_DIR}/shaders/${entry}.h)
+    add_custom_command(OUTPUT ${header}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
+        COMMAND "${FXC}" /nologo /T cs_5_0 /E ${entry} /O3 /WX /Vn g_${entry} /Fh ${header} ${SHADER_SOURCE}
+        DEPENDS ${SHADER_SOURCE}
+        COMMENT "fxc ${entry}")
+    list(APPEND SHADER_HEADERS ${header})
+endforeach()
+
 # ---- HitCamVCam.dll: decoder bridge for HitCam.exe + Media Foundation camera (Windows 11) ----
 add_library(HitCamVCam SHARED
     src/Shared.cpp
     src/MediaSource.cpp
     src/Bridge.cpp
     src/DShowOutput.cpp
-    src/Denoiser.cpp
+    src/ArtifactReducer.cpp
+    src/GpuProcessor.cpp
+    ${SHADER_HEADERS}
     src/DllMain.cpp
     src/HitCamVCam.def
     # NVIDIA Video Effects SDK loaders (MIT): the runtime itself is a separate NVIDIA install.
@@ -55,7 +83,7 @@ add_library(HitCamVCam SHARED
     ${SOFTCAM_DIR}/softcamcore/Misc.cpp
     ${SOFTCAM_DIR}/softcamcore/Watchdog.cpp
 )
-target_include_directories(HitCamVCam PRIVATE third_party/nvvfx/include ${SOFTCAM_DIR})
+target_include_directories(HitCamVCam PRIVATE third_party/nvvfx/include ${SOFTCAM_DIR} ${CMAKE_CURRENT_BINARY_DIR})
 set_source_files_properties(
     third_party/nvvfx/src/NVVideoEffectsProxy.cpp third_party/nvvfx/src/nvCVImageProxy.cpp
     ${SOFTCAM_DIR}/softcamcore/SenderAPI.cpp ${SOFTCAM_DIR}/softcamcore/FrameBuffer.cpp
@@ -66,9 +94,10 @@ set_source_files_properties(${SOFTCAM_DIR}/softcamcore/Misc.cpp TARGET_DIRECTORY
 
 target_compile_definitions(HitCamVCam PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCam PRIVATE /W4 /WX /permissive- /EHsc /utf-8)
-target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys shell32 winmm delayimp)
+target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecdspuuid strmiids ole32 oleaut32 advapi32 propsys shell32 winmm d3d11 delayimp)
 # The virtual camera API exists only on Windows 11: loaded on first use, so decoding and the preview still work without it.
-target_link_options(HitCamVCam PRIVATE /DELAYLOAD:mfsensorgroup.dll)
+# Direct3D is needed only by HitCam.exe with picture processing on, not by the frame server that hosts the camera.
+target_link_options(HitCamVCam PRIVATE /DELAYLOAD:mfsensorgroup.dll /DELAYLOAD:d3d11.dll)
 
 # Manual checks (build.ps1 -Tests); the end-to-end one needs the camera registered (not run in CI).
 add_executable(HitCamVCamTest tests/VCamTest.cpp src/Shared.cpp)
