@@ -14,7 +14,9 @@ public sealed record FiredShot(Shot Shot, long Timestamp);
 /// <summary>
 /// Plays finger-gun shots over the preview, like the DLL does in the camera picture (<see cref="ShotEffect"/>): a
 /// flame at the muzzle in a warm glow and a flash of the whole picture, drawn here, and the kick, applied to
-/// <see cref="ShakeTarget"/> (the panel holding the preview and its overlays). Animates itself while a shot plays.
+/// <see cref="ShakeTarget"/> (the panel holding the preview and its overlays). Animates itself while a shot plays:
+/// each animation frame (before rendering) moves the panel and asks for a redraw; <see cref="Render"/> only draws,
+/// since changing a visual during the render pass throws.
 /// </summary>
 public sealed class ShotOverlay : Control
 {
@@ -36,6 +38,7 @@ public sealed class ShotOverlay : Control
     {
         AffectsRender<ShotOverlay>(ShotsProperty, SourceProperty);
         IsHitTestVisibleProperty.OverrideDefaultValue<ShotOverlay>(false);
+        ShotsProperty.Changed.AddClassHandler<ShotOverlay>((overlay, _) => overlay.Animate());
     }
 
     public IReadOnlyList<FiredShot>? Shots
@@ -58,36 +61,53 @@ public sealed class ShotOverlay : Control
 
     public override void Render(DrawingContext context)
     {
-        var playing = (Shots ?? []).Select(s => (s.Shot, Ms: Stopwatch.GetElapsedTime(s.Timestamp).TotalMilliseconds))
-            .Where(s => s.Ms < ShotEffect.DurationMs).ToList();
-        var picture = Source is { } source ? OverlayGeometry.Fit(Bounds.Size, source.Size) : default;
+        var playing = Playing();
+        var picture = Picture();
         if (playing.Count == 0 || picture.Width <= 0)
-        {
-            Shake(ShotState.None, picture);
             return;
-        }
-
         var newest = playing.MinBy(s => s.Ms);
-        var move = ShotEffect.At(newest.Ms, newest.Shot.Direction.X);
-        Shake(move, picture);
+        var lift = ShotEffect.At(newest.Ms, newest.Shot.Direction.X).Lift;
         using (context.PushClip(picture))
         {
-            if (move.Lift > 0.004f)
-                context.FillRectangle(new ImmutableSolidColorBrush(Colors.White, move.Lift), picture);
+            if (lift > 0.004f)
+                context.FillRectangle(new ImmutableSolidColorBrush(Colors.White, lift), picture);
             foreach (var (shot, ms) in playing)
                 DrawFlash(context, shot, ShotEffect.At(ms, shot.Direction.X).Flash, picture);
         }
+    }
 
-        // Next animation frame while anything plays.
-        if (!_frameRequested && TopLevel.GetTopLevel(this) is { } top)
+    private List<(Shot Shot, double Ms)> Playing() =>
+        [.. (Shots ?? []).Select(s => (s.Shot, Ms: Stopwatch.GetElapsedTime(s.Timestamp).TotalMilliseconds)).Where(s => s.Ms < ShotEffect.DurationMs)];
+
+    private Rect Picture() => Source is { } source ? OverlayGeometry.Fit(Bounds.Size, source.Size) : default;
+
+    /// <summary>One animation step: kick the panel, redraw, and ask for the next step while a shot plays.</summary>
+    private void Animate()
+    {
+        var playing = Playing();
+        if (playing.Count == 0)
         {
-            _frameRequested = true;
-            top.RequestAnimationFrame(_ =>
-            {
-                _frameRequested = false;
-                InvalidateVisual();
-            });
+            Shake(ShotState.None, default);
+            InvalidateVisual();
+            return;
         }
+        var newest = playing.MinBy(s => s.Ms);
+        Shake(ShotEffect.At(newest.Ms, newest.Shot.Direction.X), Picture());
+        InvalidateVisual();
+        if (_frameRequested || TopLevel.GetTopLevel(this) is not { } top)
+            return;
+        _frameRequested = true;
+        top.RequestAnimationFrame(_ =>
+        {
+            _frameRequested = false;
+            Animate();
+        });
+    }
+
+    protected override void OnDetachedFromVisualTree(VisualTreeAttachmentEventArgs e)
+    {
+        base.OnDetachedFromVisualTree(e);
+        Shake(ShotState.None, default);
     }
 
     /// <summary>The same flame and glow as the DLL: sizes from the hand, the flame along the barrel.</summary>
