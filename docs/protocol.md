@@ -1,6 +1,6 @@
 # HitCam protocol v1
 
-Transport: one TCP connection per session. The PC listens (default port **47800**), the iPhone connects.
+Transport: one TCP connection per session. The PC listens (default port **47800**), the phone (iPhone or Android) connects.
 All multi-byte integers are **little-endian**. No external servers are ever involved.
 
 ## Framing
@@ -60,8 +60,9 @@ phone                                   pc
   |   (pairingRequired: PC shows 6-digit PIN)
   | --- PairRequest {pin} --------------> |
   | <-- PairResult {ok, token?, attemptsLeft} |
-  | --- Capabilities, CameraState ------> |
   | --- StreamConfig -------------------> |
+  | --- Capabilities -------------------> |
+  | --- CameraState --------------------> |
   | --- VideoFrame (keyframe first) ----> |
   | --- VideoFrame ... -----------------> |
   | <-- Control / RequestKeyframe ------- |
@@ -86,6 +87,10 @@ phone                                   pc
 * Clock sync: every `Ping` is answered with a `Pong` whose payload echoes the ping's header timestamp and whose
   own header timestamp is the replier's clock. The PC uses this to estimate capture-to-receive latency.
 * Liveness: either side closes the connection if nothing was received for **5 s**.
+* Startup order: once the session is accepted (`HelloAck{status:"accepted"}` or `PairResult{ok:true}`) the
+  phone starts its camera and sends, in this order, `StreamConfig`, `Capabilities`, `CameraState`, then
+  `VideoFrame`s starting with a keyframe (`Status` and `Ping` follow periodically). A later lens or format
+  change sends a new `StreamConfig` before the updated `CameraState`.
 * A `StreamConfig` is always followed by a keyframe. The PC sends `RequestKeyframe` after decoder errors.
 
 ## Low-latency rules
@@ -143,3 +148,9 @@ without a mode means "locked at this value", the other one keeps its current val
 `exposureBias`. `stabilization` ∈ {"off", "standard", "cinematic"}, limited to `stabilizationModes`, which the
 phone recomputes for every format; stabilization adds latency. Switching lens or format resets white balance
 and exposure to "auto".
+
+`Hello.model` is a free-form device model string for display and diagnostics only, e.g. `"iPhone15,2"` or
+`"Xiaomi 23049PCD8G"`; the PC must not parse it. `whiteBalanceTint` units are device-specific: the value is on a
+−150…150 green–magenta scale (the iPhone uses it as-is, Android maps it to its own white-balance gains), so the
+same number may look slightly different on different phones. Android offers only `"off"` and `"standard"` in
+`stabilizationModes`.
