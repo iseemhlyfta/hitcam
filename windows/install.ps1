@@ -65,7 +65,7 @@ try {
         $modelsDir = New-Item -ItemType Directory -Force -Path (Join-Path $installDir "models")
         $models | Copy-Item -Destination $modelsDir -Force
     } else {
-        Write-Host "No object detection model found. To enable 'Анализ объектов', run from the vision folder:"
+        Write-Host "No object detection model found. To enable object detection, run from the vision folder:"
         Write-Host "  python export_default.py --out $installDir\models   (see vision\README.md)"
     }
 }
