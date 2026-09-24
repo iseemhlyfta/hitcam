@@ -126,7 +126,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             }
             Dispatcher.UIThread.Post(() => Hands.ShowResult(r));
         };
-        Hands.WhenAnyValue(h => h.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowHands)));
+        Hands.WhenAnyValue(h => h.IsActive, h => h.ShowPoints).Subscribe(_ =>
+        {
+            this.RaisePropertyChanged(nameof(ShowHands));
+            this.RaisePropertyChanged(nameof(ShowHandPoints));
+        });
 
         _server = new HitCamServer(
             new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
@@ -244,6 +248,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     /// <summary>Hands are drawn over the preview: tracking runs and there is a picture.</summary>
     public bool ShowHands => Hands.IsActive && HasPreview;
 
+    /// <summary>Points on the hands are drawn: tracking runs, there is a picture and they are not hidden.</summary>
+    public bool ShowHandPoints => ShowHands && Hands.ShowPoints;
+
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
 
@@ -330,6 +337,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             this.RaisePropertyChanged(nameof(HasPreview));
             this.RaisePropertyChanged(nameof(ShowDetections));
             this.RaisePropertyChanged(nameof(ShowHands));
+            this.RaisePropertyChanged(nameof(ShowHandPoints));
         }
     }
 

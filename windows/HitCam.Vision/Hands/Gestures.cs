@@ -47,7 +47,8 @@ public static class PoseClassifier
 
     private static bool IsGun(IReadOnlyList<PointF> p, float size)
     {
-        if (!IsExtended(p, Index) || !IsCurled(p, Ring) || !IsCurled(p, Little))
+        // The index finger is the barrel: really straight, not just half open (a relaxed hand is no gun).
+        if (!IsStraight(p, Index) || !IsCurled(p, Ring) || !IsCurled(p, Little))
             return false;
         // The barrel: the index finger alone, or both fingers side by side pointing the same way (not a "V").
         var twoFingers = IsExtended(p, Middle);
@@ -63,6 +64,11 @@ public static class PoseClassifier
     /// <summary>Index and middle fingertips together and the two fingers parallel.</summary>
     public static bool IsTwoFingerBarrel(IReadOnlyList<PointF> p, float size) =>
         Distance(p[8], p[12]) <= 0.45f * size && Angle(Direction(p, Index), Direction(p, Middle)) <= 30;
+
+    /// <summary>Fully straight: extended, and bent by less than 25° at each of the two finger joints.</summary>
+    private static bool IsStraight(IReadOnlyList<PointF> p, int[] f) =>
+        Straightness(p, f) > 0.92f && Distance(p[0], p[f[3]]) > Distance(p[0], p[f[1]])
+        && Angle(Sub(p[f[1]], p[f[0]]), Sub(p[f[2]], p[f[1]])) < 25 && Angle(Sub(p[f[2]], p[f[1]]), Sub(p[f[3]], p[f[2]])) < 25;
 
     /// <summary>Straight (the tip about as far from the base as the finger is long) and pointing away from the wrist.</summary>
     private static bool IsExtended(IReadOnlyList<PointF> p, int[] f) =>
@@ -104,14 +110,20 @@ public sealed record GestureOptions
     /// <summary>A gun stays "held" this long after the pose is last seen: during the jerk the fingers blur.</summary>
     public TimeSpan Hold { get; init; } = TimeSpan.FromMilliseconds(300);
 
-    /// <summary>How far back the jerk is looked for.</summary>
-    public TimeSpan Window { get; init; } = TimeSpan.FromMilliseconds(200);
+    /// <summary>The gun must be held this long before it can fire: a pose that only appears mid-movement does not shoot.</summary>
+    public TimeSpan Aim { get; init; } = TimeSpan.FromMilliseconds(200);
 
-    /// <summary>The barrel turning up by this many degrees within <see cref="Window"/> is a shot…</summary>
-    public float RecoilDegrees { get; init; } = 22;
+    /// <summary>How far back the jerk is looked for: a recoil is fast.</summary>
+    public TimeSpan Window { get; init; } = TimeSpan.FromMilliseconds(150);
+
+    /// <summary>
+    /// The barrel turning up by this many degrees within <see cref="Window"/> is a shot… Both this and the rise must
+    /// hold for the last two frames, so one jumpy frame of the landmarks never fires.
+    /// </summary>
+    public float RecoilDegrees { get; init; } = 28;
 
     /// <summary>…or its tip rising this much (in hand sizes) relative to the wrist, for a gun pointed at the camera.</summary>
-    public float RecoilRise { get; init; } = 0.45f;
+    public float RecoilRise { get; init; } = 0.55f;
 
     /// <summary>No second shot from the same hand sooner than this.</summary>
     public TimeSpan Cooldown { get; init; } = TimeSpan.FromMilliseconds(400);
@@ -163,6 +175,7 @@ public sealed class GestureDetector(GestureOptions? options = null)
         private HandPose _candidate;
         private int _candidateFrames;
         private HandPose _pose;
+        private TimeSpan _poseSince;
         private TimeSpan _lastSeen;
         private TimeSpan? _lastShot;
 
@@ -173,6 +186,8 @@ public sealed class GestureDetector(GestureOptions? options = null)
             _candidate = seen;
             if (seen != HandPose.None && _candidateFrames >= options.ConfirmFrames)
             {
+                if (_pose != seen)
+                    _poseSince = now;
                 _pose = seen;
                 _lastSeen = now;
             }
@@ -208,8 +223,12 @@ public sealed class GestureDetector(GestureOptions? options = null)
 
             if (_lastShot is { } last && now - last < options.Cooldown)
                 return null;
-            var turned = elevation - _history.Min(s => s.Elevation);
-            var lifted = rise - _history.Min(s => s.Rise);
+            if (now - _poseSince < options.Aim || _history.Count < 3)
+                return null;
+            // The last two frames against the lowest point of the window.
+            var recent = _history.TakeLast(2).ToList();
+            var turned = recent.Min(s => s.Elevation) - _history.Min(s => s.Elevation);
+            var lifted = recent.Min(s => s.Rise) - _history.Min(s => s.Rise);
             if (turned < options.RecoilDegrees && lifted < options.RecoilRise)
                 return null;
             _lastShot = now;

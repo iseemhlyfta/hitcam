@@ -174,7 +174,10 @@ public static class Loc
     public static string HandsShotsHint => Russian
         ? "Указательный и средний пальцы вместе, большой отогнут, остальные в кулаке — «пистолет». Резкий рывок кистью вверх, как отдача, — выстрел: вспышка и толчок кадра в превью и в камере «HitCam»"
         : "Index and middle fingers together, thumb up, the others curled: a “gun”. A sharp upward jerk of the wrist, like recoil, fires: a flash and a kick in the preview and in the “HitCam” camera";
-    public static string HandPoseGun => Russian ? "пистолет" : "gun";
+    public static string HandsPoints => Russian ? "Показывать точки на руках" : "Show points on the hands";
+    public static string HandsPointsHint => Russian
+        ? "Без точек руки всё равно отслеживаются, и выстрел работает"
+        : "Without the points the hands are still tracked, and shots still work";
     public static string HandsNoModels(string folder) => Russian
         ? $"Модели рук не найдены. Переустановите HitCam или положите их в папку {folder} (см. vision/README.md)"
         : $"Hand models not found. Reinstall HitCam or put them into {folder} (see vision/README.md)";

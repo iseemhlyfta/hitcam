@@ -35,7 +35,13 @@
         </Border>
 
         <StackPanel Spacing="14" IsVisible="{Binding HasModels}">
-            <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsSkeletonHint}">
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsPointsHint}">
+                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ShowPoints}"
+                              AutomationProperties.Name="{x:Static svc:Loc.HandsPoints}" />
+                <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsPoints}" TextWrapping="Wrap" />
+            </DockPanel>
+
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsSkeletonHint}" IsEnabled="{Binding ShowPoints}">
                 <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ShowSkeleton}"
                               AutomationProperties.Name="{x:Static svc:Loc.HandsSkeleton}" />
                 <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsSkeleton}" TextWrapping="Wrap" />

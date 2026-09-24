@@ -6,6 +6,11 @@ public sealed record HandSettings
 {
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// Points on the fingers in the preview. Off: the hands are still tracked (for shots) but nothing is drawn on them.
+    /// </summary>
+    public bool ShowPoints { get; set; } = true;
+
     /// <summary>Lines between the points (the hand's "skeleton"); off: only the points.</summary>
     public bool ShowSkeleton { get; set; }
 

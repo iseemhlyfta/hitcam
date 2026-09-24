@@ -28,6 +28,9 @@ internal static class Poses
     /// <summary>Pointing: only the index finger out, the thumb folded.</summary>
     public static readonly (float X, float Y)[] Pointing = With(OneFingerGun, (2, (-0.12f, 0.15f)), (3, (-0.02f, 0.08f)), (4, (0.06f, 0.05f)));
 
+    /// <summary>A gun whose index and middle fingers are only half straightened (bent at the last joints).</summary>
+    public static readonly (float X, float Y)[] HalfBentGun = With(Gun, (7, (-0.05f, -0.29f)), (8, (0.04f, -0.37f)), (11, (0.06f, -0.32f)), (12, (0.14f, -0.4f)));
+
     public static readonly (float X, float Y)[] Fist = With(Pointing, (6, (-0.06f, -0.1f)), (7, (-0.07f, 0)), (8, (-0.07f, 0.06f)));
 
     public static PointF[] Place((float X, float Y)[] pose, PointF origin, float size, float rotation)
@@ -66,7 +69,7 @@ public sealed class PoseClassifierTests
     [MemberData(nameof(Rotations))]
     public void Other_poses_are_not_a_gun(float rotation)
     {
-        foreach (var pose in new[] { Poses.Peace, Poses.Pointing, Poses.ThumbIn, Poses.Fist })
+        foreach (var pose in new[] { Poses.Peace, Poses.Pointing, Poses.ThumbIn, Poses.Fist, Poses.HalfBentGun })
             Assert.Equal(HandPose.None, PoseClassifier.Classify(Poses.Place(pose, new PointF(400, 300), 200, rotation)));
         // An open hand.
         Assert.Equal(HandPose.None, PoseClassifier.Classify(SyntheticHand.Points(new PointF(400, 300), 200, rotation)));
@@ -197,7 +200,7 @@ public sealed class GestureDetectorTests
         var detector = new GestureDetector();
         IEnumerable<TrackedHand> TwoFlicks(int gap)
         {
-            foreach (var h in Flick(35, 3, after: 0))
+            foreach (var h in Flick(35, 3, after: 2))
                 yield return h;
             for (var i = 0; i < gap; i++)
                 yield return Hand(Right);   // back down to aim
@@ -207,9 +210,24 @@ public sealed class GestureDetectorTests
                 yield return Hand(Right - 35 * MathF.PI / 180);
         }
 
-        Assert.Single(Run(detector, TwoFlicks(3)).Shots);   // 200 ms later: within the cooldown
+        Assert.Single(Run(detector, TwoFlicks(3)).Shots);   // about 300 ms later: within the cooldown
         detector.Reset();
         Assert.Equal(2, Run(detector, TwoFlicks(15)).Shots.Count);
+    }
+
+    [Fact]
+    public void A_gun_that_just_appeared_does_not_fire()
+    {
+        // The pose forms and the hand jerks up right away (e.g. waving): no aim, no shot.
+        var frames = new[] { Hand(Right), Hand(Right) }.Concat(Enumerable.Range(1, 5).Select(i => Hand(Right - 0.7f * i / 3)));
+        Assert.Empty(Run(new GestureDetector(), frames).Shots);
+    }
+
+    [Fact]
+    public void One_jumpy_frame_does_not_fire()
+    {
+        var frames = Enumerable.Repeat(Hand(Right), 10).Append(Hand(Right - 0.7f)).Concat(Enumerable.Repeat(Hand(Right), 5));
+        Assert.Empty(Run(new GestureDetector(), frames).Shots);
     }
 
     [Fact]

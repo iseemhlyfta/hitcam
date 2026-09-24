@@ -59,6 +59,9 @@ public sealed class HandsViewModel : ReactiveObject
         }
     }
 
+    /// <summary>Points (and lines, if on) on the hands in the preview.</summary>
+    public bool ShowPoints { get => _settings.ShowPoints; set => Update(_settings with { ShowPoints = value }); }
+
     public bool ShowSkeleton { get => _settings.ShowSkeleton; set => Update(_settings with { ShowSkeleton = value }); }
 
     /// <summary>Finger-gun shots: in the preview and the camera.</summary>
@@ -184,6 +187,7 @@ public sealed class HandsViewModel : ReactiveObject
             return;
         _settings = settings;
         this.RaisePropertyChanged(nameof(IsEnabled));
+        this.RaisePropertyChanged(nameof(ShowPoints));
         this.RaisePropertyChanged(nameof(ShowSkeleton));
         this.RaisePropertyChanged(nameof(ShotsEnabled));
         this.RaisePropertyChanged(nameof(Settings));

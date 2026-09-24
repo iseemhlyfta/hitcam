@@ -41,6 +41,8 @@ public sealed class HandsTests : IDisposable
         Assert.False(settings.Hands.Enabled);
         Assert.False(settings.Hands.ShowSkeleton);
         Assert.True(settings.Hands.Shots);
+        Assert.True(settings.Hands.ShowPoints);
+        Assert.False(AppSettings.Parse("""{"hands":{"showPoints":false}}"""u8)!.Hands.ShowPoints);
         Assert.False(AppSettings.Parse("""{"hands":{"shots":false}}"""u8)!.Hands.Shots);
         Assert.Equal(new HandSettings(), AppSettings.Parse("""{"hands":null}"""u8)!.Hands);
         Assert.True(AppSettings.Parse("""{"hands":{"enabled":true}}"""u8)!.Hands.Enabled);
@@ -50,7 +52,7 @@ public sealed class HandsTests : IDisposable
     public void Hand_settings_survive_a_save_and_load()
     {
         var path = Path.Combine(_directory, "settings.json");
-        var hands = new HandSettings { Enabled = true, ShowSkeleton = true, Shots = false };
+        var hands = new HandSettings { Enabled = true, ShowPoints = false, ShowSkeleton = true, Shots = false };
 
         (AppSettings.Load(path) with { Hands = hands }).Save(path);
 
@@ -78,6 +80,19 @@ public sealed class HandsTests : IDisposable
         _time.AdvanceBy(TimeSpan.FromSeconds(1));
         Assert.Equal(2, _applied.Count);
         Assert.Single(_saved);
+    }
+
+    [Fact]
+    public void Hiding_the_points_keeps_tracking_and_shots()
+    {
+        var hands = CreateViewModel(new HandSettings { Enabled = true });
+        hands.IsActive = true;
+        hands.ShowPoints = false;
+
+        Assert.Equal(new HandSettings { Enabled = true, ShowPoints = false }, _applied[^1]);
+        hands.ShowResult(Result(1, shots: 1));
+        Assert.Single(hands.Hands);
+        Assert.Single(hands.Shots);
     }
 
     [Fact]
