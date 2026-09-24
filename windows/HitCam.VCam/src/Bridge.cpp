@@ -22,6 +22,7 @@
 #include "ErrorGuard.h"
 #include "GpuProcessor.h"
 #include "Overlay.h"
+#include "ShotEffect.h"
 #include "Processing.h"
 #include "Shared.h"
 
@@ -171,6 +172,8 @@ struct FrameSink {
     std::vector<uint8_t> packed;
     // Detection boxes drawn into the camera's frames (not the preview).
     Overlay overlay;
+    // Finger-gun shots played in the camera's frames (not the preview).
+    ShotEffect shots;
     // HitCamVCamTest only: frames go to the preview alone, not to a camera; `testOutput` (if set) receives what
     // the camera would get.
     using TestOutput = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
@@ -251,15 +254,22 @@ struct FrameSink {
         // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
         const bool toDShow = !previewOnly && dshow::IsActive();
         if (fits || toDShow) {
+            // Never into the decoder's buffer: into the packed copy (already the processed frame, if any).
+            auto own = [&] {
+                if (luma == packed.data()) return;
+                Pack(luma, chroma, pitch, width, height);
+                luma = packed.data();
+                chroma = packed.data() + static_cast<size_t>(width) * height;
+                pitch = width;
+            };
             if (const auto boxes = overlay.Current()) {
-                // Never into the decoder's buffer: into the packed copy (already the processed frame, if any).
-                if (luma != packed.data()) {
-                    Pack(luma, chroma, pitch, width, height);
-                    luma = packed.data();
-                    chroma = packed.data() + static_cast<size_t>(width) * height;
-                    pitch = width;
-                }
+                own();
                 Overlay::Draw(*boxes, packed.data(), packed.data() + static_cast<size_t>(width) * height, width, width, height);
+            }
+            const double now = ShotEffect::NowMs();
+            if (shots.Active(now)) {
+                own();
+                shots.Draw(packed.data(), width, height, now);
             }
         }
         if (previewOnly) {
@@ -281,6 +291,7 @@ struct FrameSink {
     }
 
     void ClearSignal() {
+        shots.Clear();
         writer.ClearSignal();
         dshow::ClearSignal();
         gpu.Reset();
@@ -570,6 +581,22 @@ __declspec(dllexport) void __stdcall HitCam_BridgePreviewOnly(void* handle) {
 // a second are dropped.
 __declspec(dllexport) void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count) {
     if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.overlay.Set(boxes, count); });
+}
+
+// A finger-gun shot to play in the camera's frames (never in the preview) for about 0.2 s from now: muzzle flash,
+// a flash of the whole frame and a kick. Any thread; copies the shot.
+__declspec(dllexport) void __stdcall HitCam_BridgeShot(void* handle, const HitCamShot* shot) {
+    if (handle && shot) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.shots.Fire(*shot); });
+}
+
+// For HitCamVCamTest: plays `shot` onto one packed NV12 frame as it looks `elapsedMs` after it was fired.
+__declspec(dllexport) void __stdcall HitCam_TestShotFrame(const HitCamShot* shot, double elapsedMs, uint8_t* nv12, uint32_t width, uint32_t height) {
+    if (!shot || !nv12 || width < 2 || height < 2) return;
+    hitcam::Quietly([&] {
+        hitcam::ShotEffect effect;
+        effect.FireAt(*shot, 0);
+        effect.Draw(nv12, width, height, elapsedMs);
+    });
 }
 
 // For HitCamVCamTest: makes the bridge preview-only (HitCam_BridgePreviewOnly) and hands what the camera would get

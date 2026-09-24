@@ -8,4 +8,10 @@ public sealed record HandSettings
 
     /// <summary>Lines between the points (the hand's "skeleton"); off: only the points.</summary>
     public bool ShowSkeleton { get; set; }
+
+    /// <summary>
+    /// The finger gun: a sharp upward jerk fires a shot, shown in the preview and in the "HitCam" camera. On by
+    /// default (it needs tracking on anyway).
+    /// </summary>
+    public bool Shots { get; set; } = true;
 }

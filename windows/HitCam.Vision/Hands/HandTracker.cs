@@ -17,8 +17,9 @@ public interface IHandModels : IDisposable
 /// <summary>
 /// A hand followed across frames. <see cref="Points"/> are the 21 landmarks (see <see cref="HandLandmarks"/>),
 /// smoothed and normalized to the frame (0..1). <see cref="Id"/> stays the same while the hand is tracked.
+/// <see cref="Pose"/> is set by <see cref="GestureDetector"/>.
 /// </summary>
-public sealed record TrackedHand(int Id, IReadOnlyList<PointF> Points, float Score, bool IsRight);
+public sealed record TrackedHand(int Id, IReadOnlyList<PointF> Points, float Score, bool IsRight, HandPose Pose = HandPose.None);
 
 public sealed record HandTrackerOptions
 {

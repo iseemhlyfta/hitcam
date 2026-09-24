@@ -72,6 +72,7 @@ add_library(HitCamVCam SHARED
     src/ArtifactReducer.cpp
     src/GpuProcessor.cpp
     src/Overlay.cpp
+    src/ShotEffect.cpp
     ${SHADER_HEADERS}
     src/DllMain.cpp
     src/HitCamVCam.def
@@ -101,7 +102,7 @@ target_link_libraries(HitCamVCam PRIVATE mfplat mfuuid mf mfsensorgroup wmcodecd
 target_link_options(HitCamVCam PRIVATE /DELAYLOAD:mfsensorgroup.dll /DELAYLOAD:d3d11.dll)
 
 # Manual checks (build.ps1 -Tests); the end-to-end one needs the camera registered (not run in CI).
-add_executable(HitCamVCamTest tests/VCamTest.cpp src/Shared.cpp)
+add_executable(HitCamVCamTest tests/VCamTest.cpp src/Shared.cpp src/ShotEffect.cpp)
 target_include_directories(HitCamVCamTest PRIVATE src)
 target_compile_definitions(HitCamVCamTest PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A00000C)
 target_compile_options(HitCamVCamTest PRIVATE /W4 /WX /permissive- /EHsc /utf-8)

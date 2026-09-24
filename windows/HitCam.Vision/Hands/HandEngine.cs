@@ -2,8 +2,13 @@ using System.Diagnostics;
 
 namespace HitCam.Vision.Hands;
 
-/// <summary>One analysed frame: the hands to show, their points normalized to the frame.</summary>
-public sealed record HandResult(IReadOnlyList<TrackedHand> Hands, VisionStats Stats, ulong Sequence, int FrameWidth, int FrameHeight);
+/// <summary>One analysed frame: the hands to show (points normalized to the frame, poses) and the shots fired in it.</summary>
+public sealed record HandResult(
+    IReadOnlyList<TrackedHand> Hands, VisionStats Stats, ulong Sequence, int FrameWidth, int FrameHeight, IReadOnlyList<Shot> Shots)
+{
+    public HandResult(IReadOnlyList<TrackedHand> hands, VisionStats stats, ulong sequence, int frameWidth, int frameHeight)
+        : this(hands, stats, sequence, frameWidth, frameHeight, []) { }
+}
 
 /// <summary>
 /// Runs hand tracking on its own thread, like <see cref="VisionEngine"/>: frames are pulled only when the previous
@@ -92,6 +97,7 @@ public sealed class HandEngine : IDisposable
     {
         IHandModels? models = null;
         HandTracker? tracker = null;
+        var gestures = new GestureDetector();
         var loadedVersion = 0;
         var frame = new VisionFrame();
         ulong lastSequence = 0;
@@ -147,6 +153,7 @@ public sealed class HandEngine : IDisposable
                 if (Interlocked.Exchange(ref _resetTracks, 0) == 1)
                 {
                     tracker.Reset();
+                    gestures.Reset();
                     fps.Reset();
                 }
 
@@ -170,13 +177,16 @@ public sealed class HandEngine : IDisposable
                 {
                     lastFrameSize = (frame.Width, frame.Height);
                     tracker.Reset();
+                    gestures.Reset();
                 }
 
                 var started = _time.GetTimestamp();
                 IReadOnlyList<TrackedHand> hands;
+                IReadOnlyList<Shot> shots;
                 try
                 {
-                    hands = tracker.Update(frame, _time.GetElapsedTime(0, started));
+                    var time = _time.GetElapsedTime(0, started);
+                    (hands, shots) = gestures.Update(tracker.Update(frame, time), frame.Width, frame.Height, time);
                 }
                 catch (Exception ex)
                 {
@@ -200,7 +210,7 @@ public sealed class HandEngine : IDisposable
                 try
                 {
                     ResultReady?.Invoke(new HandResult(
-                        hands, new VisionStats(milliseconds, rate, models.Provider), frame.Sequence, frame.Width, frame.Height));
+                        hands, new VisionStats(milliseconds, rate, models.Provider), frame.Sequence, frame.Width, frame.Height, shots));
                 }
                 catch (Exception ex)
                 {

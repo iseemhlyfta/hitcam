@@ -52,6 +52,10 @@ internal static class NativeMethods
     [DllImport(Library)]
     public static extern unsafe void HitCam_BridgeSetOverlay(IntPtr handle, HitCamOverlayBox* boxes, int count);
 
+    /// <summary>Plays a finger-gun shot in the camera picture for about 0.2 s from now; the DLL copies it.</summary>
+    [DllImport(Library)]
+    public static extern void HitCam_BridgeShot(IntPtr handle, in HitCamShot shot);
+
     [DllImport(Library, CharSet = CharSet.Unicode)]
     public static extern int HitCam_VirtualCameraStart(string friendlyName, out IntPtr handle);
 

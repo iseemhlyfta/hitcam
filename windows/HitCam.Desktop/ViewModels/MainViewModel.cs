@@ -32,6 +32,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly VirtualCamera _camera = new();
     private readonly VisionEngine _vision;
     private readonly HandEngine _hands;
+    // Read by the hand tracking thread: shots go to the camera straight from there.
+    private volatile bool _shotsToCamera;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -115,7 +117,15 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             },
             AvaloniaScheduler.Instance);
         _hands.StatusChanged += s => Dispatcher.UIThread.Post(() => Hands.ShowStatus(s));
-        _hands.ResultReady += r => Dispatcher.UIThread.Post(() => Hands.ShowResult(r));
+        _hands.ResultReady += r =>
+        {
+            if (_shotsToCamera)
+            {
+                foreach (var shot in r.Shots)
+                    _pipeline.Shot(HitCamShot.From(shot));
+            }
+            Dispatcher.UIThread.Post(() => Hands.ShowResult(r));
+        };
         Hands.WhenAnyValue(h => h.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowHands)));
 
         _server = new HitCamServer(
@@ -505,6 +515,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     {
         var active = Hands.IsEnabled && Hands.HasModels && IsConnected;
         Hands.IsActive = active;
+        _shotsToCamera = active && Hands.ShotsEnabled;
         if (active)
             _hands.Start();
         else

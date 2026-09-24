@@ -1,7 +1,9 @@
+using System.Globalization;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Media;
 using Avalonia.Media.Immutable;
+using HitCam.Desktop.Services;
 using HitCam.Vision.Hands;
 
 namespace HitCam.Desktop.Views;
@@ -52,6 +54,9 @@ public sealed class HandOverlay : Control
     private static readonly IPen Outline = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb(0xB0, 0, 0, 0)), 1.5);
     private static readonly IPen Bone = new ImmutablePen(new ImmutableSolidColorBrush(Color.FromArgb(0xD0, 0xFF, 0xFF, 0xFF)), 2,
         lineCap: PenLineCap.Round);
+
+    private static readonly Typeface TagTypeface = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
+    private static readonly IBrush TagBrush = new ImmutableSolidColorBrush(Color.FromArgb(0xC8, 0x11, 0x11, 0x14));
 
     static HandOverlay()
     {
@@ -106,8 +111,22 @@ public sealed class HandOverlay : Control
                     var r = IsFingertip(i) ? radius * 1.3 : radius;
                     context.DrawEllipse(FingerBrushes[FingerOf(i)], Outline, points[i], r, r);
                 }
+                if (hand.Pose == HandPose.Gun)
+                    DrawTag(context, Loc.HandPoseGun, points[0], radius, picture);
             }
         }
+    }
+
+    /// <summary>The recognized pose in a dark tab just below the wrist, kept inside the picture.</summary>
+    private static void DrawTag(DrawingContext context, string text, Point wrist, double radius, Rect picture)
+    {
+        var formatted = new FormattedText(text, CultureInfo.CurrentUICulture, FlowDirection.LeftToRight, TagTypeface, 12, Brushes.White);
+        var width = Math.Ceiling(formatted.Width) + 12;
+        var height = Math.Ceiling(formatted.Height) + 4;
+        var x = Math.Clamp(wrist.X - width / 2, picture.X, Math.Max(picture.X, picture.Right - width));
+        var y = Math.Clamp(wrist.Y + radius * 2, picture.Y, Math.Max(picture.Y, picture.Bottom - height));
+        context.DrawRectangle(TagBrush, null, new Rect(x, y, width, height), 4, 4);
+        context.DrawText(formatted, new Point(x + 6, y + 2));
     }
 
     private static double Distance(Point a, Point b) => Math.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y));

@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
 using HitCam.Desktop.Services;
+using HitCam.Desktop.Views;
 using HitCam.Vision;
 using HitCam.Vision.Hands;
 using ReactiveUI;
@@ -27,6 +29,7 @@ public sealed class HandsViewModel : ReactiveObject
     private string _statsText = "";
     private string _errorText = "";
     private IReadOnlyList<TrackedHand> _hands = [];
+    private IReadOnlyList<FiredShot> _shots = [];
     private bool _isActive;
 
     /// <param name="modelsFound">Whether the hand models are installed; checked now and whenever tracking is switched on.</param>
@@ -57,6 +60,12 @@ public sealed class HandsViewModel : ReactiveObject
     }
 
     public bool ShowSkeleton { get => _settings.ShowSkeleton; set => Update(_settings with { ShowSkeleton = value }); }
+
+    /// <summary>Finger-gun shots: in the preview and the camera.</summary>
+    public bool ShotsEnabled { get => _settings.Shots; set => Update(_settings with { Shots = value }); }
+
+    /// <summary>Shots still playing in the preview (at most a quarter of a second old).</summary>
+    public IReadOnlyList<FiredShot> Shots { get => _shots; private set => this.RaiseAndSetIfChanged(ref _shots, value); }
 
     public bool HasModels
     {
@@ -143,12 +152,19 @@ public sealed class HandsViewModel : ReactiveObject
         if (!IsActive)
             return;
         Hands = result.Hands;
+        if (result.Shots.Count > 0 && _settings.Shots)
+        {
+            var now = Stopwatch.GetTimestamp();
+            Shots = [.. Shots.Where(s => Stopwatch.GetElapsedTime(s.Timestamp).TotalMilliseconds < ShotEffect.DurationMs),
+                .. result.Shots.Select(s => new FiredShot(s, now))];
+        }
         StatsText = Loc.HandsStats(result.Hands.Count, result.Stats.AnalysisFps, result.Stats.InferenceMilliseconds, result.Stats.Provider);
     }
 
     public void ClearResults()
     {
         Hands = [];
+        Shots = [];
         StatsText = "";
         ErrorText = "";
     }
@@ -169,6 +185,7 @@ public sealed class HandsViewModel : ReactiveObject
         _settings = settings;
         this.RaisePropertyChanged(nameof(IsEnabled));
         this.RaisePropertyChanged(nameof(ShowSkeleton));
+        this.RaisePropertyChanged(nameof(ShotsEnabled));
         this.RaisePropertyChanged(nameof(Settings));
         _apply(_settings);
         _isDirty = true;

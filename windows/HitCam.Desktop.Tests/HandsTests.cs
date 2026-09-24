@@ -1,4 +1,5 @@
 using System.Reactive.Concurrency;
+using System.Runtime.InteropServices;
 using HitCam.Desktop.Services;
 using HitCam.Desktop.ViewModels;
 using HitCam.Desktop.Views;
@@ -25,9 +26,10 @@ public sealed class HandsTests : IDisposable
     private HandsViewModel CreateViewModel(HandSettings? initial = null) =>
         new(initial ?? new HandSettings(), () => _modelsFound, _applied.Add, _saved.Add, _time);
 
-    private static HandResult Result(int hands) => new(
+    private static HandResult Result(int hands, int shots = 0) => new(
         [.. Enumerable.Range(1, hands).Select(id => new TrackedHand(id, new PointF[21], 0.9f, true))],
-        new VisionStats(4.4, 29.6, "DirectML"), 1, 960, 540);
+        new VisionStats(4.4, 29.6, "DirectML"), 1, 960, 540,
+        [.. Enumerable.Range(1, shots).Select(id => new Shot(id, new PointF(0.5f, 0.5f), new PointF(1, 0), 0.2f))]);
 
     // Settings
 
@@ -38,6 +40,8 @@ public sealed class HandsTests : IDisposable
 
         Assert.False(settings.Hands.Enabled);
         Assert.False(settings.Hands.ShowSkeleton);
+        Assert.True(settings.Hands.Shots);
+        Assert.False(AppSettings.Parse("""{"hands":{"shots":false}}"""u8)!.Hands.Shots);
         Assert.Equal(new HandSettings(), AppSettings.Parse("""{"hands":null}"""u8)!.Hands);
         Assert.True(AppSettings.Parse("""{"hands":{"enabled":true}}"""u8)!.Hands.Enabled);
     }
@@ -46,7 +50,7 @@ public sealed class HandsTests : IDisposable
     public void Hand_settings_survive_a_save_and_load()
     {
         var path = Path.Combine(_directory, "settings.json");
-        var hands = new HandSettings { Enabled = true, ShowSkeleton = true };
+        var hands = new HandSettings { Enabled = true, ShowSkeleton = true, Shots = false };
 
         (AppSettings.Load(path) with { Hands = hands }).Save(path);
 
@@ -124,6 +128,61 @@ public sealed class HandsTests : IDisposable
         hands.SaveNow();
 
         Assert.Single(_saved);
+    }
+
+    // Shots
+
+    [Fact]
+    public void Shots_play_in_the_preview_only_while_switched_on()
+    {
+        var hands = CreateViewModel(new HandSettings { Enabled = true });
+        hands.IsActive = true;
+
+        hands.ShowResult(Result(1, shots: 1));
+        Assert.Single(hands.Shots);
+        hands.ShowResult(Result(1, shots: 2));
+        Assert.Equal(3, hands.Shots.Count);   // earlier ones still playing
+
+        hands.ShotsEnabled = false;
+        Assert.Equal(new HandSettings { Enabled = true, Shots = false }, _applied[^1]);
+        hands.ShowResult(Result(1, shots: 1));
+        Assert.Equal(3, hands.Shots.Count);
+
+        hands.IsActive = false;
+        Assert.Empty(hands.Shots);
+    }
+
+    [Fact]
+    public void Shot_struct_matches_the_dll()
+    {
+        Assert.Equal(20, Marshal.SizeOf<HitCamShot>());
+        var shot = HitCamShot.From(new Shot(3, new PointF(0.25f, 0.75f), new PointF(0.6f, -0.8f), 0.3f));
+        Assert.Equal((0.25f, 0.75f, 0.6f, -0.8f, 0.3f), (shot.X, shot.Y, shot.DirX, shot.DirY, shot.Size));
+    }
+
+    [Fact]
+    public void Shot_curves_match_the_dll()
+    {
+        // The values HitCamVCamTest --shot checks for ShotEffect::At.
+        var start = ShotEffect.At(0, 1);
+        Assert.Equal(1, start.Flash);
+        Assert.Equal(0.22f, start.Lift, 1e-4f);
+        Assert.Equal(0.018f, start.ShakeY, 1e-5f);
+        Assert.Equal(-0.009f, start.ShakeX, 1e-5f);
+        Assert.Equal(1.0396f, start.Zoom, 1e-4f);
+        Assert.Equal(0.009f, ShotEffect.At(0, -1).ShakeX, 1e-5f);
+
+        var middle = ShotEffect.At(100, 1);
+        Assert.True(middle.Flash < 0.1f && middle.Lift < 0.03f && MathF.Abs(middle.ShakeY) < 0.01f);
+        Assert.Equal(ShotState.None, ShotEffect.At(ShotEffect.DurationMs, 1));
+        Assert.Equal(ShotState.None, ShotEffect.At(-1, 1));
+
+        // The zoom always covers the shake: no frame edge shows.
+        for (var ms = 0.0; ms < ShotEffect.DurationMs; ms += 5)
+        {
+            var s = ShotEffect.At(ms, 1);
+            Assert.True((s.Zoom - 1) / 2 >= MathF.Abs(s.ShakeY) - 1e-6f, $"{ms} ms");
+        }
     }
 
     // Overlay

@@ -9,6 +9,7 @@
 //   --process         picture processing (temporal noise reduction, colour, sharpness, NVIDIA artifact reduction)
 //                     of the decoder bridge; no camera and no camera output needed
 //   --overlay         detection boxes burnt into the camera frames (HitCam_BridgeSetOverlay); no camera output
+//   --shot            the finger-gun shot effect in the camera frames (HitCam_BridgeShot); no camera output
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
 //   --dshow           the DirectShow camera (Windows 10) of the DLLs built next to this test, without registration
@@ -28,6 +29,7 @@
 #include <wrl/client.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -38,6 +40,7 @@
 
 #include "../src/Overlay.h"
 #include "../src/Processing.h"
+#include "../src/ShotEffect.h"
 #include "../src/Shared.h"
 
 using Microsoft::WRL::ComPtr;
@@ -59,6 +62,8 @@ extern "C" void __stdcall HitCam_BridgeProcessingStats(void* handle, double* gpu
 extern "C" void __stdcall HitCam_BridgeProcessFrame(void* handle, uint8_t* nv12, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgePreviewOnly(void* handle);
 extern "C" void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count);
+extern "C" void __stdcall HitCam_BridgeShot(void* handle, const HitCamShot* shot);
+extern "C" void __stdcall HitCam_TestShotFrame(const HitCamShot* shot, double elapsedMs, uint8_t* nv12, uint32_t width, uint32_t height);
 using TestOutputCallback = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgeTestOutput(void* handle, TestOutputCallback callback, void* context);
 extern "C" void __stdcall HitCam_BridgeTestPublish(void* handle, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
@@ -592,6 +597,7 @@ int RunSourceCheck() {
 #include "DShowCheck.inl"
 #include "ProcessCheck.inl"
 #include "OverlayCheck.inl"
+#include "ShotCheck.inl"
 
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -606,6 +612,7 @@ int main(int argc, char** argv) {
     }
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0) return process_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--overlay") == 0) return overlay_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--shot") == 0) return shot_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
     if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run(false);
     if (argc > 1 && std::strcmp(argv[1], "--dshow-installed") == 0) return dshow_check::Run(true);

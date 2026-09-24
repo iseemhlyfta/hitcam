@@ -22,6 +22,7 @@ public sealed class VideoPipeline : IDisposable
     private volatile bool _isLinked;
     private volatile string? _error;
     private volatile bool _overlayUnsupported;
+    private volatile bool _shotUnsupported;
 
     public VideoPipeline()
     {
@@ -157,6 +158,29 @@ public sealed class VideoPipeline : IDisposable
             catch (EntryPointNotFoundException)
             {
                 _overlayUnsupported = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A finger-gun shot played in the camera picture (never the preview). Any thread. Does nothing before the
+    /// decoder exists or with a DLL that predates shots.
+    /// </summary>
+    public void Shot(HitCamShot shot)
+    {
+        if (_shotUnsupported)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                NativeMethods.HitCam_BridgeShot(_bridge, shot);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _shotUnsupported = true;
             }
         }
     }

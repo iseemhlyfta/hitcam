@@ -41,6 +41,15 @@
                 <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsSkeleton}" TextWrapping="Wrap" />
             </DockPanel>
 
+            <StackPanel Spacing="4">
+                <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsShotsHint}">
+                    <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ShotsEnabled}"
+                                  AutomationProperties.Name="{x:Static svc:Loc.HandsShots}" />
+                    <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsShots}" TextWrapping="Wrap" />
+                </DockPanel>
+                <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.HandsShotsHint}" TextWrapping="Wrap" />
+            </StackPanel>
+
             <!--  What runs and how fast; why it does not  -->
             <StackPanel Spacing="4">
                 <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
