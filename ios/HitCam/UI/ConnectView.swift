@@ -151,7 +151,8 @@ struct ConnectView: View {
             inputError = L10n.invalidAddress
             return
         }
-        // Reuse the id/name remembered from an earlier QR scan of the same PC, so its token is found.
+        // Reuse the id/name remembered for the same PC, so its token is found. Recents hold only a trusted id
+        // (from a QR code or a completed pairing), never one a host merely claimed in HelloAck.
         let known = LocalStore.recentServers.first { $0.host == address.host && $0.port == address.port }
         start(known ?? address)
     }

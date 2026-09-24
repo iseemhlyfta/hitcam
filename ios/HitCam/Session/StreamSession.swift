@@ -2,6 +2,23 @@ import AVFoundation
 import Combine
 import UIKit
 
+/// Which server id may unlock a stored token. Any PC can claim any id in HelloAck (ids are in every HelloAck
+/// and QR code), so `ServerAddress.serverId` holds only a trusted id: one that came with the address the user
+/// chose (QR code, or a recents entry saved under this rule) or one whose server completed pairing.
+enum ServerTrust {
+    /// Keychain keys that may hold the token for this address, most specific first.
+    static func tokenKeys(for address: ServerAddress) -> [String] {
+        [address.serverId, "\(address.host):\(address.port)"].compactMap { $0 }
+    }
+
+    /// After PairResult ok the server proved it holds the PC's PIN, so the id it claimed becomes trusted.
+    static func afterPairing(_ address: ServerAddress, claimedServerId: String?) -> ServerAddress {
+        var paired = address
+        if paired.serverId == nil { paired.serverId = claimedServerId }
+        return paired
+    }
+}
+
 /// Drives one connection to a PC: handshake, pairing, streaming, remote control and reconnects.
 /// Published state is updated on the main thread; networking runs on `queue`.
 final class StreamSession: ObservableObject {
@@ -26,6 +43,8 @@ final class StreamSession: ObservableObject {
     private var connection: FramedConnection?
     private var connectionId: UUID?
     private var address: ServerAddress?
+    /// Server id from HelloAck while it is not trusted: never used to look up a token, never saved as `serverId`.
+    private var claimedServerId: String?
     private var encoder: H264Encoder!
     private var timers: [DispatchSourceTimer] = []
     private var reconnectWork: DispatchWorkItem?
@@ -81,6 +100,7 @@ final class StreamSession: ObservableObject {
         queue.async {
             self.userStopped = false
             self.address = address
+            self.claimedServerId = nil
             self.openConnection(reconnecting: false)
         }
     }
@@ -170,7 +190,7 @@ final class StreamSession: ObservableObject {
 
     private func tokenKeys() -> [String] {
         guard let address else { return [] }
-        return [address.serverId, "\(address.host):\(address.port)"].compactMap { $0 }
+        return ServerTrust.tokenKeys(for: address)
     }
 
     private func sendHello() {
@@ -191,11 +211,12 @@ final class StreamSession: ObservableObject {
         switch header.type {
         case .helloAck:
             guard let ack = try? decoder.decode(HelloAck.self, from: payload) else { return fail(L10n.protocolError) }
-            if let expected = address?.serverId, expected != ack.serverId {
-                // The QR code (or an earlier session) named another PC: stop here and send nothing more.
+            if let expected = address?.serverId ?? claimedServerId, expected != ack.serverId {
+                // The QR code, an earlier session or the previous connection named another PC: stop here and send nothing more.
                 return fail(L10n.otherPc)
             }
-            if address?.serverId == nil { address?.serverId = ack.serverId }
+            // Only a claim until pairing succeeds: it must not unlock the token of the real PC with this id.
+            if address?.serverId == nil { claimedServerId = ack.serverId }
             if address?.name == nil { address?.name = ack.serverName }
             switch ack.status {
             case HelloStatus.accepted:
@@ -212,8 +233,10 @@ final class StreamSession: ObservableObject {
             }
         case .pairResult:
             guard case .pairing = currentPhase,
-                  let result = try? decoder.decode(PairResult.self, from: payload), let address else { return }
+                  let result = try? decoder.decode(PairResult.self, from: payload), var address else { return }
             if result.ok, let token = result.token {
+                address = ServerTrust.afterPairing(address, claimedServerId: claimedServerId)
+                self.address = address
                 tokenKeys().forEach { TokenStore.save(token, for: $0) }
                 startStreaming(serverName: address.name ?? address.host)
             } else if result.attemptsLeft > 0 {
