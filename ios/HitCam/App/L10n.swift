@@ -46,6 +46,33 @@ enum L10n {
            : "Could not connect: \(reason). Make sure the PC and iPhone are on the same Wi-Fi and HitCam is running on the PC."
     }
     static func cameraFailed(_ reason: String) -> String { ru ? "Ошибка камеры: \(reason)" : "Camera error: \(reason)" }
+    static var connectTitle: String { ru ? "Подключение к ПК" : "Connect to your PC" }
+    static var connectHint: String {
+        ru ? "Запустите HitCam на ПК в той же Wi-Fi сети и отсканируйте QR-код с его экрана или введите адрес."
+           : "Start HitCam on a PC in the same Wi-Fi network, then scan the QR code on its screen or type its address."
+    }
+    static var stepOpen: String { ru ? "Откройте HitCam на ПК" : "Open HitCam on the PC" }
+    static var stepScan: String { ru ? "Сканируйте код" : "Scan the code" }
+    static var stepPin: String { ru ? "Введите PIN" : "Enter the PIN" }
+    static func pairingRequest(_ server: String) -> String { ru ? "Сопряжение с «\(server)»" : "Pairing with “\(server)”" }
+    static var pinTitle: String { ru ? "Введите код с экрана ПК" : "Enter the code shown on the PC" }
+    static var pinHint: String {
+        ru ? "После сопряжения iPhone будет подключаться к этому ПК без кода." : "Once paired, this iPhone connects to the PC without a code."
+    }
+    static var camera: String { ru ? "Камера" : "Camera" }
+    static var appliesInstantly: String { ru ? "Настройки сразу применяются к трансляции" : "Changes apply to the stream right away" }
+    static var lens: String { ru ? "Объектив" : "Lens" }
+    static var tapToFocus: String { ru ? "Нажмите на картинку, чтобы сфокусироваться" : "Tap the picture to focus" }
+    static var auto: String { ru ? "Авто" : "Auto" }
+    static func lensName(_ id: String, fallback: String) -> String {
+        switch id {
+        case "back-ultrawide": return ru ? "Ультра" : "Ultra"
+        case "back-wide": return ru ? "Широкий" : "Wide"
+        case "back-tele": return ru ? "Теле" : "Tele"
+        case "front": return ru ? "Фронт" : "Front"
+        default: return fallback
+        }
+    }
     static var cameraDenied: String {
         ru ? "Нет доступа к камере. Разрешите его в Настройках → HitCam." : "No camera access. Allow it in Settings → HitCam."
     }

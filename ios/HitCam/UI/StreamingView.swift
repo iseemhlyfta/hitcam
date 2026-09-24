@@ -10,6 +10,7 @@ struct StreamingView: View {
     @State private var showControls = true
 
     private var state: CameraState { session.cameraState }
+    private var camera: CameraInfo? { session.capabilities.cameras.first { $0.id == state.cameraId } }
 
     var body: some View {
         ZStack {
@@ -20,17 +21,23 @@ struct StreamingView: View {
             }
             .ignoresSafeArea()
 
-            // The screen is landscape-only, so the controls sit in a column on the right instead of covering the preview.
-            VStack(spacing: 0) {
+            // Chrome over the picture. Each layer fills the screen and pins its content to a corner,
+            // so hiding the settings panel never moves the top bar.
+            VStack(alignment: .leading, spacing: 0) {
                 topBar
-                HStack(spacing: 0) {
-                    Spacer()
-                    if showControls {
-                        ScrollView { controls }
-                            .frame(width: 380)
-                            .background(.ultraThinMaterial)
-                    }
-                }
+                Spacer(minLength: 0)
+                Pill(text: L10n.tapToFocus)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+
+            if showControls {
+                controlsPanel
+                    .frame(width: 350)
+                    .padding(.top, 68)
+                    .padding([.trailing, .bottom], 12)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
             }
 
             if dimmed {
@@ -40,7 +47,7 @@ struct StreamingView: View {
                     .onTapGesture { setDimmed(false) }
             }
         }
-        .statusBarHidden(dimmed)
+        .statusBarHidden(true)
         .onAppear { OrientationLock.set(.landscape) }
         .onChange(of: scenePhase) { _, phase in
             // The brightness outlives the app: restore it before leaving the foreground.
@@ -52,104 +59,131 @@ struct StreamingView: View {
         }
     }
 
+    // MARK: Top bar
+
     private var topBar: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Label(serverName, systemImage: "dot.radiowaves.left.and.right").font(.subheadline.bold())
-                Text("\(Int(session.sentFps)) fps · \(String(format: "%.1f", Double(session.sentKbps) / 1000)) Mbit/s · \(state.width)×\(state.height)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
+        HStack(spacing: 8) {
+            Pill(text: "LIVE · \(state.height)p · \(state.fps) fps", dot: HC.live)
+            Pill(text: serverName, dot: HC.ok)
+                .lineLimit(1)
+            Pill(text: String(format: "%.0f fps · %.1f Mbit/s", session.sentFps, Double(session.sentKbps) / 1000), foreground: HC.text2)
+            Spacer(minLength: 8)
+            OverlayIconButton(systemImage: "slider.horizontal.3", label: L10n.camera, active: showControls) {
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { showControls.toggle() }
             }
-            Spacer()
-            Button { withAnimation { showControls.toggle() } } label: {
-                Image(systemName: showControls ? "slider.horizontal.below.rectangle" : "slider.horizontal.3")
-            }
-            Button { setDimmed(true) } label: { Image(systemName: "moon.fill") }
-                .accessibilityLabel(L10n.dim)
-            Button(role: .destructive) { session.disconnect() } label: { Image(systemName: "xmark.circle.fill") }
-                .accessibilityLabel(L10n.disconnect)
+            OverlayIconButton(systemImage: "moon.fill", label: L10n.dim) { setDimmed(true) }
+            OverlayIconButton(systemImage: "xmark", label: L10n.disconnect, tint: HC.danger) { session.disconnect() }
         }
-        .font(.title3)
-        .padding(12)
-        .background(.ultraThinMaterial)
     }
 
-    private var controls: some View {
-        VStack(spacing: 12) {
-            // Camera selection
-            Picker("", selection: Binding(get: { state.cameraId }, set: { session.apply(Control(cameraId: $0)) })) {
-                ForEach(session.capabilities.cameras, id: \.id) { camera in
-                    Text(camera.name).tag(camera.id)
+    // MARK: Settings panel (same layout as the PC's "Camera" panel)
+
+    private var controlsPanel: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(L10n.camera).font(.headline).foregroundStyle(HC.text)
+                    Text(L10n.appliesInstantly).font(.caption).foregroundStyle(HC.text2)
                 }
-            }
-            .pickerStyle(.segmented)
 
-            if let camera = session.capabilities.cameras.first(where: { $0.id == state.cameraId }), camera.maxZoom > camera.minZoom {
-                HStack {
-                    Text(L10n.zoom).font(.caption)
-                    Slider(value: Binding(get: { state.zoom }, set: { session.apply(Control(zoom: $0)) }),
-                           in: camera.minZoom...camera.maxZoom)
-                    Text(String(format: "%.1f×", state.zoom)).font(.caption.monospacedDigit()).frame(width: 44)
+                if session.capabilities.cameras.count > 1 {
+                    VStack(alignment: .leading, spacing: 6) {
+                        FieldLabel(L10n.lens)
+                        Segmented(
+                            options: session.capabilities.cameras.map { (id: $0.id, label: L10n.lensName($0.id, fallback: $0.name)) },
+                            selection: state.cameraId
+                        ) { session.apply(Control(cameraId: $0)) }
+                    }
                 }
-            }
 
-            HStack {
-                Text(L10n.exposure).font(.caption)
-                Slider(value: Binding(get: { state.exposureBias }, set: { session.apply(Control(exposureBias: $0)) }), in: -2...2)
-            }
+                VStack(alignment: .leading, spacing: 6) {
+                    FieldLabel(L10n.quality)
+                    qualityMenu
+                }
 
-            HStack {
-                Text(L10n.focus).font(.caption)
-                Slider(value: Binding(get: { state.lensPosition }, set: { session.apply(Control(focusMode: "locked", lensPosition: $0)) }), in: 0...1)
-                Button(L10n.autoFocus) { session.apply(Control(focusMode: "continuous")) }
-                    .font(.caption)
-                    .buttonStyle(.bordered)
-                    .tint(state.focusMode == "continuous" ? .accentColor : .gray)
-            }
+                if let camera, camera.maxZoom > camera.minZoom {
+                    SliderRow(
+                        title: L10n.zoom,
+                        valueText: String(format: "%.1f×", state.zoom),
+                        value: Binding(get: { state.zoom }, set: { session.apply(Control(zoom: $0)) }),
+                        range: camera.minZoom...camera.maxZoom)
+                }
 
-            HStack(spacing: 10) {
-                Menu {
-                    ForEach(qualityOptions, id: \.label) { option in
-                        Button(option.label) {
-                            session.apply(Control(width: option.width, height: option.height, fps: option.fps, bitrateKbps: option.bitrate))
+                SliderRow(
+                    title: L10n.exposure,
+                    valueText: String(format: "%+.1f EV", state.exposureBias),
+                    value: Binding(get: { state.exposureBias }, set: { session.apply(Control(exposureBias: $0)) }),
+                    range: -2...2)
+
+                if camera?.supportsFocus != false {
+                    SliderRow(
+                        title: L10n.focus,
+                        valueText: String(format: "%.2f", state.lensPosition),
+                        value: Binding(get: { state.lensPosition }, set: { session.apply(Control(focusMode: "locked", lensPosition: $0)) }),
+                        range: 0...1
+                    ) {
+                        ChipButton(title: L10n.auto, isOn: state.focusMode == "continuous") {
+                            session.apply(Control(focusMode: "continuous"))
                         }
                     }
-                } label: {
-                    Label("\(state.height)p\(state.fps)", systemImage: "dial.medium")
                 }
-                .buttonStyle(.bordered)
 
-                Toggle(isOn: Binding(get: { state.mirror }, set: { session.apply(Control(mirror: $0)) })) {
-                    Image(systemName: "arrow.left.and.right.righttriangle.left.righttriangle.right")
-                }
-                .toggleStyle(.button)
-                .accessibilityLabel(L10n.mirror)
-
-                Button { session.apply(Control(rotation: (state.rotation + 90) % 360)) } label: {
-                    Label("\(state.rotation)°", systemImage: "rotate.right")
-                }
-                .buttonStyle(.bordered)
-
-                if session.capabilities.cameras.first(where: { $0.id == state.cameraId })?.hasTorch == true {
-                    Toggle(isOn: Binding(get: { state.torch }, set: { session.apply(Control(torch: $0)) })) {
-                        Image(systemName: state.torch ? "flashlight.on.fill" : "flashlight.off.fill")
+                HStack(spacing: 8) {
+                    if camera?.hasTorch == true {
+                        ToggleTile(systemImage: state.torch ? "flashlight.on.fill" : "flashlight.off.fill", label: L10n.torch, isOn: state.torch) {
+                            session.apply(Control(torch: !state.torch))
+                        }
                     }
-                    .toggleStyle(.button)
-                    .accessibilityLabel(L10n.torch)
+                    ToggleTile(systemImage: "arrow.left.and.right.righttriangle.left.righttriangle.right", label: L10n.mirror, isOn: state.mirror) {
+                        session.apply(Control(mirror: !state.mirror))
+                    }
+                    ToggleTile(systemImage: "rotate.right", label: "\(state.rotation)°") {
+                        session.apply(Control(rotation: (state.rotation + 90) % 360))
+                    }
+                    .accessibilityLabel(L10n.rotate)
+                }
+
+                Text(L10n.keepAppOpen).font(.caption2).foregroundStyle(HC.text2).fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(16)
+        }
+        .scrollIndicators(.hidden)
+        .background(HC.surface.opacity(0.95), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(HC.border))
+    }
+
+    private var qualityMenu: some View {
+        Menu {
+            ForEach(qualityOptions, id: \.label) { option in
+                Button {
+                    session.apply(Control(width: option.width, height: option.height, fps: option.fps, bitrateKbps: option.bitrate))
+                } label: {
+                    if option.width == state.width, option.fps == state.fps {
+                        Label(option.label, systemImage: "checkmark")
+                    } else {
+                        Text(option.label)
+                    }
                 }
             }
-
-            Text(L10n.keepAppOpen).font(.caption2).foregroundStyle(.secondary)
+        } label: {
+            HStack {
+                Text("\(state.height)p · \(state.fps) fps").font(.subheadline).foregroundStyle(HC.text)
+                Spacer()
+                Image(systemName: "chevron.down").font(.caption.weight(.semibold)).foregroundStyle(HC.text2)
+            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 40)
+            .background(HC.surface2, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(HC.border))
         }
-        .padding(12)
     }
 
     private var qualityOptions: [(label: String, width: Int, height: Int, fps: Int, bitrate: Int)] {
         [
-            ("720p 30", 1280, 720, 30, 4000),
-            ("720p 60", 1280, 720, 60, 6000),
-            ("1080p 30", 1920, 1080, 30, 8000),
-            ("1080p 60", 1920, 1080, 60, 12000),
+            ("720p · 30 fps", 1280, 720, 30, 4000),
+            ("720p · 60 fps", 1280, 720, 60, 6000),
+            ("1080p · 30 fps", 1920, 1080, 30, 8000),
+            ("1080p · 60 fps", 1920, 1080, 60, 12000),
         ]
     }
 
