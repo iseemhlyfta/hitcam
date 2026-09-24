@@ -32,6 +32,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
 
       # Without the secret (e.g. pull requests from forks) Gradle signs the release APK with the debug key.
+      # A release (tag push, also when called from release.yml) must never ship a debug-signed APK.
       - name: Decode release keystore
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -40,6 +41,9 @@ jobs:
             echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/hitcam.jks"
             echo "HITCAM_KEYSTORE=$RUNNER_TEMP/hitcam.jks" >> "$GITHUB_ENV"
             echo "::notice::Release APK is signed with the release key"
+          elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 is not set: refusing to publish a debug-signed APK for release $GITHUB_REF_NAME. Add the ANDROID_KEYSTORE_* secrets and re-run."
+            exit 1
           else
             echo "::warning::ANDROID_KEYSTORE_BASE64 is not set: release APK is signed with the debug key"
           fi
