@@ -16,7 +16,9 @@ public partial class App : Application
         {
             var viewModel = new MainViewModel();
             desktop.MainWindow = new MainWindow { DataContext = viewModel };
-            desktop.ShutdownRequested += (_, _) => viewModel.DisposeAsync().AsTask().GetAwaiter().GetResult();
+            // Exit is raised on every shutdown path (last window closed, OS logoff, forced Shutdown), unlike
+            // ShutdownRequested. It runs on the UI thread, so the view model must not need that thread to finish.
+            desktop.Exit += (_, _) => viewModel.Shutdown(TimeSpan.FromSeconds(3));
             viewModel.Start();
         }
 

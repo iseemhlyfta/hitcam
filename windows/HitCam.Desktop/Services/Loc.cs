@@ -118,14 +118,35 @@ public static class Loc
         : "Pick it in Zoom, Discord, Teams, OBS or a browser";
     public static string CameraNotInstalledTitle => Russian ? "Виртуальная камера не установлена" : "The virtual camera is not installed";
     public static string CameraNotInstalledDetail => Russian
-        ? "Нужны права администратора, один раз. После этого камера «HitCam» появится в других программах."
-        : "Needs admin rights once. Then the “HitCam” camera shows up in other apps.";
+        ? "Нужны права администратора, один раз. После этого камера «HitCam» появится в других программах. " + CamerasRestartNote
+        : "Needs admin rights once. Then the “HitCam” camera shows up in other apps. " + CamerasRestartNote;
     public static string CameraOutdatedTitle => Russian ? "Доступно обновление камеры" : "A camera update is available";
-    public static string CameraOutdatedDetail => Russian ? "Камера работает, но установлена старая версия." : "The camera works, but an older version is installed.";
+    public static string CameraOutdatedDetail => Russian
+        ? "Камера работает, но установлена старая версия. " + CamerasRestartNote
+        : "The camera works, but an older version is installed. " + CamerasRestartNote;
     public static string CameraFailedTitle => Russian ? "Камера не запустилась" : "The camera did not start";
-    public static string CameraFailedDetail(string error) => Russian ? $"Ошибка {error}. Попробуйте переустановить." : $"Error {error}. Try reinstalling.";
+    public static string CameraFailedDetail(string error) => Russian
+        ? $"Ошибка {error}. Попробуйте переустановить. {CamerasRestartNote}"
+        : $"Error {error}. Try reinstalling. {CamerasRestartNote}";
+    /// <summary>Installing stops the Windows camera service (FrameServer).</summary>
+    public static string CamerasRestartNote => Russian
+        ? "Во время установки все камеры Windows, включая встроенную, на пару секунд перезапустятся — идущий звонок потеряет видео."
+        : "While installing, all Windows cameras, the built-in one too, restart for a couple of seconds; a call in progress loses video.";
     public static string CameraUnavailableTitle => Russian ? "Камера не собрана" : "The camera is not built";
     public static string CameraUnavailableDetail => Russian ? "Нет HitCamVCam.dll рядом с программой." : "HitCamVCam.dll is missing next to the app.";
+    public static string CameraTamperedTitle => Russian ? "Файл камеры повреждён или подменён" : "The camera file is damaged or replaced";
+    public static string CameraTamperedDetail => Russian
+        ? "HitCamVCam.dll рядом с программой не совпадает с этой версией HitCam, поэтому он не будет установлен. Переустановите HitCam."
+        : "HitCamVCam.dll next to the app does not match this HitCam version, so it will not be installed. Reinstall HitCam.";
+    public static string DebugInstanceTitle => Russian ? "Отладочный экземпляр: камера отключена" : "Debug instance: camera disabled";
+    public static string DebugInstanceDetail => Russian
+        ? "Запущено с --port: виртуальная камера «HitCam» не добавляется, работает только превью."
+        : "Started with --port: the “HitCam” virtual camera is not added, only the preview works.";
+    public static string CameraInstallError(string error) => Russian ? $"Ошибка установки: {error}" : $"Installation error: {error}";
+    public static string ActionFailed(string error) => Russian ? $"Не удалось: {error}" : $"Failed: {error}";
+    public static string AlreadyRunningNotResponding => Russian
+        ? "HitCam уже запущен, но не отвечает. Завершите его в диспетчере задач и запустите снова."
+        : "HitCam is already running but not responding. End it in Task Manager and start it again.";
     public static string CameraInstallingTitle => Russian ? "Установка камеры…" : "Installing the camera…";
     public static string CameraInstallingDetail => Russian ? "Подтвердите запрос администратора." : "Confirm the administrator prompt.";
     public static string CameraInstallFailedTitle => Russian ? "Камера не установлена" : "Camera not installed";

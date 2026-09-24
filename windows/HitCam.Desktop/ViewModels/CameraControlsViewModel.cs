@@ -1,5 +1,8 @@
+using System.Diagnostics;
+using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
+using System.Reactive.Subjects;
 using HitCam.Core.Protocol;
 using HitCam.Desktop.Services;
 using ReactiveUI;
@@ -55,10 +58,12 @@ public sealed class CameraControlsViewModel : ReactiveObject
     private static readonly TimeSpan EchoGrace = TimeSpan.FromMilliseconds(700);
 
     private readonly Func<Control, Task> _send;
-    // Created on the UI thread (see the class summary), so throttled sends and re-applies land back on it.
-    private readonly IScheduler _ui = new SynchronizationContextScheduler(SynchronizationContext.Current ?? new SynchronizationContext());
+    // Where throttled sends and re-applies run: the UI thread in the app, virtual time in tests.
+    private readonly IScheduler _ui;
+    private readonly Subject<Unit> _localEdits = new();
     private bool _fromPhone;
-    private DateTime _lastLocalEdit;
+    // Between a local edit and EchoGrace after the last one; phone states wait in _pending meanwhile.
+    private bool _isEditing;
     private CameraState? _pending;
 
     private bool _isAvailable;
@@ -87,9 +92,19 @@ public sealed class CameraControlsViewModel : ReactiveObject
     private StabilizationOption? _selectedStabilization;
     private IReadOnlyList<CameraInfo> _cameraInfos = [];
 
-    public CameraControlsViewModel(Func<Control, Task> send)
+    /// <param name="ui">Scheduler of the UI thread (the one this view model is used on).</param>
+    public CameraControlsViewModel(Func<Control, Task> send, IScheduler ui)
     {
         _send = send;
+        _ui = ui;
+
+        // Once the user has stopped editing, show the newest state from the phone.
+        _localEdits.Throttle(EchoGrace, _ui).Subscribe(_ =>
+        {
+            _isEditing = false;
+            if (_pending is { } state)
+                ApplyState(state);
+        });
 
         // Sliders: send at most every 80 ms while dragging.
         this.WhenAnyValue(x => x.Zoom).Skip(1).Where(_ => !_fromPhone).Do(_ => MarkLocalEdit())
@@ -114,6 +129,10 @@ public sealed class CameraControlsViewModel : ReactiveObject
         AutoFocusCommand = ReactiveCommand.Create(() => Send(new Control { FocusMode = "continuous" }));
         AutoWhiteBalanceCommand = ReactiveCommand.Create(() => Send(new Control { WhiteBalanceMode = WhiteBalanceModes.Auto }));
         RotateCommand = ReactiveCommand.Create(() => Send(new Control { Rotation = (Rotation + 90) % 360 }));
+        // Sending is fire-and-forget; an error must not reach ReactiveUI's default handler, which crashes the app.
+        AutoFocusCommand.ThrownExceptions.Subscribe(ReportSendError);
+        AutoWhiteBalanceCommand.ThrownExceptions.Subscribe(ReportSendError);
+        RotateCommand.ThrownExceptions.Subscribe(ReportSendError);
     }
 
     public ReactiveCommand<System.Reactive.Unit, System.Reactive.Unit> AutoFocusCommand { get; }
@@ -347,9 +366,9 @@ public sealed class CameraControlsViewModel : ReactiveObject
     public void ApplyState(CameraState state)
     {
         _pending = state;
-        if (DateTime.UtcNow - _lastLocalEdit < EchoGrace)
+        if (_isEditing)
         {
-            // Applied once the edit settles (see MarkLocalEdit).
+            // Applied once the edit settles (see the constructor).
             return;
         }
 
@@ -417,14 +436,11 @@ public sealed class CameraControlsViewModel : ReactiveObject
 
     private void MarkLocalEdit()
     {
-        _lastLocalEdit = DateTime.UtcNow;
-        // Re-apply the newest phone state once the user has stopped editing.
-        _ui.Schedule(EchoGrace + TimeSpan.FromMilliseconds(50), () =>
-        {
-            if (DateTime.UtcNow - _lastLocalEdit >= EchoGrace && _pending is { } state)
-                ApplyState(state);
-        });
+        _isEditing = true;
+        _localEdits.OnNext(Unit.Default);
     }
+
+    private static void ReportSendError(Exception ex) => Trace.TraceWarning($"HitCam: camera control not sent: {ex.Message}");
 
     private void RunFromPhone(Action update)
     {
@@ -439,5 +455,17 @@ public sealed class CameraControlsViewModel : ReactiveObject
         }
     }
 
-    private void Send(Control control) => _ = _send(control);
+    private void Send(Control control)
+    {
+        try
+        {
+            _ = _send(control).ContinueWith(
+                t => ReportSendError(t.Exception!.GetBaseException()), CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted, TaskScheduler.Default);
+        }
+        catch (Exception ex)
+        {
+            ReportSendError(ex);
+        }
+    }
 }

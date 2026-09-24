@@ -56,4 +56,19 @@
       <None Include="$(VCamDll)" Link="HitCamVCam.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     </ItemGroup>
   </Target>
+  <!--
+    The app only ever installs (with admin rights) the exact DLL it was built with: its SHA-256 goes into HitCam.exe
+    as [AssemblyMetadata("HitCamVCamSha256", ...)]. Without the DLL there is no hash and installing is not offered.
+  -->
+  <Target Name="EmbedVirtualCameraHash" AfterTargets="CopyVirtualCamera" BeforeTargets="BeforeBuild" Condition="Exists('$(VCamDll)')">
+    <GetFileHash Files="$(VCamDll)" Algorithm="SHA256" HashEncoding="hex">
+      <Output TaskParameter="Hash" PropertyName="VCamSha256" />
+    </GetFileHash>
+    <ItemGroup>
+      <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+        <_Parameter1>HitCamVCamSha256</_Parameter1>
+        <_Parameter2>$(VCamSha256)</_Parameter2>
+      </AssemblyAttribute>
+    </ItemGroup>
+  </Target>
 </Project>

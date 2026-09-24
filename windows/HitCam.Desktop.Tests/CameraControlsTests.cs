@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reactive.Concurrency;
 using HitCam.Core.Protocol;
 using HitCam.Desktop.ViewModels;
 
@@ -19,6 +20,8 @@ public sealed class CameraControlsTests
         [StabilizationModes.Off, StabilizationModes.Standard, StabilizationModes.Cinematic]);
 
     private readonly ConcurrentQueue<Control> _sent = new();
+    // Virtual time: throttling and the echo grace run only when a test advances the clock.
+    private readonly HistoricalScheduler _time = new();
     private readonly CameraControlsViewModel _controls;
 
     public CameraControlsTests()
@@ -27,13 +30,11 @@ public sealed class CameraControlsTests
         {
             _sent.Enqueue(control);
             return Task.CompletedTask;
-        });
+        }, _time);
     }
 
-    private static CancellationToken Ct => TestContext.Current.CancellationToken;
-
     [Fact]
-    public async Task State_from_the_phone_fills_the_controls_without_echoing_back()
+    public void State_from_the_phone_fills_the_controls_without_echoing_back()
     {
         _controls.ApplyCapabilities(Capabilities);
         _controls.ApplyState(Initial with { CameraId = "back-tele", Zoom = 2.5, Fps = 60, Mirror = true, Rotation = 90 });
@@ -46,7 +47,7 @@ public sealed class CameraControlsTests
         Assert.Equal("90°", _controls.RotationText);
         Assert.Equal(4, _controls.Qualities.Count);
 
-        await Task.Delay(300, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(300));
         Assert.Empty(_sent);
     }
 
@@ -65,14 +66,14 @@ public sealed class CameraControlsTests
     }
 
     [Fact]
-    public async Task Dragging_a_slider_sends_one_throttled_control()
+    public void Dragging_a_slider_sends_one_throttled_control()
     {
         Ready();
 
         _controls.Zoom = 2;
         _controls.Zoom = 3;
         _controls.Zoom = 4;
-        await Task.Delay(300, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(300));
 
         var control = Assert.Single(_sent);
         Assert.Equal(4, control.Zoom);
@@ -100,12 +101,12 @@ public sealed class CameraControlsTests
     }
 
     [Fact]
-    public async Task Focus_slider_locks_focus_and_autofocus_button_unlocks_it()
+    public void Focus_slider_locks_focus_and_autofocus_button_unlocks_it()
     {
         Ready();
 
         _controls.LensPosition = 0.8;
-        await Task.Delay(300, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(300));
         _controls.AutoFocusCommand.Execute().Subscribe();
 
         var sent = _sent.ToArray();
@@ -115,7 +116,7 @@ public sealed class CameraControlsTests
     }
 
     [Fact]
-    public async Task A_stale_echo_does_not_snap_the_slider_back_but_the_phone_has_the_last_word()
+    public void A_stale_echo_does_not_snap_the_slider_back_but_the_phone_has_the_last_word()
     {
         Ready();
 
@@ -126,12 +127,29 @@ public sealed class CameraControlsTests
 
         // Once editing stops, the newest state from the phone is shown (here: it clamped the zoom).
         _controls.ApplyState(Initial with { Zoom = 3 });
-        await Task.Delay(1200, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(1200));
         Assert.Equal(3, _controls.Zoom);
     }
 
     [Fact]
-    public async Task White_balance_sliders_lock_it_at_the_chosen_temperature_and_tint()
+    public void Every_edit_restarts_the_grace_period()
+    {
+        Ready();
+
+        _controls.Zoom = 4;
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(600));
+        _controls.Zoom = 5;
+        _controls.ApplyState(Initial with { Zoom = 2 });
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(600));
+        Assert.Equal(5, _controls.Zoom);
+
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(200));
+        Assert.Equal(2, _controls.Zoom);
+        Assert.Equal([4.0, 5.0], _sent.Select(c => c.Zoom ?? 0));
+    }
+
+    [Fact]
+    public void White_balance_sliders_lock_it_at_the_chosen_temperature_and_tint()
     {
         Ready();
         Assert.True(_controls.SupportsWhiteBalance);
@@ -140,7 +158,7 @@ public sealed class CameraControlsTests
         _controls.WhiteBalanceTemperature = 3000;
         _controls.WhiteBalanceTemperature = 3400.4;
         _controls.WhiteBalanceTint = -12;
-        await Task.Delay(300, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(300));
 
         var control = Assert.Single(_sent);
         Assert.Equal((WhiteBalanceModes.Locked, 3400.0, -12.0), (control.WhiteBalanceMode, control.WhiteBalanceTemperature, control.WhiteBalanceTint));
@@ -175,7 +193,7 @@ public sealed class CameraControlsTests
     }
 
     [Fact]
-    public async Task Stabilization_offers_only_the_modes_of_the_current_format()
+    public void Stabilization_offers_only_the_modes_of_the_current_format()
     {
         Ready();
         Assert.True(_controls.SupportsStabilization);
@@ -187,7 +205,7 @@ public sealed class CameraControlsTests
         // e.g. 1080p60 on some iPhones: no stabilization at all.
         _controls.ApplyState(Initial with { Stabilization = StabilizationModes.Off, StabilizationModes = [StabilizationModes.Off] });
         // Right after the local choice the phone state is held back until editing settles.
-        await Task.Delay(1200, Ct);
+        _time.AdvanceBy(TimeSpan.FromMilliseconds(1200));
         Assert.False(_controls.SupportsStabilization);
     }
 

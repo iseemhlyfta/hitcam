@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reactive.Linq;
 using System.Reactive;
@@ -11,6 +12,7 @@ using HitCam.Core.Protocol;
 using HitCam.Core.Server;
 using HitCam.Desktop.Services;
 using ReactiveUI;
+using ReactiveUI.Avalonia;
 
 namespace HitCam.Desktop.ViewModels;
 
@@ -20,6 +22,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly HitCamServer _server;
     private readonly DispatcherTimer _statsTimer;
     private readonly DispatcherTimer _previewTimer;
+    // Network changes come in bursts (an adapter going up raises several); addresses are read once it settles.
+    private readonly DispatcherTimer _addressTimer;
+    private NetworkAddressChangedEventHandler? _networkChanged;
+    private int _disposed;
     private readonly VideoPipeline _pipeline = new();
     private readonly VirtualCamera _camera = new();
     private long _framesInWindow;
@@ -84,13 +90,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             IsFullScreen = false;
             _previewTimer!.Stop();
             Preview = null;
+            ReleasePreviewBuffers();
             StatusText = Loc.Disconnected(reason);
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
             LiveText = "";
         });
         _server.Disconnected += (_, _) => _pipeline.ClearSignal();
 
-        Controls = new CameraControlsViewModel(control => _server.SendControlAsync(control));
+        Controls = new CameraControlsViewModel(control => _server.SendControlAsync(control), AvaloniaScheduler.Instance);
         _server.CapabilitiesReceived += c => Dispatcher.UIThread.Post(() => Controls.ApplyCapabilities(c));
         _server.CameraStateReceived += s => Dispatcher.UIThread.Post(() => Controls.ApplyState(s));
         _server.Disconnected += (_, _) => Dispatcher.UIThread.Post(Controls.Reset);
@@ -121,10 +128,27 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             Process.Start(new ProcessStartInfo(NvidiaVideoEffectsDownload) { UseShellExecute = true })?.Dispose();
         });
 
+        // An unobserved command error would crash the app; show it where the user clicked instead.
+        DisconnectCommand.ThrownExceptions.Subscribe(ex => StatusText = Loc.ActionFailed(ex.Message));
+        CancelPairingCommand.ThrownExceptions.Subscribe(ex => StatusText = Loc.ActionFailed(ex.Message));
+        InstallCameraCommand.ThrownExceptions.Subscribe(ex =>
+            SetCameraStatus(false, Loc.CameraInstallFailedTitle, Loc.CameraInstallError(ex.Message), Loc.InstallCamera));
+        ToggleFullScreenCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Full screen: {ex.Message}"));
+        OpenDenoiseDownloadCommand.ThrownExceptions.Subscribe(ex => DenoiseStatus = Loc.ActionFailed(ex.Message));
+
         _isDenoiseEnabled = _settings.DenoiseEnabled;
         _selectedDenoiseMode = DenoiseModes.FirstOrDefault(o => o.Key == _settings.DenoiseMode) ?? DenoiseModes[1];
-        _statsTimer = new DispatcherTimer(TimeSpan.FromSeconds(1), DispatcherPriority.Background, (_, _) => UpdateStats());
-        _previewTimer = new DispatcherTimer(TimeSpan.FromMilliseconds(33), DispatcherPriority.Render, (_, _) => UpdatePreview());
+        // Property-initialized timers: the constructor taking a callback also starts the timer.
+        _statsTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromSeconds(1) };
+        _statsTimer.Tick += (_, _) => UpdateStats();
+        _previewTimer = new DispatcherTimer(DispatcherPriority.Render) { Interval = TimeSpan.FromMilliseconds(33) };
+        _previewTimer.Tick += (_, _) => UpdatePreview();
+        _addressTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(500) };
+        _addressTimer.Tick += (_, _) =>
+        {
+            _addressTimer.Stop();
+            RefreshAddresses();
+        };
     }
 
     public ReactiveCommand<Unit, Unit> DisconnectCommand { get; }
@@ -339,8 +363,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
         RefreshAddresses();
         RefreshCamera();
-        System.Net.NetworkInformation.NetworkChange.NetworkAddressChanged += (_, _) =>
-            Dispatcher.UIThread.Post(RefreshAddresses);
+        _networkChanged = (_, _) => Dispatcher.UIThread.Post(() =>
+        {
+            _addressTimer.Stop();
+            _addressTimer.Start();
+        });
+        NetworkChange.NetworkAddressChanged += _networkChanged;
         // Loading the NVIDIA libraries takes a moment; the switch appears once they are found.
         _ = Task.Run(VideoPipeline.IsDenoiseAvailable).ContinueWith(
             t => Dispatcher.UIThread.Post(() =>
@@ -359,7 +387,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             PrimaryAddress = Loc.NoNetwork;
             OtherAddresses = "";
-            QrCode = null;
+            ReplaceQrCode(null);
             return;
         }
 
@@ -368,15 +396,34 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             ? Loc.OtherAddresses(string.Join(", ", addresses.Skip(1).Select(a => $"{a}:{_server.Port}")))
             : "";
         var name = Uri.EscapeDataString(Environment.MachineName);
-        QrCode = QrImage.Create($"{ProtocolInfo.UriScheme}://{addresses[0]}:{_server.Port}?id={_settings.ServerId}&name={name}");
+        ReplaceQrCode(QrImage.Create($"{ProtocolInfo.UriScheme}://{addresses[0]}:{_server.Port}?id={_settings.ServerId}&name={name}"));
+    }
+
+    private void ReplaceQrCode(Bitmap? qrCode)
+    {
+        var old = QrCode;
+        QrCode = qrCode;
+        old?.Dispose();
     }
 
     private void RefreshCamera()
     {
+        // A second instance for debugging (--port) must not add a second "HitCam" camera.
+        if (Program.PortOverride is not null)
+        {
+            SetCameraStatus(false, Loc.DebugInstanceTitle, Loc.DebugInstanceDetail, null);
+            return;
+        }
+
         var setup = VirtualCamera.GetSetup();
         if (setup is CameraSetup.Unavailable)
         {
             SetCameraStatus(false, Loc.CameraUnavailableTitle, Loc.CameraUnavailableDetail, null);
+            return;
+        }
+        if (setup is CameraSetup.Tampered)
+        {
+            SetCameraStatus(false, Loc.CameraTamperedTitle, Loc.CameraTamperedDetail, null);
             return;
         }
         if (setup is CameraSetup.NotInstalled)
@@ -407,9 +454,20 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     {
         _camera.Stop();
         SetCameraStatus(false, Loc.CameraInstallingTitle, Loc.CameraInstallingDetail, null);
-        var installed = await VirtualCamera.InstallAsync();
+        bool installed;
+        try
+        {
+            installed = await VirtualCamera.InstallAsync();
+        }
+        catch (Exception ex)
+        {
+            RefreshCamera();
+            if (!_camera.IsRunning)
+                SetCameraStatus(false, Loc.CameraInstallFailedTitle, Loc.CameraInstallError(ex.Message), Loc.InstallCamera);
+            return;
+        }
         RefreshCamera();
-        if (!installed && !_camera.IsRunning)
+        if (!installed && !_camera.IsRunning && CanInstallCamera)
             SetCameraStatus(false, Loc.CameraInstallFailedTitle, Loc.CameraInstallFailedDetail, Loc.InstallCamera);
     }
 
@@ -422,6 +480,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         var bitmap = _previewBuffers[_nextPreviewBuffer];
         if (bitmap is null || bitmap.PixelSize.Width != width || bitmap.PixelSize.Height != height)
         {
+            // The one on screen is the other buffer, so this one can go.
+            bitmap?.Dispose();
             bitmap = new WriteableBitmap(new PixelSize(width, height), new Vector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Opaque);
             _previewBuffers[_nextPreviewBuffer] = bitmap;
         }
@@ -466,11 +526,60 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
                       + (rtt is { } r ? $" · RTT {r / 1000.0:0} {Loc.Milliseconds}" : "");
     }
 
+    /// <summary>Called with <see cref="Preview"/> already cleared.</summary>
+    private void ReleasePreviewBuffers()
+    {
+        for (var i = 0; i < _previewBuffers.Length; i++)
+        {
+            _previewBuffers[i]?.Dispose();
+            _previewBuffers[i] = null;
+        }
+        _nextPreviewBuffer = 0;
+    }
+
+    /// <summary>
+    /// App exit, on the UI thread, which the caller blocks: the network and native teardown runs on the thread pool
+    /// and is given at most <paramref name="timeout"/>, so a stuck connection can never keep a windowless process alive.
+    /// </summary>
+    public void Shutdown(TimeSpan timeout)
+    {
+        StopOnUiThread();
+        try
+        {
+            if (!Task.Run(DisposeCoreAsync).Wait(timeout))
+                Trace.TraceWarning("HitCam: shutdown timed out; exiting anyway.");
+        }
+        catch (AggregateException ex)
+        {
+            Trace.TraceWarning($"HitCam: shutdown failed: {ex.InnerException?.Message}");
+        }
+    }
+
+    /// <summary>Call on the UI thread.</summary>
     public async ValueTask DisposeAsync()
+    {
+        StopOnUiThread();
+        await DisposeCoreAsync().ConfigureAwait(false);
+    }
+
+    private void StopOnUiThread()
     {
         _statsTimer.Stop();
         _previewTimer.Stop();
-        await _server.DisposeAsync();
+        _addressTimer.Stop();
+        if (_networkChanged is not null)
+        {
+            NetworkChange.NetworkAddressChanged -= _networkChanged;
+            _networkChanged = null;
+        }
+    }
+
+    // No UI thread needed from here on.
+    private async Task DisposeCoreAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+        await _server.DisposeAsync().ConfigureAwait(false);
         _pipeline.Dispose();
         _camera.Dispose();
     }
