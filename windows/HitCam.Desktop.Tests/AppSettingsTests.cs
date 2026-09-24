@@ -13,7 +13,7 @@ public sealed class AppSettingsTests
         Assert.NotNull(settings);
         Assert.Equal("b929fd73", settings.ServerId);
         Assert.False(settings.DenoiseEnabled);
-        Assert.Equal(0.5, settings.DenoiseStrength);
+        Assert.Equal(1.0, settings.DenoiseStrength);
     }
 
     [Fact]

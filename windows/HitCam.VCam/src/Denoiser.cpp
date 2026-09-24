@@ -2,7 +2,9 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <string>
 
@@ -23,14 +25,15 @@ std::string SdkDirectory() {
     return std::string(path) + "\\NVIDIA Corporation\\NVIDIA Video Effects";
 }
 
-// The SDK has no stream sync of its own; the CUDA runtime it ships with is already loaded next to it.
-void SynchronizeStream(CUstream stream) {
+// The SDK has no stream sync of its own, and it links the CUDA runtime statically (no cudart DLL to borrow from).
+// The driver API is always there with an NVIDIA driver and takes the same stream handle.
+bool SynchronizeStream(CUstream stream) {
     using Sync = int(__stdcall*)(CUstream);
     static const Sync sync = [] {
-        const HMODULE cudart = GetModuleHandleW(L"cudart64_12.dll");
-        return cudart ? reinterpret_cast<Sync>(GetProcAddress(cudart, "cudaStreamSynchronize")) : nullptr;
+        const HMODULE driver = LoadLibraryExW(L"nvcuda.dll", nullptr, LOAD_LIBRARY_SEARCH_SYSTEM32);
+        return driver ? reinterpret_cast<Sync>(GetProcAddress(driver, "cuStreamSynchronize")) : nullptr;
     }();
-    if (sync) sync(stream);
+    return sync && sync(stream) == 0;
 }
 
 }  // namespace
@@ -78,7 +81,8 @@ struct Denoiser::Effect {
         if (status == NVCV_SUCCESS) status = NvCVImage_Transfer(&frame, &gpuInput, 1.0f / 255.0f, stream, &staging);
         if (status == NVCV_SUCCESS) status = NvVFX_Run(handle, 0);
         if (status == NVCV_SUCCESS) status = NvCVImage_Transfer(&gpuOutput, &frame, 255.0f, stream, &staging);
-        SynchronizeStream(stream);
+        // The frame must be complete before it goes to the camera; never publish a half-copied one.
+        if (status == NVCV_SUCCESS && !SynchronizeStream(stream)) status = NVCV_ERR_CUDA;
         return status;
     }
 };
@@ -117,10 +121,44 @@ void Denoiser::StartLoad(uint32_t width, uint32_t height, unsigned model) {
     });
 }
 
+double Denoiser::EstimateNoise(const uint8_t* luma, uint32_t width, uint32_t height) {
+    // Immerkær's Laplacian-difference mask on a sparse grid. Its response to Gaussian noise of sigma s has
+    // standard deviation 6s; edges and texture give large responses, so a low percentile ignores them.
+    thread_local std::vector<int> responses;
+    responses.clear();
+    for (uint32_t y = 2; y + 2 < height; y += 4) {
+        const uint8_t* row = luma + static_cast<size_t>(y) * width;
+        for (uint32_t x = 2; x + 2 < width; x += 4) {
+            const uint8_t* p = row + x;
+            const int response = p[-static_cast<int>(width) - 1] - 2 * p[-static_cast<int>(width)] + p[-static_cast<int>(width) + 1]
+                                 - 2 * p[-1] + 4 * p[0] - 2 * p[1]
+                                 + p[width - 1] - 2 * p[width] + p[width + 1];
+            responses.push_back(response < 0 ? -response : response);
+        }
+    }
+    if (responses.empty()) return 0;
+    // 30th percentile of |N(0, 6s)| is 0.385 * 6s.
+    const auto percentile = responses.begin() + static_cast<std::ptrdiff_t>(responses.size() * 3 / 10);
+    std::nth_element(responses.begin(), percentile, responses.end());
+    return *percentile / (0.385 * 6.0);
+}
+
 bool Denoiser::Process(uint8_t* nv12, uint32_t width, uint32_t height) {
     const float strength = strength_.load();
     if (strength <= 0 || !IsAvailable()) return false;
-    const unsigned model = strength > 0.5f ? 1 : 0;
+
+    // How noisy is the picture? Smoothed over ~20 frames so the amount does not flicker.
+    const double sigma = EstimateNoise(nv12, width, height);
+    noise_ = noise_ < 0 ? sigma : noise_ * 0.95 + sigma * 0.05;
+    lastNoise_ = noise_;
+    // The strong model removes about a third of fine detail and, measured on textured scenes, is worse than the
+    // gentle one even in a dark room (noise ~16); it is kept for extreme noise only. Hysteresis avoids reloading.
+    if (strongModel_ ? noise_ < kStrongModelOff : noise_ > kStrongModelOn) strongModel_ = !strongModel_;
+    const unsigned model = strongModel_ ? 1 : 0;
+    // A clean picture is left alone: the network has nothing to remove there and only adds its own artifacts.
+    const double need = std::clamp((noise_ - kNoiseIgnored) / (kNoiseFull - kNoiseIgnored), 0.0, 1.0);
+    const float amount = static_cast<float>(strength * need);
+    lastAmount_ = amount;
 
     {
         std::lock_guard guard(lock_);
@@ -133,9 +171,9 @@ bool Denoiser::Process(uint8_t* nv12, uint32_t width, uint32_t height) {
     if (!effectMatches && !loading_ && (wantedChanged || lastError_ == 0)) StartLoad(width, height, model);
     // While the other model loads, keep using the current one if it fits this frame size.
     if (!effect_ || effect_->width != width || effect_->height != height) return false;
+    if (amount < 0.02f) return false;
 
-    // Mixing with the original gives a continuous strength on top of the effect's two levels.
-    const float amount = model == 0 ? strength * 2 : strength;
+    // Mixing with the original gives a continuous amount on top of the effect's two levels.
     const size_t size = static_cast<size_t>(width) * height * 3 / 2;
     if (amount < 0.999f) original_.assign(nv12, nv12 + size);
 

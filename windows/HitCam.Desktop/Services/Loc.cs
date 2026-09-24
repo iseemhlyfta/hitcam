@@ -83,15 +83,19 @@ public static class Loc
     // AI noise removal (on the PC)
     public static string Denoise => Russian ? "ИИ-шумоподавление" : "AI noise removal";
     public static string DenoiseHint => Russian
-        ? "Нейросеть NVIDIA убирает шум, не размывая детали. Работает на видеокарте ПК, iPhone не нагружает."
+        ? "Нейросеть NVIDIA убирает шум при слабом свете, не размывая детали. Работает на видеокарте ПК, iPhone не нагружает."
         : "An NVIDIA neural network removes noise without blurring detail. Runs on the PC's GPU, not on the iPhone.";
     public static string DenoiseStrength => Russian ? "Сила" : "Strength";
     public static string DenoiseStrengthHint => Russian
-        ? "До 50% — мягкая модель (сохраняет текстуру), выше — сильная"
-        : "Up to 50%: gentle model (keeps texture); above: strong model";
+        ? "Сколько шума убирать, когда он есть. На чистой картинке обработка выключается сама, чтобы не портить детали."
+        : "How much noise to remove when there is some. On a clean picture processing turns itself off to keep detail.";
     public static string DenoiseLoading => Russian ? "Загружаем модель…" : "Loading the model…";
-    public static string DenoiseTime(double milliseconds) =>
-        Russian ? $"{milliseconds:0.0} мс на кадр" : $"{milliseconds:0.0} ms per frame";
+    public static string DenoiseIdle(double noise) => Russian
+        ? $"Шум {noise:0.0} — картинка чистая, обработка не нужна"
+        : $"Noise {noise:0.0}: the picture is clean, nothing to do";
+    public static string DenoiseActive(double noise, float amount, double milliseconds) => Russian
+        ? $"Шум {noise:0.0} — убираем на {amount:P0}, {milliseconds:0.0} мс на кадр"
+        : $"Noise {noise:0.0}: removing {amount:P0}, {milliseconds:0.0} ms per frame";
     public static string DenoiseFailed(int code) =>
         Russian ? $"Не запустилось (код NVIDIA {code}). Нужна видеокарта RTX." : $"Did not start (NVIDIA code {code}). Needs an RTX GPU.";
     public static string DenoiseMissing => Russian

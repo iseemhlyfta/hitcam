@@ -59,15 +59,18 @@ public sealed class VideoPipeline : IDisposable
         }
     }
 
-    /// <summary>Last frame's denoise time (ms, null if none yet) and the NVIDIA status of a failed model load (0 if none).</summary>
-    public (double? Milliseconds, int Error) DenoiseStats()
+    /// <summary>
+    /// Last denoised frame's time (ms, null if none yet), the NVIDIA status of a failed model load (0 if none),
+    /// the measured noise level (null before the first frame) and the amount applied to the last frame (0..1).
+    /// </summary>
+    public DenoiseStats DenoiseStats()
     {
         lock (_bridgeLock)
         {
             if (_bridge == IntPtr.Zero)
-                return (null, 0);
-            NativeMethods.HitCam_BridgeDenoiseStats(_bridge, out var milliseconds, out var error);
-            return (milliseconds >= 0 ? milliseconds : null, error);
+                return new DenoiseStats(null, 0, null, 0);
+            NativeMethods.HitCam_BridgeDenoiseStats(_bridge, out var milliseconds, out var error, out var noise, out var amount);
+            return new DenoiseStats(milliseconds >= 0 ? milliseconds : null, error, noise >= 0 ? noise : null, amount);
         }
     }
 
@@ -202,3 +205,6 @@ public sealed class VideoPipeline : IDisposable
         _thread.Join(TimeSpan.FromSeconds(2));
     }
 }
+
+/// <summary>AI noise removal state of the last frame (see <see cref="VideoPipeline.DenoiseStats"/>).</summary>
+public readonly record struct DenoiseStats(double? Milliseconds, int Error, double? Noise, float Amount);

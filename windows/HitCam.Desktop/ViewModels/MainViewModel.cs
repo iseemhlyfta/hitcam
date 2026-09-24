@@ -171,7 +171,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         }
     }
 
-    /// <summary>0.05..1; up to 0.5 the gentle model is mixed with the original, above that the strong one.</summary>
+    /// <summary>0.05..1: upper limit of noise removal; how much is applied follows the measured noise.</summary>
     public double DenoiseStrength
     {
         get => _denoiseStrength;
@@ -443,9 +443,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
         if (IsDenoiseAvailable && IsDenoiseEnabled)
         {
-            var (milliseconds, denoiseError) = _pipeline.DenoiseStats();
-            DenoiseStatus = denoiseError != 0 ? Loc.DenoiseFailed(denoiseError)
-                : milliseconds is { } ms ? Loc.DenoiseTime(ms)
+            var stats = _pipeline.DenoiseStats();
+            DenoiseStatus = stats.Error != 0 ? Loc.DenoiseFailed(stats.Error)
+                : stats.Noise is not { } noise ? Loc.DenoiseLoading
+                // Below ~2% the picture is clean enough that it is passed through untouched.
+                : stats.Amount < 0.02f ? Loc.DenoiseIdle(noise)
+                : stats.Milliseconds is { } ms ? Loc.DenoiseActive(noise, stats.Amount, ms)
                 : Loc.DenoiseLoading;
         }
 

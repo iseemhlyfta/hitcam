@@ -34,7 +34,7 @@ extern "C" void __stdcall HitCam_BridgePreviewInfo(void* handle, uint32_t* width
 extern "C" BOOL __stdcall HitCam_BridgeCopyPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 extern "C" BOOL __stdcall HitCam_DenoiseAvailable();
 extern "C" void __stdcall HitCam_BridgeSetDenoise(void* handle, float strength);
-extern "C" void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error);
+extern "C" void __stdcall HitCam_BridgeDenoiseStats(void* handle, double* milliseconds, int* error, double* noise, float* amount);
 
 namespace {
 
@@ -80,12 +80,16 @@ public:
         BYTE* data = nullptr;
         if (SUCCEEDED(hr)) hr = buffer->Lock(&data, nullptr, nullptr);
         if (FAILED(hr)) return hr;
-        std::memset(data, luma, width_ * height_);
+        if (scene_) {
+            DrawScene(data);
+        } else {
+            std::memset(data, luma, width_ * height_);
+            std::memset(data + width_ * height_, 128, width_ * height_ / 2);
+        }
         for (UINT32 i = 0; noise > 0 && i < width_ * height_; ++i) {
             seed_ = seed_ * 1664525u + 1013904223u;
-            data[i] = static_cast<uint8_t>(std::clamp(luma + static_cast<int>(seed_ >> 24) % (2 * noise + 1) - noise, 16, 235));
+            data[i] = static_cast<uint8_t>(std::clamp(data[i] + static_cast<int>(seed_ >> 24) % (2 * noise + 1) - noise, 16, 235));
         }
-        std::memset(data + width_ * height_, 128, width_ * height_ / 2);
         buffer->Unlock();
         buffer->SetCurrentLength(size);
 
@@ -134,6 +138,37 @@ private:
     UINT32 height_ = 0;
     LONGLONG time_ = 0;
     uint32_t seed_ = 1;
+    bool scene_ = false;
+
+public:
+    // Instead of a flat frame: colour gradients (left half) and fine texture with thin lines (right half).
+    void UseScene() { scene_ = true; }
+
+private:
+    void DrawScene(uint8_t* data) const {
+        const UINT32 half = width_ / 2;
+        for (UINT32 y = 0; y < height_; ++y) {
+            for (UINT32 x = 0; x < width_; ++x) {
+                int value;
+                if (x < half) {
+                    value = 40 + static_cast<int>(180.0 * y / height_);
+                } else {
+                    // Stripes 3 px wide plus a grid of 1 px lines, like fabric and text.
+                    value = ((x / 3) % 2 == 0 ? 150 : 90) + ((x % 40 == 0 || y % 40 == 0) ? -60 : 0);
+                }
+                data[static_cast<size_t>(y) * width_ + x] = static_cast<uint8_t>(std::clamp(value, 16, 235));
+            }
+        }
+        uint8_t* chroma = data + static_cast<size_t>(width_) * height_;
+        for (UINT32 y = 0; y < height_ / 2; ++y) {
+            for (UINT32 x = 0; x < width_ / 2; ++x) {
+                const bool left = x * 2 < half;
+                // Left half: blue-to-yellow and green-to-magenta gradients; right half: skin-like warm tone.
+                chroma[(static_cast<size_t>(y) * (width_ / 2) + x) * 2] = static_cast<uint8_t>(left ? 64 + 128 * x * 2 / half : 110);
+                chroma[(static_cast<size_t>(y) * (width_ / 2) + x) * 2 + 1] = static_cast<uint8_t>(left ? 64 + 128 * y * 2 / height_ : 150);
+            }
+        }
+    }
 };
 
 HRESULT OpenCamera(const wchar_t* name, IMFSourceReader** reader) {
@@ -217,6 +252,89 @@ bool PreviewStats(void* bridge, double* mean, double* deviation) {
     return true;
 }
 
+// Decodes a textured scene through a fresh bridge and returns the settled BGRA preview.
+bool RenderScene(int noise, float denoise, std::vector<uint8_t>& pixels, uint32_t& width, uint32_t& height, double& milliseconds, double& noiseLevel, float& applied) {
+    TestEncoder encoder;
+    encoder.UseScene();
+    void* bridge = nullptr;
+    if (FAILED(encoder.Initialize(1920, 1080, 30'000'000)) || FAILED(HitCam_BridgeCreate(&bridge))) return false;
+    HitCam_BridgeSetDenoise(bridge, denoise);
+
+    int64_t time = 0;
+    int settled = 0;
+    const ULONGLONG deadline = GetTickCount64() + 60'000;
+    milliseconds = -1;
+    while (GetTickCount64() < deadline && settled < 15) {
+        std::vector<std::vector<uint8_t>> units;
+        if (FAILED(encoder.Encode(0, units, noise))) break;
+        for (const auto& unit : units) HitCam_BridgeDecode(bridge, unit.data(), static_cast<uint32_t>(unit.size()), time += 333'333);
+        int error = 0;
+        float amount = 0;
+        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &amount);
+        if (error != 0) break;
+        uint64_t frame = 0;
+        HitCam_BridgePreviewInfo(bridge, &width, &height, &frame);
+        // Count frames once decoding runs and, with denoise, once the model runs or it decided nothing is needed.
+        if (frame > 0 && (denoise <= 0 || milliseconds >= 0 || (noiseLevel >= 0 && amount < 0.02f && frame > 30))) ++settled;
+        else Sleep(20);
+    }
+    pixels.assign(static_cast<size_t>(width) * height * 4, 0);
+    {
+        int error = 0;
+        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &applied);
+    }
+    const bool ok = settled >= 15 && HitCam_BridgeCopyPreview(bridge, pixels.data(), width * 4, width, height);
+    HitCam_BridgeDestroy(bridge);
+    return ok;
+}
+
+// --denoise-scene: does noise removal keep colour and detail on a textured picture (and not damage a clean one)?
+int RunSceneCheck() {
+    struct Case { const char* name; int noise; float denoise; };
+    const Case cases[] = {
+        {"clean", 0, 0}, {"light noise", 4, 0}, {"light noise + 100%", 4, 1.0f}, {"noisy", 12, 0}, {"noisy + 100%", 12, 1.0f},
+        {"dark room", 30, 0}, {"dark room + 100%", 30, 1.0f}, {"clean + 100%", 0, 1.0f},
+    };
+    std::vector<uint8_t> reference;
+    std::printf("%-20s %6s %6s %6s %6s %8s %7s %6s %8s\n", "case", "diff", "dB", "dG", "dR", "texture", "smooth", "noise", "applied");
+    for (const auto& c : cases) {
+        std::vector<uint8_t> pixels;
+        uint32_t width = 0, height = 0;
+        double milliseconds = -1, noiseLevel = -1;
+        float applied = 0;
+        if (!RenderScene(c.noise, c.denoise, pixels, width, height, milliseconds, noiseLevel, applied)) {
+            std::printf("%-22s FAILED\n", c.name);
+            return 1;
+        }
+        if (reference.empty()) reference = pixels;
+
+        // diff: mean abs difference to the clean frame; dB/dG/dR: mean colour shift on the gradient half;
+        // texture: mean horizontal step on the striped half (detail); smooth: the same on the gradient half (noise).
+        double diff = 0, shift[3] = {}, texture = 0, smooth = 0;
+        size_t leftCount = 0, rightCount = 0;
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x + 1 < width; ++x) {
+                const size_t i = (static_cast<size_t>(y) * width + x) * 4;
+                for (int ch = 0; ch < 3; ++ch) diff += std::abs(pixels[i + ch] - reference[i + ch]);
+                const double step = std::abs(pixels[i + 4 + 1] - pixels[i + 1]);
+                if (x < width / 2 - 1) {
+                    for (int ch = 0; ch < 3; ++ch) shift[ch] += pixels[i + ch] - reference[i + ch];
+                    smooth += step;
+                    ++leftCount;
+                } else if (x > width / 2 + 1) {
+                    texture += step;
+                    ++rightCount;
+                }
+            }
+        }
+        const double all = static_cast<double>(width - 1) * height * 3;
+        std::printf("%-20s %6.2f %6.2f %6.2f %6.2f %8.2f %7.2f %6.1f %7.0f%%\n", c.name, diff / all, shift[0] / leftCount,
+                    shift[1] / leftCount, shift[2] / leftCount, texture / rightCount, smooth / leftCount, noiseLevel,
+                    milliseconds >= 0 ? applied * 100 : 0.0f);
+    }
+    return 0;
+}
+
 // --denoise: NVIDIA AI noise removal on real H.264 with synthetic sensor noise; no camera needed.
 int RunDenoiseCheck() {
     if (!HitCam_DenoiseAvailable()) {
@@ -263,12 +381,14 @@ int RunDenoiseCheck() {
         HitCam_BridgeSetDenoise(bridge, strength);
         double milliseconds = -1;
         int error = 0;
+        double noiseLevel = -1;
+        float amount = 0;
         // The model loads in the background (TensorRT); frames pass through meanwhile.
         const ULONGLONG deadline = GetTickCount64() + 60'000;
         while (GetTickCount64() < deadline) {
             hr = feed(3);
             if (FAILED(hr)) return Fail("decode while loading", hr);
-            HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error);
+            HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &amount);
             if (error != 0) break;
             if (milliseconds >= 0) {
                 hr = feed(10);  // let the temporal model settle
@@ -276,7 +396,7 @@ int RunDenoiseCheck() {
             }
             Sleep(50);
         }
-        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error);
+        HitCam_BridgeDenoiseStats(bridge, &milliseconds, &error, &noiseLevel, &amount);
         double mean = 0, deviation = 0;
         const bool ok = error == 0 && milliseconds >= 0 && PreviewStats(bridge, &mean, &deviation)
                         && deviation < noisyDeviation * 0.7 && std::abs(mean - noisyMean) < 4;
@@ -301,6 +421,7 @@ int main(int argc, char** argv) {
         return 0;
     }
     if (argc > 1 && std::strcmp(argv[1], "--denoise") == 0) return RunDenoiseCheck();
+    if (argc > 1 && std::strcmp(argv[1], "--denoise-scene") == 0) return RunSceneCheck();
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {
