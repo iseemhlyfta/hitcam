@@ -180,11 +180,11 @@ public sealed class VideoPipeline : IDisposable
         }
         finally
         {
+            // Unpublish under the lock, destroy outside it: destroying waits for a model that may still be loading
+            // (seconds), and the UI thread must not block on the lock meanwhile. Nobody can reach the handle now.
             lock (_bridgeLock)
-            {
                 _bridge = IntPtr.Zero;
-                NativeMethods.HitCam_BridgeDestroy(bridge);
-            }
+            NativeMethods.HitCam_BridgeDestroy(bridge);
         }
     }
 
