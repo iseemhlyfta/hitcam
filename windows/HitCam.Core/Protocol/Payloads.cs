@@ -69,6 +69,14 @@ public static class StabilizationModes
     public const string Cinematic = "cinematic";
 }
 
+/// <summary>Phone camera noise reduction (Android NOISE_REDUCTION_MODE).</summary>
+public static class NoiseReductionModes
+{
+    public const string Off = "off";
+    public const string Fast = "fast";
+    public const string High = "high";
+}
+
 public sealed record VideoPreset(int Width, int Height, int[] Fps)
 {
     public const int MaxFps = 8;
@@ -109,14 +117,20 @@ public sealed record CameraState(
     double? WhiteBalanceTint = null,
     string? ExposureMode = null,
     string? Stabilization = null,
-    string[]? StabilizationModes = null) : IValidatedPayload
+    string[]? StabilizationModes = null,
+    // Added in app 0.3; null from older phone apps or cameras without the setting.
+    string? NoiseReduction = null,
+    string[]? NoiseReductionModes = null) : IValidatedPayload
 {
     public const int MaxStabilizationModes = 8;
+    public const int MaxNoiseReductionModes = 8;
 
     void IValidatedPayload.Validate()
     {
         if (StabilizationModes is not null)
             PayloadChecks.Array(StabilizationModes, MaxStabilizationModes, "stabilizationModes");
+        if (NoiseReductionModes is not null)
+            PayloadChecks.Array(NoiseReductionModes, MaxNoiseReductionModes, "noiseReductionModes");
     }
 }
 
@@ -142,6 +156,8 @@ public sealed record Control
     public double? WhiteBalanceTint { get; init; }
     public string? ExposureMode { get; init; }
     public string? Stabilization { get; init; }
+    /// <summary>"off", "fast" or "high" (see <see cref="NoiseReductionModes"/>).</summary>
+    public string? NoiseReduction { get; init; }
 }
 
 public sealed record Status(

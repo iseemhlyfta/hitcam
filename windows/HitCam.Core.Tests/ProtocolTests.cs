@@ -93,6 +93,39 @@ public class ProtocolTests
         Assert.Equal("back-wide", state.CameraId);
         Assert.Null(state.WhiteBalanceMode);
         Assert.Null(state.StabilizationModes);
+        Assert.Null(state.NoiseReduction);
+        Assert.Null(state.NoiseReductionModes);
+    }
+
+    [Fact]
+    public void Noise_reduction_round_trips()
+    {
+        var state = new CameraState("back-wide", 1, false, "continuous", 0.5, 0, false, 0, 1920, 1080, 30, 8000,
+            NoiseReduction: NoiseReductionModes.Fast, NoiseReductionModes: [NoiseReductionModes.Off, NoiseReductionModes.Fast, NoiseReductionModes.High]);
+        var control = new Control { NoiseReduction = NoiseReductionModes.High };
+
+        var stateBack = Message.Json(MessageType.CameraState, state, ProtocolJson.Default.CameraState).ReadJson(ProtocolJson.Default.CameraState);
+        var stateJson = System.Text.Encoding.UTF8.GetString(Message.Json(MessageType.CameraState, state, ProtocolJson.Default.CameraState).Payload);
+        var controlJson = System.Text.Encoding.UTF8.GetString(Message.Json(MessageType.Control, control, ProtocolJson.Default.Control).Payload);
+
+        Assert.Equal("fast", stateBack.NoiseReduction);
+        Assert.Equal(["off", "fast", "high"], stateBack.NoiseReductionModes!);
+        Assert.Contains("\"noiseReduction\":\"fast\",\"noiseReductionModes\":[\"off\",\"fast\",\"high\"]", stateJson);
+        Assert.Equal("""{"noiseReduction":"high"}""", controlJson);
+    }
+
+    [Fact]
+    public void Noise_reduction_modes_are_bounded()
+    {
+        var baseState = new CameraState("a", 1, false, "auto", 0, 0, false, 0, 1, 1, 30, 1);
+        var tooMany = baseState with { NoiseReductionModes = [.. Enumerable.Repeat(NoiseReductionModes.Off, CameraState.MaxNoiseReductionModes + 1)] };
+        var fits = baseState with { NoiseReductionModes = [.. Enumerable.Repeat(NoiseReductionModes.Off, CameraState.MaxNoiseReductionModes)] };
+        var withNull = JsonMessage(MessageType.CameraState, """{"cameraId":"a","zoom":1,"torch":false,"focusMode":"auto","lensPosition":0,"exposureBias":0,"mirror":false,"rotation":0,"width":1,"height":1,"fps":30,"bitrateKbps":1,"noiseReductionModes":["off",null]}""");
+
+        Assert.Throws<ProtocolException>(() => Message.Json(MessageType.CameraState, tooMany, ProtocolJson.Default.CameraState).ReadJson(ProtocolJson.Default.CameraState));
+        Assert.Throws<ProtocolException>(() => withNull.ReadJson(ProtocolJson.Default.CameraState));
+        Assert.Equal(CameraState.MaxNoiseReductionModes, Message.Json(MessageType.CameraState, fits, ProtocolJson.Default.CameraState)
+            .ReadJson(ProtocolJson.Default.CameraState).NoiseReductionModes!.Length);
     }
 
     [Fact]
