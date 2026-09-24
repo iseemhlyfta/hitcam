@@ -122,7 +122,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             if (_shotsToCamera)
             {
                 foreach (var shot in r.Shots)
+                {
+                    DiagnosticLog.Write(FormattableString.Invariant(
+                        $"shot: hand {shot.HandId} at {shot.Muzzle.X:0.00},{shot.Muzzle.Y:0.00} size {shot.Size:0.00}, frame {r.FrameWidth}x{r.FrameHeight}"));
                     _pipeline.Shot(HitCamShot.From(shot));
+                }
             }
             Dispatcher.UIThread.Post(() => Hands.ShowResult(r));
         };

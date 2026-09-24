@@ -14,6 +14,9 @@ internal static partial class Program
     [STAThread]
     public static int Main(string[] args)
     {
+        DiagnosticLog.Install();
+        DiagnosticLog.Write($"start {typeof(Program).Assembly.GetName().Version} ({Environment.OSVersion}) {string.Join(' ', args)}");
+
         var index = Array.IndexOf(args, "--port");
         if (index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var port))
             PortOverride = port;
@@ -33,7 +36,9 @@ internal static partial class Program
             }
         }
 
-        return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        var code = BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+        DiagnosticLog.Write($"stopped, code {code}");
+        return code;
     }
 
     public static AppBuilder BuildAvaloniaApp() =>

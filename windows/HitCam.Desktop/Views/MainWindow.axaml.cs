@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using Avalonia.Controls;
 using Avalonia.Input;
+using HitCam.Desktop.Services;
 using HitCam.Desktop.ViewModels;
 
 namespace HitCam.Desktop.Views;
@@ -33,6 +34,12 @@ public partial class MainWindow : Window
         {
             WindowState = _stateBeforeFullScreen;
         }
+    }
+
+    protected override void OnClosing(WindowClosingEventArgs e)
+    {
+        DiagnosticLog.Write($"window closing: {e.CloseReason}{(e.IsProgrammatic ? ", programmatic" : "")}");
+        base.OnClosing(e);
     }
 
     protected override void OnKeyDown(KeyEventArgs e)
