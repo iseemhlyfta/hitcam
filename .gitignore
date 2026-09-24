@@ -508,3 +508,11 @@ captures/
 !android/**/src/debug/
 !android/**/src/release/
 !android/**/src/**
+
+# HitCam: vision (Python environment, datasets, weights, exported models)
+vision/.venv/
+vision/data/
+vision/runs/
+vision/output/
+*.pth
+*.onnx

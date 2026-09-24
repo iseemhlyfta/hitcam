@@ -1,0 +1,13 @@
+# Everything for collecting frames, training, evaluation and export (Python 3.11, Windows).
+# torch is NOT listed: install it first from the PyTorch index, otherwise pip picks a CPU-only build:
+#   NVIDIA GPU: pip install torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cu126
+#   no GPU:     pip install torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
+-r requirements-export.txt
+rfdetr[train]==1.11.0
+pytorch_lightning==2.6.6
+torchmetrics==1.8.2
+pycocotools==2.0.11
+supervision==0.30.5
+transformers==5.17.0
+peft==0.21.0
+cv2_enumerate_cameras==1.3.4

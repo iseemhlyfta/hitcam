@@ -1,0 +1,9 @@
+# Minimum for export_default.py and check_onnx.py (CI bundles the default model with these on a CPU-only runner).
+# torch is NOT listed: install it first from the PyTorch index, see README.md
+#   CPU only: pip install torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
+rfdetr==1.11.0
+onnx==1.23.0
+onnxruntime-directml==1.24.4
+opencv-python==5.0.0.93
+pillow==12.3.0
+numpy==2.3.5
