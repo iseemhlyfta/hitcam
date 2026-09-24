@@ -162,6 +162,52 @@ class StreamSessionTest {
     }
 
     @Test
+    fun silentPcFailsTheConnectInsteadOfHangingForever() {
+        useReplyTimeout(300)
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        pc.expect(MessageType.Hello)
+        // Accepted TCP, never answers.
+        waitFor { session.phase.value is Phase.Failed }
+        assertTrue((session.phase.value as Phase.Failed).error is SessionError.ConnectionFailed)
+        pc.close()
+    }
+
+    @Test
+    fun silentPcWhileReconnectingIsRetried() {
+        useReplyTimeout(300)
+        val pc = streamingPc()
+        pc.close()
+        waitFor { session.phase.value is Phase.Reconnecting }
+        val silent = FakePc(server.accept())
+        silent.expect(MessageType.Hello)
+        // No answer: the phone gives up on this socket and tries again.
+        val again = FakePc(server.accept())
+        again.expect(MessageType.Hello)
+        assertTrue(session.phase.value is Phase.Reconnecting)
+        silent.close()
+        again.close()
+    }
+
+    @Test
+    fun unansweredPinClosesButTypingThePinHasNoDeadline() {
+        useReplyTimeout(300)
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        pc.expect(MessageType.Hello)
+        pc.sendJson(MessageType.HelloAck, HelloAck(1, "pairingRequired", "Test PC", "pc-4"))
+        waitFor { session.phase.value is Phase.Pairing }
+        // The user takes longer than the reply timeout to type the PIN.
+        Thread.sleep(900)
+        assertTrue(session.phase.value is Phase.Pairing)
+
+        session.submitPin("123456")
+        pc.expect(MessageType.PairRequest)
+        waitFor { session.phase.value == Phase.Failed(SessionError.ConnectionClosed) }
+        pc.close()
+    }
+
+    @Test
     fun pingIsAnsweredWithTheEchoedTimestamp() {
         session.connect(address)
         val pc = FakePc(server.accept())
@@ -222,6 +268,11 @@ class StreamSessionTest {
         pc.expect(MessageType.Bye)
         waitFor { session.phase.value == Phase.Idle }
         pc.close()
+    }
+
+    private fun useReplyTimeout(ms: Long) {
+        session.close()
+        session = StreamSession(video, environment, reconnectDelayMs = 100, replyTimeoutMs = ms)
     }
 
     private fun streamingPc(): FakePc {

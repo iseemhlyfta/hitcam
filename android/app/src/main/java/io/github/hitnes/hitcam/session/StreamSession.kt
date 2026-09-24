@@ -59,6 +59,8 @@ class StreamSession(
     private val video: VideoSource,
     private val environment: SessionEnvironment,
     private val reconnectDelayMs: Long = 2_000,
+    /** How long to wait for the PC to answer Hello or a PIN before giving up on the connection. */
+    private val replyTimeoutMs: Long = 10_000,
 ) {
     private val queue = Executors.newSingleThreadScheduledExecutor { Thread(it, "hitcam-session") }
 
@@ -82,6 +84,8 @@ class StreamSession(
     // What the PC on the other end said about itself in HelloAck. Anyone can claim any id, so it is never used
     // to look up a token; it becomes trusted only when pairing with that PC succeeds.
     private var claimedServerId: String? = null
+    // Armed while a Hello or PairRequest is waiting for its answer (not while the user types the PIN).
+    private var replyDeadline: ScheduledFuture<*>? = null
     private var timers = mutableListOf<ScheduledFuture<*>>()
     private var reconnect: ScheduledFuture<*>? = null
     private var lastReceived = 0L
@@ -125,7 +129,10 @@ class StreamSession(
     }
 
     fun submitPin(pin: String) = queue.execute {
-        if (_phase.value is Phase.Pairing) connection?.send(MessageType.PairRequest, PairRequest.serializer(), PairRequest(pin))
+        if (_phase.value !is Phase.Pairing) return@execute
+        val connection = connection ?: return@execute
+        connection.send(MessageType.PairRequest, PairRequest.serializer(), PairRequest(pin))
+        expectReply()
     }
 
     fun disconnect() = queue.execute {
@@ -238,11 +245,37 @@ class StreamSession(
             token = token,
         )
         connection?.send(MessageType.Hello, Hello.serializer(), hello)
+        expectReply()
+    }
+
+    /**
+     * The PC must answer within [replyTimeoutMs]; a PC that accepted TCP but hangs would otherwise keep the phone
+     * connecting forever (the liveness check only runs while streaming). Handled like a dropped connection.
+     */
+    private fun expectReply() {
+        replyDeadline?.cancel(false)
+        val id = connectionId
+        replyDeadline = queue.schedule({
+            replyDeadline = null
+            if (connectionId != id) return@schedule
+            val connection = connection ?: return@schedule
+            this.connection = null
+            connection.cancel()
+            // A PIN left unanswered reads as a closed connection; no answer to Hello as a connection error.
+            val error = if (_phase.value is Phase.Pairing) null else java.io.IOException("timeout")
+            handle(FramedConnection.Event.Closed(error))
+        }, replyTimeoutMs, TimeUnit.MILLISECONDS)
+    }
+
+    private fun cancelReplyDeadline() {
+        replyDeadline?.cancel(false)
+        replyDeadline = null
     }
 
     private fun handleMessage(header: MessageHeader, payload: ByteArray) {
         when (header.type) {
             MessageType.HelloAck -> {
+                cancelReplyDeadline()
                 val ack = decode<HelloAck>(payload) ?: return fail(SessionError.ProtocolError)
                 val expected = address?.serverId
                 // The QR code (or an earlier session) named another PC: stop here and send nothing more.
@@ -263,6 +296,7 @@ class StreamSession(
             }
             MessageType.PairResult -> {
                 if (_phase.value !is Phase.Pairing) return
+                cancelReplyDeadline()
                 val result = decode<PairResult>(payload) ?: return
                 val address = address ?: return
                 val token = result.token
@@ -442,6 +476,7 @@ class StreamSession(
         isStreaming = false
         reconnect?.cancel(false)
         reconnect = null
+        cancelReplyDeadline()
         stopTimers()
         video.stop()
         val old = connection
