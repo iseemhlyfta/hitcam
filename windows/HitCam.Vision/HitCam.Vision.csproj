@@ -1,11 +1,14 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!--
-    HitCam Vision: object detection (RF-DETR exported to ONNX) on the preview frames, with tracking. No UI and no
-    dependency on the native camera DLL: frames come in through a callback.
+    HitCam Vision: object detection (RF-DETR exported to ONNX) and hand tracking (MediaPipe Hands) on the preview
+    frames. No UI and no dependency on the native camera DLL: frames come in through a callback.
   -->
   <PropertyGroup>
     <RootNamespace>HitCam.Vision</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="HitCam.Vision.Tests" />
+  </ItemGroup>
   <ItemGroup>
     <!-- ONNX Runtime with the DirectML provider (any DirectX 12 GPU); falls back to its CPU provider. -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" />

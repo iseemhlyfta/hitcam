@@ -239,6 +239,17 @@ python export_default.py --model small
 Работает без видеокарты (так её запускает CI); для этого достаточно `requirements-export.txt` и torch с
 `--index-url https://download.pytorch.org/whl/cpu`.
 
+## Модели рук
+
+Для отслеживания рук HitCam берёт готовые модели MediaPipe Hands из OpenCV Zoo (Apache 2.0), обучать ничего не нужно.
+Скачать их в `output\hands` (там их ищут тесты `HitCam.Vision.Tests`):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File ..\windows\get-hand-models.ps1 -Destination output\hands
+```
+
+Как они работают — в [docs/vision.md](../docs/vision.md#отслеживание-рук).
+
 ## Лицензии
 
 RF-DETR и его веса — Apache 2.0 (Roboflow), значит и дообученные модели можно свободно распространять.

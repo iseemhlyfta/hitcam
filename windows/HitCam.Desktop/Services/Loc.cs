@@ -160,6 +160,23 @@ public static class Loc
         ? $"Анализ: {fps:0} fps · {milliseconds:0} мс · {provider}"
         : $"Analysis: {fps:0} fps · {milliseconds:0} ms · {provider}";
     public static string VisionFailed(string error) => Russian ? $"Модель не загрузилась: {error}" : $"The model did not load: {error}";
+
+    // Hand tracking
+    public static string Hands => Russian ? "Отслеживание рук" : "Hand tracking";
+    public static string HandsHint => Russian
+        ? "Ставит точки на суставы и кончики пальцев, до двух рук. Работает на этом ПК"
+        : "Puts points on the joints and fingertips, up to two hands. Runs on this PC";
+    public static string HandsSkeleton => Russian ? "Соединять точки линиями" : "Connect the points with lines";
+    public static string HandsSkeletonHint => Russian
+        ? "Рисует «скелет» руки: линии вдоль пальцев и по ладони. Видно только здесь, в превью"
+        : "Draws the hand's “skeleton”: lines along the fingers and across the palm. Only shown here, in the preview";
+    public static string HandsNoModels(string folder) => Russian
+        ? $"Модели рук не найдены. Переустановите HitCam или положите их в папку {folder} (см. vision/README.md)"
+        : $"Hand models not found. Reinstall HitCam or put them into {folder} (see vision/README.md)";
+    public static string HandsStarting(string provider) => Russian ? $"Руки: запуск · {provider}" : $"Hands: starting · {provider}";
+    public static string HandsStats(int hands, double fps, double milliseconds, string provider) => Russian
+        ? $"Рук в кадре: {hands} · {fps:0} fps · {milliseconds:0} мс · {provider}"
+        : $"Hands in view: {hands} · {fps:0} fps · {milliseconds:0} ms · {provider}";
     public static string ClassGroupPeople => Russian ? "Люди" : "People";
     public static string ClassGroupVehicles => Russian ? "Транспорт" : "Vehicles";
     public static string ClassGroupStreet => Russian ? "Улица" : "Street";

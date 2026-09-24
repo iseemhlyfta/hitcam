@@ -38,6 +38,8 @@
                     <Image Source="{Binding Preview}" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="MediumQuality" />
                     <!--  Detected objects, mapped through the same letterboxing as the image  -->
                     <views:DetectionOverlay Source="{Binding Preview}" Tracks="{Binding Vision.Tracks}" IsVisible="{Binding ShowDetections}" />
+                    <!--  Tracked hands: dots on the fingers, lines if asked  -->
+                    <views:HandOverlay Source="{Binding Preview}" Hands="{Binding Hands.Hands}" ShowSkeleton="{Binding Hands.ShowSkeleton}" IsVisible="{Binding ShowHands}" />
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" IsVisible="{Binding !HasPreview}">
                         <Path Classes="icon" Width="40" Height="40" StrokeThickness="1.4" Stroke="{StaticResource HcVideoMuted}" Data="{StaticResource IconVideo}" />
                         <TextBlock FontSize="13" Foreground="{StaticResource HcVideoMuted}" Text="{x:Static svc:Loc.WaitingForFrame}" />
@@ -364,6 +366,11 @@
                     <!--  Object analysis (HitCam Vision): boxes over the preview and, if asked, in the camera picture  -->
                     <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
                         <views:VisionPanel DataContext="{Binding Vision}" />
+                    </Border>
+
+                    <!--  Hand tracking: points on the fingers over the preview  -->
+                    <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
+                        <views:HandsPanel DataContext="{Binding Hands}" />
                     </Border>
                     </StackPanel>
                 </ScrollViewer>

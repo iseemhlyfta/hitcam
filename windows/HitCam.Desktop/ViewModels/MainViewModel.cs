@@ -12,6 +12,7 @@ using HitCam.Core.Protocol;
 using HitCam.Core.Server;
 using HitCam.Desktop.Services;
 using HitCam.Vision;
+using HitCam.Vision.Hands;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
 
@@ -30,6 +31,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly VideoPipeline _pipeline = new();
     private readonly VirtualCamera _camera = new();
     private readonly VisionEngine _vision;
+    private readonly HandEngine _hands;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -100,6 +102,22 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         };
         Vision.WhenAnyValue(v => v.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowDetections)));
 
+        // Hand tracking: its own thread and frames, independent of object analysis.
+        _hands = new HandEngine(_pipeline.CopyPreviewTo);
+        Hands = new HandsViewModel(
+            _settings.Hands,
+            () => HandModelFiles.Find() is not null,
+            _ => ApplyHands(),
+            settings =>
+            {
+                _settings = _settings with { Hands = settings };
+                _settings.Save();
+            },
+            AvaloniaScheduler.Instance);
+        _hands.StatusChanged += s => Dispatcher.UIThread.Post(() => Hands.ShowStatus(s));
+        _hands.ResultReady += r => Dispatcher.UIThread.Post(() => Hands.ShowResult(r));
+        Hands.WhenAnyValue(h => h.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowHands)));
+
         _server = new HitCamServer(
             new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
             new FilePairingStore(AppPaths.PairedDevices));
@@ -119,7 +137,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             IsConnected = true;
             _previewTimer!.Start();
             _vision.ResetTracks();
+            _hands.ResetTracks();
             ApplyVision();
+            ApplyHands();
         });
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
@@ -133,6 +153,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             LiveText = "";
             Processing.ClearStats();
             ApplyVision();
+            ApplyHands();
             _cameraOverlay.Clear();
             Interlocked.Exchange(ref _streamSize, 0);
         });
@@ -150,6 +171,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             // Another lens, quality or orientation: tracks from the old picture mean nothing.
             Interlocked.Exchange(ref _streamSize, ((long)c.Width << 32) | (uint)c.Height);
             _vision.ResetTracks();
+            _hands.ResetTracks();
             LiveText = $"LIVE · {Math.Min(c.Width, c.Height)}p · {c.Fps} fps";
         });
         _server.StatusReceived += s => Dispatcher.UIThread.Post(() =>
@@ -205,6 +227,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     /// <summary>Boxes are drawn over the preview: analysis runs and there is a picture.</summary>
     public bool ShowDetections => Vision.IsActive && HasPreview;
+
+    /// <summary>Hand tracking: settings panel, stats and the hands for the preview overlay.</summary>
+    public HandsViewModel Hands { get; }
+
+    /// <summary>Hands are drawn over the preview: tracking runs and there is a picture.</summary>
+    public bool ShowHands => Hands.IsActive && HasPreview;
 
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
@@ -291,6 +319,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             this.RaiseAndSetIfChanged(ref _preview, value);
             this.RaisePropertyChanged(nameof(HasPreview));
             this.RaisePropertyChanged(nameof(ShowDetections));
+            this.RaisePropertyChanged(nameof(ShowHands));
         }
     }
 
@@ -471,6 +500,17 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _cameraOverlay.SetEnabled(active && Vision.BurnIn);
     }
 
+    /// <summary>Tracking runs while it is on, the models are there and a phone is connected; otherwise they are unloaded.</summary>
+    private void ApplyHands()
+    {
+        var active = Hands.IsEnabled && Hands.HasModels && IsConnected;
+        Hands.IsActive = active;
+        if (active)
+            _hands.Start();
+        else
+            _hands.Stop();
+    }
+
     /// <summary>
     /// Height in pixels of the picture the camera sends, for the size of burnt-in labels: the phone's stream in the
     /// preview's orientation, or twice the preview (which is at most 960×540) before the stream is known.
@@ -573,6 +613,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _addressTimer.Stop();
         Processing.SaveNow();
         Vision.SaveNow();
+        Hands.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -588,6 +629,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         await _server.DisposeAsync().ConfigureAwait(false);
         // Analysis reads the decoder's preview: it goes first.
         _vision.Dispose();
+        _hands.Dispose();
         _cameraOverlay.Clear();
         _pipeline.Dispose();
         _cameraOverlay.Dispose();

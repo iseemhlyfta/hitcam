@@ -44,6 +44,15 @@ public sealed partial record AppSettings
 
     private VisionSettings _vision = new();
 
+    /// <summary>Hand tracking; off by default.</summary>
+    public HandSettings Hands
+    {
+        get => _hands;
+        set => _hands = value ?? new HandSettings();
+    }
+
+    private HandSettings _hands = new();
+
     public static AppSettings Load() => Load(AppPaths.Settings);
 
     /// <summary>

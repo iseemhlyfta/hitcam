@@ -120,6 +120,14 @@ Firefox и сайты вроде Google Meet; не видят приложени
 Как это устроено, теория для начинающих и дообучение на своих объектах (Python, папка `vision/`): см.
 [docs/vision.md](docs/vision.md) и [vision/README.md](vision/README.md).
 
+## Отслеживание рук
+
+Раздел **«Отслеживание рук»** ставит точки на суставы и кончики пальцев, до двух рук сразу. Точки держатся на пальцах
+и сглаживаются, чтобы не дрожать; переключатель «Соединять точки линиями» рисует «скелет» руки. Точки видны только
+в превью. Работает на ПК: модели **MediaPipe Hands** (Google, Apache 2.0, в ONNX от OpenCV Zoo) через ONNX Runtime +
+DirectML, около 2 мс на руку на RTX 3070. Модели входят в архив релиза (`models\hands`); `install.ps1` скачивает их
+сам и проверяет SHA-256. Подробнее: [docs/vision.md](docs/vision.md#отслеживание-рук).
+
 ## Разработка
 
 Нужны .NET 10 SDK и Visual Studio с «Разработкой классических приложений на C++» (MSVC, Windows 11 SDK):
@@ -133,6 +141,8 @@ dotnet test HitCam.Vision.Tests
 dotnet run --project HitCam.Desktop
 # во втором терминале — эмулятор телефона (PIN с экрана ПК):
 dotnet run --project HitCam.FakePhone -- 127.0.0.1 47800
+# с настоящим видео по кругу (H.264 Annex B с разделителями кадров, x264 aud=1):
+dotnet run --project HitCam.FakePhone -- 127.0.0.1 47800 --video hands.h264 --size 1280x960
 ```
 
 iOS собирается в GitHub Actions (`.github/workflows/ios.yml`): артефакт `HitCam-unsigned.ipa`.
@@ -152,5 +162,6 @@ Android собирается в GitHub Actions (`.github/workflows/android.yml`,
 MIT — см. [LICENSE](LICENSE).
 
 Сторонние компоненты: Softcam (MIT), DirectShow base classes (MIT), RF-DETR и его веса Nano/Small (Apache 2.0),
+модели MediaPipe Hands из OpenCV Zoo (Apache 2.0),
 ONNX Runtime (MIT), DirectML.dll (Microsoft, распространяется по лицензии Microsoft для DirectML), заголовки NVIDIA
 Video Effects SDK (MIT; сама среда NVIDIA ставится отдельно).

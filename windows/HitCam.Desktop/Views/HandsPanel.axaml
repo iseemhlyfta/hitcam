@@ -1,0 +1,51 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.HandsPanel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:HandsViewModel">
+
+    <UserControl.Resources>
+        <!--  Switches without the Fluent "On/Off" text column, which is 154 px wide  -->
+        <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <Style Selector="ToggleSwitch.bare">
+            <Setter Property="OnContent" Value="{x:Null}" />
+            <Setter Property="OffContent" Value="{x:Null}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </UserControl.Styles>
+
+    <StackPanel Spacing="14">
+        <DockPanel>
+            <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}"
+                          AutomationProperties.Name="{x:Static svc:Loc.Hands}" />
+            <StackPanel Spacing="2">
+                <TextBlock Classes="title" Text="{x:Static svc:Loc.Hands}" />
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.HandsHint}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DockPanel>
+
+        <!--  No models next to the app or in LocalAppData  -->
+        <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModels}">
+            <SelectableTextBlock FontSize="12" Text="{Binding NoModelsText}" TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Spacing="14" IsVisible="{Binding HasModels}">
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsSkeletonHint}">
+                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ShowSkeleton}"
+                              AutomationProperties.Name="{x:Static svc:Loc.HandsSkeleton}" />
+                <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsSkeleton}" TextWrapping="Wrap" />
+            </DockPanel>
+
+            <!--  What runs and how fast; why it does not  -->
+            <StackPanel Spacing="4">
+                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
+                <TextBlock Classes="muted" Foreground="{StaticResource HcLive}" Text="{Binding ErrorText}" TextWrapping="Wrap" IsVisible="{Binding HasError}" />
+            </StackPanel>
+        </StackPanel>
+    </StackPanel>
+</UserControl>

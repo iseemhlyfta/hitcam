@@ -50,10 +50,15 @@ jobs:
           python -m pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --quiet -r requirements-export.txt
           python export_default.py --cpu --out ../out/HitCam/models
+      # Hand tracking models (MediaPipe Hands via OpenCV Zoo, Apache 2.0): downloaded from a fixed commit, SHA-256 checked.
+      - name: Add hand tracking models
+        shell: pwsh
+        run: ./get-hand-models.ps1 -Destination ../out/HitCam/models/hands
       - name: Check vision model
         shell: pwsh
         run: |
-          foreach ($file in "models/rfdetr-nano.onnx", "models/rfdetr-nano.labels.json", "onnxruntime.dll", "DirectML.dll") {
+          foreach ($file in "models/rfdetr-nano.onnx", "models/rfdetr-nano.labels.json", "models/hands/palm_detection_mediapipe_2023feb.onnx",
+                            "models/hands/handpose_estimation_mediapipe_2023feb.onnx", "onnxruntime.dll", "DirectML.dll") {
             if (-not (Test-Path "../out/HitCam/$file")) { throw "$file is missing from the published app" }
           }
       - uses: actions/upload-artifact@v4

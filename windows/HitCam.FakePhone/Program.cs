@@ -1,6 +1,8 @@
 // Development tool: pretends to be the phone app so the PC side can be tested without a phone.
-// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30]
-// Frames are dummy (not decodable) H.264-shaped access units at 30 fps, ~8 Mbit/s.
+// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30] [--video file.h264 --size 1280x720]
+// Frames are dummy (not decodable) H.264-shaped access units at 30 fps, ~8 Mbit/s, or with --video a real H.264
+// Annex B stream played in a loop: each access unit must start with an access unit delimiter (x264: aud=1) and the
+// stream with an IDR frame.
 
 using System.Diagnostics;
 using System.Net.Sockets;
@@ -10,6 +12,8 @@ var host = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "127.0.0.1";
 var port = args.Where(a => !a.StartsWith("--")).Skip(1).Select(int.Parse).FirstOrDefault(ProtocolInfo.DefaultPort);
 var pinArg = Option("--pin");
 var seconds = int.Parse(Option("--seconds") ?? "30");
+var video = Option("--video") is { } videoPath ? SplitAccessUnits(File.ReadAllBytes(videoPath)) : null;
+var size = (Option("--size") ?? "1920x1080").Split('x').Select(int.Parse).ToArray();
 var tokenFile = Path.Combine(Path.GetTempPath(), "hitcam-fakephone.token");
 const string deviceId = "fake-phone-0001";
 
@@ -65,7 +69,7 @@ else if (ack.Status != HelloStatus.Accepted)
     return 1;
 }
 
-await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", 1920, 1080, 30, 8000), ProtocolJson.Default.StreamConfig, Now()));
+await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", size[0], size[1], 30, 8000), ProtocolJson.Default.StreamConfig, Now()));
 await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", 30, 8000, 0), ProtocolJson.Default.Status, Now()));
 
 // Cameras and state like a phone with three back lenses, so the PC's camera settings can be exercised.
@@ -113,11 +117,21 @@ var start = clock.Elapsed;
 var end = start + TimeSpan.FromSeconds(seconds);
 for (var i = 0; clock.Elapsed < end; i++)
 {
-    var keyframe = i % 60 == 0;
-    var payload = new byte[keyframe ? 120_000 : 30_000];
-    random.NextBytes(payload);
-    byte[] prefix = keyframe ? [0, 0, 0, 1, 0x67, 0, 0, 0, 1, 0x68, 0, 0, 0, 1, 0x65] : [0, 0, 0, 1, 0x41];
-    prefix.CopyTo(payload, 0);
+    bool keyframe;
+    byte[] payload;
+    if (video is not null)
+    {
+        payload = video[i % video.Count];
+        keyframe = HasIdr(payload);
+    }
+    else
+    {
+        keyframe = i % 60 == 0;
+        payload = new byte[keyframe ? 120_000 : 30_000];
+        random.NextBytes(payload);
+        byte[] prefix = keyframe ? [0, 0, 0, 1, 0x67, 0, 0, 0, 1, 0x68, 0, 0, 0, 1, 0x65] : [0, 0, 0, 1, 0x41];
+        prefix.CopyTo(payload, 0);
+    }
     await stream.WriteAsync(new Message(new MessageHeader(MessageType.VideoFrame, keyframe ? MessageFlags.Keyframe : MessageFlags.None, payload.Length, Now()), payload));
     // Pace against the clock: Task.Delay alone has ~15 ms granularity on Windows.
     var wait = start + frameInterval * (i + 1) - clock.Elapsed;
@@ -138,6 +152,36 @@ async Task<Message> ReadAsync(MessageType type)
             return message;
         if (message.Type == MessageType.Ping)
             await stream.WriteAsync(Message.Pong(message.Header.Timestamp, Now()));
+    }
+}
+
+// Access units of an Annex B stream, split at the access unit delimiters (NAL type 9).
+static List<byte[]> SplitAccessUnits(byte[] data)
+{
+    var starts = new List<int>();
+    foreach (var (start, type) in NalUnits(data))
+    {
+        if (type == 9)
+            starts.Add(start);
+    }
+    if (starts.Count == 0)
+        throw new InvalidDataException("The video has no access unit delimiters; encode it with x264 aud=1.");
+    starts.Add(data.Length);
+    return [.. starts.Zip(starts.Skip(1), (from, to) => data[from..to])];
+}
+
+static bool HasIdr(byte[] accessUnit) => NalUnits(accessUnit).Any(n => n.Type == 5);
+
+// Start of each NAL unit's start code (00 00 01, or 00 00 00 01) and its type.
+static IEnumerable<(int Start, int Type)> NalUnits(byte[] data)
+{
+    for (var i = 0; i + 3 < data.Length; i++)
+    {
+        if (data[i] != 0 || data[i + 1] != 0 || data[i + 2] != 1)
+            continue;
+        var start = i > 0 && data[i - 1] == 0 ? i - 1 : i;
+        yield return (start, data[i + 3] & 0x1F);
+        i += 2;
     }
 }
 
