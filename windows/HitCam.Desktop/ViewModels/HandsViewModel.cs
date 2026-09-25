@@ -3,6 +3,7 @@ using System.Reactive;
 using System.Reactive.Concurrency;
 using System.Reactive.Linq;
 using System.Reactive.Subjects;
+using Avalonia.Media;
 using HitCam.Desktop.Services;
 using HitCam.Desktop.Views;
 using HitCam.Vision;
@@ -30,6 +31,8 @@ public sealed class HandsViewModel : ReactiveObject
     private string _errorText = "";
     private IReadOnlyList<TrackedHand> _hands = [];
     private IReadOnlyList<FiredShot> _shots = [];
+    private IReadOnlyList<FingerThread> _threads = [];
+    private IReadOnlyList<ThreadFill> _fills = [];
     private bool _isActive;
 
     /// <param name="modelsFound">Whether the hand models are installed; checked now and whenever tracking is switched on.</param>
@@ -66,6 +69,47 @@ public sealed class HandsViewModel : ReactiveObject
 
     /// <summary>Finger-gun shots: in the preview and the camera.</summary>
     public bool ShotsEnabled { get => _settings.Shots; set => Update(_settings with { Shots = value }); }
+
+    /// <summary>Threads between the same fingertips of the two hands, and fills between them.</summary>
+    public bool ThreadsEnabled { get => _settings.Threads; set => Update(_settings with { Threads = value }); }
+
+    /// <summary>Fill colour at the hand further left.</summary>
+    public Color LeftColor
+    {
+        get => Color.Parse(_settings.LeftColor);
+        set => Update(_settings with { LeftColor = ToHex(value) });
+    }
+
+    /// <summary>Fill colour at the other hand.</summary>
+    public Color RightColor
+    {
+        get => Color.Parse(_settings.RightColor);
+        set => Update(_settings with { RightColor = ToHex(value) });
+    }
+
+    /// <summary>Fill opacity, percent.</summary>
+    public double FillOpacity
+    {
+        get => _settings.FillOpacity;
+        set => Update(_settings with { FillOpacity = double.IsFinite(value) ? (int)Math.Round(value) : HandSettings.DefaultFillOpacity });
+    }
+
+    public string FillOpacityText => $"{_settings.FillOpacity}%";
+
+    // What also goes into the "HitCam" camera picture.
+
+    public bool CameraPoints { get => _settings.CameraPoints; set => Update(_settings with { CameraPoints = value }); }
+
+    public bool CameraThreads { get => _settings.CameraThreads; set => Update(_settings with { CameraThreads = value }); }
+
+    public bool CameraFill { get => _settings.CameraFill; set => Update(_settings with { CameraFill = value }); }
+
+    public bool CameraShots { get => _settings.CameraShots; set => Update(_settings with { CameraShots = value }); }
+
+    /// <summary>Threads of the last analysed frame, for the preview.</summary>
+    public IReadOnlyList<FingerThread> Threads { get => _threads; private set => this.RaiseAndSetIfChanged(ref _threads, value); }
+
+    public IReadOnlyList<ThreadFill> Fills { get => _fills; private set => this.RaiseAndSetIfChanged(ref _fills, value); }
 
     /// <summary>Shots still playing in the preview (at most a quarter of a second old).</summary>
     public IReadOnlyList<FiredShot> Shots { get => _shots; private set => this.RaiseAndSetIfChanged(ref _shots, value); }
@@ -155,6 +199,8 @@ public sealed class HandsViewModel : ReactiveObject
         if (!IsActive)
             return;
         Hands = result.Hands;
+        Threads = _settings.Threads ? result.Threads : [];
+        Fills = _settings.Threads ? result.Fills : [];
         if (result.Shots.Count > 0 && _settings.Shots)
         {
             var now = Stopwatch.GetTimestamp();
@@ -167,6 +213,8 @@ public sealed class HandsViewModel : ReactiveObject
     public void ClearResults()
     {
         Hands = [];
+        Threads = [];
+        Fills = [];
         Shots = [];
         StatsText = "";
         ErrorText = "";
@@ -190,9 +238,19 @@ public sealed class HandsViewModel : ReactiveObject
         this.RaisePropertyChanged(nameof(ShowPoints));
         this.RaisePropertyChanged(nameof(ShowSkeleton));
         this.RaisePropertyChanged(nameof(ShotsEnabled));
+        foreach (var name in ThreadProperties)
+            this.RaisePropertyChanged(name);
         this.RaisePropertyChanged(nameof(Settings));
         _apply(_settings);
         _isDirty = true;
         _changed.OnNext(Unit.Default);
     }
+
+    private static string ToHex(Color color) => $"#{color.R:X2}{color.G:X2}{color.B:X2}";
+
+    private static readonly string[] ThreadProperties =
+    [
+        nameof(ThreadsEnabled), nameof(LeftColor), nameof(RightColor), nameof(FillOpacity), nameof(FillOpacityText),
+        nameof(CameraPoints), nameof(CameraThreads), nameof(CameraFill), nameof(CameraShots),
+    ];
 }

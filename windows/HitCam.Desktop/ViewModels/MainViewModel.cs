@@ -33,8 +33,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly VirtualCamera _camera = new();
     private readonly VisionEngine _vision;
     private readonly HandEngine _hands;
-    // Read by the hand tracking thread: shots go to the camera straight from there.
+    // Read by the hand tracking thread: shots and the hand scene go to the camera straight from there.
     private volatile bool _shotsToCamera;
+    // The settings the camera scene is built with while tracking runs; null: nothing for the camera.
+    private volatile HandSettings? _handsToCamera;
+    private bool _handSceneSent;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -120,6 +123,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _hands.StatusChanged += s => Dispatcher.UIThread.Post(() => Hands.ShowStatus(s));
         _hands.ResultReady += r =>
         {
+            SendHandScene(r);
             if (_shotsToCamera)
             {
                 foreach (var shot in r.Shots)
@@ -523,12 +527,29 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _cameraOverlay.SetEnabled(active && Vision.BurnIn);
     }
 
+    /// <summary>
+    /// The hand scene (points, threads, fills) for the camera picture, on the tracking thread. An empty scene is sent
+    /// once, so switching elements off clears them; while there is nothing to draw, nothing more is sent.
+    /// </summary>
+    private void SendHandScene(HandResult result)
+    {
+        var settings = _handsToCamera;
+        var scene = settings is null ? HandCameraScene.Empty : HandCameraScene.Build(result, settings);
+        if (scene.IsEmpty && !_handSceneSent)
+            return;
+        _pipeline.SetHandScene(scene);
+        _handSceneSent = !scene.IsEmpty;
+    }
+
     /// <summary>Tracking runs while it is on, the models are there and a phone is connected; otherwise they are unloaded.</summary>
     private void ApplyHands()
     {
         var active = Hands.IsEnabled && Hands.HasModels && IsConnected;
         Hands.IsActive = active;
-        _shotsToCamera = active && Hands.ShotsEnabled;
+        _shotsToCamera = active && Hands.ShotsEnabled && Hands.CameraShots;
+        _handsToCamera = active ? Hands.Settings : null;
+        if (!active)
+            _pipeline.SetHandScene(HandCameraScene.Empty);
         if (active)
             _hands.Start();
         else

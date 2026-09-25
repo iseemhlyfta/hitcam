@@ -18,6 +18,8 @@
     <PackageReference Include="Avalonia" />
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Avalonia.Themes.Fluent" />
+    <!-- The colour pickers of the thread fill. -->
+    <PackageReference Include="Avalonia.Controls.ColorPicker" />
     <PackageReference Include="ReactiveUI.Avalonia" />
     <PackageReference Include="QRCoder" />
     <!-- Already there through Avalonia; used directly to draw labels into the camera picture. -->

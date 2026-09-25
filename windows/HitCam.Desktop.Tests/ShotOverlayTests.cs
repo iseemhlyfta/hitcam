@@ -21,7 +21,7 @@ public sealed class HeadlessApp : Application
 
 public sealed class ShotOverlayTests
 {
-    private static readonly Lazy<HeadlessUnitTestSession> Session = new(() => HeadlessUnitTestSession.StartNew(typeof(HeadlessApp)));
+    internal static readonly Lazy<HeadlessUnitTestSession> Session = new(() => HeadlessUnitTestSession.StartNew(typeof(HeadlessApp)));
 
     /// <summary>Renders frames until <paramref name="until"/>, as the app would, on the headless UI thread.</summary>
     private static void RunFrames(Func<bool> until, TimeSpan timeout)

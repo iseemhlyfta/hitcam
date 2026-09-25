@@ -61,6 +61,11 @@ internal static class NativeMethods
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool HitCam_InstallCrashLog(string path);
 
+    /// <summary>Points, threads and fills for the hands in the camera picture; the DLL copies them. All 0 clears.</summary>
+    [DllImport(Library)]
+    public static extern unsafe void HitCam_BridgeSetHandScene(IntPtr handle, HitCamSceneDot* dots, int dotCount,
+        HitCamSceneLine* lines, int lineCount, HitCamSceneQuad* quads, int quadCount);
+
     /// <summary>Plays a finger-gun shot in the camera picture for about 0.2 s from now; the DLL copies it.</summary>
     [DllImport(Library)]
     public static extern void HitCam_BridgeShot(IntPtr handle, in HitCamShot shot);

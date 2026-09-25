@@ -178,6 +178,21 @@ public static class Loc
     public static string HandsPointsHint => Russian
         ? "Без точек руки всё равно отслеживаются, и выстрел работает"
         : "Without the points the hands are still tracked, and shots still work";
+    public static string HandsThreads => Russian ? "Нити между пальцами" : "Threads between fingers";
+    public static string HandsThreadsHint => Russian
+        ? "Коснитесь кончиками одинаковых пальцев двух рук — между ними натянется нить. Нить рвётся, если согнуть палец. Между соседними нитями — цветная заливка"
+        : "Touch the same fingertips of both hands and a thread stretches between them. Folding the finger breaks it. Neighbouring threads get a colour fill between them";
+    public static string HandsLeftColor => Russian ? "Цвет у левой руки" : "Colour at the left hand";
+    public static string HandsRightColor => Russian ? "Цвет у правой руки" : "Colour at the right hand";
+    public static string HandsFillOpacity => Russian ? "Непрозрачность заливки" : "Fill opacity";
+    public static string HandsCamera => Russian ? "Показывать в камере «HitCam»" : "Show in the “HitCam” camera";
+    public static string HandsCameraHint => Russian
+        ? "Что увидят в Zoom, Discord, OBS. В превью всё показывается всегда"
+        : "What Zoom, Discord, OBS see. The preview always shows everything";
+    public static string HandsCameraPoints => Russian ? "Точки на пальцах" : "Points on the fingers";
+    public static string HandsCameraThreads => Russian ? "Нити" : "Threads";
+    public static string HandsCameraFill => Russian ? "Заливка" : "Fill";
+    public static string HandsCameraShots => Russian ? "Выстрел" : "Shot";
     public static string HandsNoModels(string folder) => Russian
         ? $"Модели рук не найдены. Переустановите HitCam или положите их в папку {folder} (см. vision/README.md)"
         : $"Hand models not found. Reinstall HitCam or put them into {folder} (see vision/README.md)";

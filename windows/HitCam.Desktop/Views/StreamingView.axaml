@@ -41,6 +41,10 @@
                     <!--  Detected objects, mapped through the same letterboxing as the image  -->
                     <views:DetectionOverlay Source="{Binding Preview}" Tracks="{Binding Vision.Tracks}" IsVisible="{Binding ShowDetections}" />
                     <!--  Tracked hands: dots on the fingers, lines if asked  -->
+                    <!--  Threads between fingertips of the two hands and the fills between them  -->
+                    <views:ThreadOverlay Source="{Binding Preview}" Threads="{Binding Hands.Threads}" Fills="{Binding Hands.Fills}"
+                                         LeftColor="{Binding Hands.LeftColor}" RightColor="{Binding Hands.RightColor}" FillOpacity="{Binding Hands.FillOpacity}"
+                                         IsVisible="{Binding ShowHands}" />
                     <views:HandOverlay Source="{Binding Preview}" Hands="{Binding Hands.Hands}" ShowSkeleton="{Binding Hands.ShowSkeleton}" IsVisible="{Binding ShowHandPoints}" />
                     <!--  Finger-gun shots: flash here, kick on the whole panel  -->
                     <views:ShotOverlay Source="{Binding Preview}" Shots="{Binding Hands.Shots}" ShakeTarget="{Binding #PreviewContent}" IsVisible="{Binding ShowHands}" />

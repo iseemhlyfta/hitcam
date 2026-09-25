@@ -23,6 +23,7 @@ public sealed class VideoPipeline : IDisposable
     private volatile string? _error;
     private volatile bool _overlayUnsupported;
     private volatile bool _shotUnsupported;
+    private volatile bool _sceneUnsupported;
     private readonly bool _previewOnly;
 
     /// <param name="previewOnly">
@@ -187,6 +188,34 @@ public sealed class VideoPipeline : IDisposable
             catch (EntryPointNotFoundException)
             {
                 _shotUnsupported = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Points, threads and fills for the hands in the camera picture (never the preview); an empty scene clears them.
+    /// Any thread. Does nothing before the decoder exists or with a DLL that predates hand scenes.
+    /// </summary>
+    public unsafe void SetHandScene(HandCameraScene scene)
+    {
+        if (_sceneUnsupported)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                fixed (HitCamSceneDot* dots = scene.Dots)
+                fixed (HitCamSceneLine* lines = scene.Lines)
+                fixed (HitCamSceneQuad* quads = scene.Quads)
+                {
+                    NativeMethods.HitCam_BridgeSetHandScene(_bridge, dots, scene.Dots.Length, lines, scene.Lines.Length, quads, scene.Quads.Length);
+                }
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _sceneUnsupported = true;
             }
         }
     }

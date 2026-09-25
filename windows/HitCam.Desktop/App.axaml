@@ -85,6 +85,7 @@
                 <ColorPaletteResources x:Key="Dark" Accent="#B69CFF" />
             </FluentTheme.Palettes>
         </FluentTheme>
+        <StyleInclude Source="avares://Avalonia.Controls.ColorPicker/Themes/Fluent/Fluent.xaml" />
         <StyleInclude Source="/Styles.axaml" />
     </Application.Styles>
 </Application>

@@ -56,6 +56,47 @@
                 <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.HandsShotsHint}" TextWrapping="Wrap" />
             </StackPanel>
 
+            <!--  Threads between the same fingertips of both hands, and the fills between them  -->
+            <StackPanel Spacing="10">
+                <DockPanel ToolTip.Tip="{x:Static svc:Loc.HandsThreadsHint}">
+                    <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ThreadsEnabled}"
+                                  AutomationProperties.Name="{x:Static svc:Loc.HandsThreads}" />
+                    <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.HandsThreads}" TextWrapping="Wrap" />
+                </DockPanel>
+                <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.HandsThreadsHint}" TextWrapping="Wrap" />
+                <StackPanel Spacing="10" IsEnabled="{Binding ThreadsEnabled}">
+                    <DockPanel>
+                        <ColorPicker DockPanel.Dock="Right" Color="{Binding LeftColor}" IsAlphaVisible="False"
+                                     AutomationProperties.Name="{x:Static svc:Loc.HandsLeftColor}" />
+                        <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.HandsLeftColor}" />
+                    </DockPanel>
+                    <DockPanel>
+                        <ColorPicker DockPanel.Dock="Right" Color="{Binding RightColor}" IsAlphaVisible="False"
+                                     AutomationProperties.Name="{x:Static svc:Loc.HandsRightColor}" />
+                        <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.HandsRightColor}" />
+                    </DockPanel>
+                    <StackPanel>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding FillOpacityText}" />
+                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.HandsFillOpacity}" />
+                        </DockPanel>
+                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                Value="{Binding FillOpacity}" AutomationProperties.Name="{x:Static svc:Loc.HandsFillOpacity}" />
+                    </StackPanel>
+                </StackPanel>
+            </StackPanel>
+
+            <!--  What also goes into the camera picture  -->
+            <StackPanel Spacing="6">
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.HandsCamera}" ToolTip.Tip="{x:Static svc:Loc.HandsCameraHint}" />
+                <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto">
+                    <CheckBox Content="{x:Static svc:Loc.HandsCameraPoints}" IsChecked="{Binding CameraPoints}" />
+                    <CheckBox Grid.Column="1" Content="{x:Static svc:Loc.HandsCameraThreads}" IsChecked="{Binding CameraThreads}" />
+                    <CheckBox Grid.Row="1" Content="{x:Static svc:Loc.HandsCameraFill}" IsChecked="{Binding CameraFill}" />
+                    <CheckBox Grid.Row="1" Grid.Column="1" Content="{x:Static svc:Loc.HandsCameraShots}" IsChecked="{Binding CameraShots}" />
+                </Grid>
+            </StackPanel>
+
             <!--  What runs and how fast; why it does not  -->
             <StackPanel Spacing="4">
                 <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
