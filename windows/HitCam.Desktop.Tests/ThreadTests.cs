@@ -92,10 +92,25 @@ public sealed class ThreadTests
         Assert.Equal(0.7f, quad.ToX, 1e-6f);
         Assert.Equal(0.47f, quad.ToY, 1e-6f);
 
-        // Each thread: a glow and a white core; no points by default.
-        Assert.Equal(4, scene.Lines.Length);
+        // Two threads and the two lines joining their tips on each hand, each as a glow and a white core; no points.
+        Assert.Equal(8, scene.Lines.Length);
         Assert.All(scene.Lines, l => Assert.Equal(0xFFFFFFu, l.Rgb));
         Assert.Empty(scene.Dots);
+    }
+
+    [Fact]
+    public void Neighbouring_threads_are_framed_on_both_hands()
+    {
+        var ring = new FingerThread(3, new PointF(0.3f, 0.6f), new PointF(0.7f, 0.62f));
+        var lines = HandStyle.ThreadLines([Index, Middle, ring], [new ThreadFill(1, 2), new ThreadFill(2, 3)]);
+
+        Assert.Equal(3 + 2 * 2, lines.Count);
+        Assert.Contains((Index.Left, Middle.Left), lines);
+        Assert.Contains((Index.Right, Middle.Right), lines);
+        Assert.Contains((Middle.Left, ring.Left), lines);
+        Assert.Contains((Middle.Right, ring.Right), lines);
+        // A single thread has nothing to frame.
+        Assert.Single(HandStyle.ThreadLines([Index], []));
     }
 
     [Fact]

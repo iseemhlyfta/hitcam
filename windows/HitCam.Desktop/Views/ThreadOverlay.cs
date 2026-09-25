@@ -132,10 +132,11 @@ public sealed class ThreadOverlay : Control
                 Math.Max(1.5, HandStyle.ThreadGlowWidth * picture.Height), lineCap: PenLineCap.Round);
             var core = new ImmutablePen(Brushes.White.ToImmutable(), Math.Max(1, HandStyle.ThreadWidth * picture.Height),
                 lineCap: PenLineCap.Round);
-            foreach (var t in threads)
-                context.DrawLine(glow, Map(t.Left), Map(t.Right));
-            foreach (var t in threads)
-                context.DrawLine(core, Map(t.Left), Map(t.Right));
+            var threadLines = HandStyle.ThreadLines(threads, Fills ?? []);
+            foreach (var (a, b) in threadLines)
+                context.DrawLine(glow, Map(a), Map(b));
+            foreach (var (a, b) in threadLines)
+                context.DrawLine(core, Map(a), Map(b));
         }
     }
 }

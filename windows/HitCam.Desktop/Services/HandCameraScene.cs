@@ -92,6 +92,24 @@ public static class HandStyle
     public static PointF[] FillCorners(FingerThread first, FingerThread second) => [first.Left, first.Right, second.Right, second.Left];
 
     /// <summary>
+    /// The white lines: every thread, and for neighbouring threads (those with a fill between them) the lines joining
+    /// their tips on each hand, so each pair of threads is framed as a four-sided shape.
+    /// </summary>
+    public static IReadOnlyList<(PointF From, PointF To)> ThreadLines(IReadOnlyList<FingerThread> threads, IReadOnlyList<ThreadFill> fills)
+    {
+        var lines = threads.Select(t => (t.Left, t.Right)).ToList();
+        var byFinger = threads.ToDictionary(t => t.Finger);
+        foreach (var fill in fills)
+        {
+            if (!byFinger.TryGetValue(fill.First, out var a) || !byFinger.TryGetValue(fill.Second, out var b))
+                continue;
+            lines.Add((a.Left, b.Left));
+            lines.Add((a.Right, b.Right));
+        }
+        return lines;
+    }
+
+    /// <summary>
     /// The fill between two threads as a ribbon with two sides: one piece, or two when the threads cross (the ribbon
     /// is twisted: the part left of the crossing shows one side, the part right of it the other). Each piece has four
     /// corners (a triangle repeats its crossing point) and <see cref="FillPiece.Side"/> 0 or 1, from the direction its
@@ -238,10 +256,11 @@ public sealed record HandCameraScene(HitCamSceneDot[] Dots, HitCamSceneLine[] Li
 
         if (settings.CameraThreads)
         {
-            foreach (var t in threads)
-                lines.Add(Line(t.Left, t.Right, HandStyle.ThreadGlowWidth, HandStyle.Thread, HandStyle.ThreadGlowAlpha));
-            foreach (var t in threads)
-                lines.Add(Line(t.Left, t.Right, HandStyle.ThreadWidth, HandStyle.Thread, 1));
+            var threadLines = HandStyle.ThreadLines(threads, result.Fills);
+            foreach (var (a, b) in threadLines)
+                lines.Add(Line(a, b, HandStyle.ThreadGlowWidth, HandStyle.Thread, HandStyle.ThreadGlowAlpha));
+            foreach (var (a, b) in threadLines)
+                lines.Add(Line(a, b, HandStyle.ThreadWidth, HandStyle.Thread, 1));
         }
 
         if (settings.CameraPoints)
