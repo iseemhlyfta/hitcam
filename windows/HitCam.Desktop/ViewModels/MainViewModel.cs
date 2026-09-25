@@ -78,7 +78,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         // Applied to the pipeline right away, so the first decoder already starts with the saved settings.
         Processing = new ProcessingViewModel(
             _settings.Processing,
-            settings => _pipeline.SetProcessing(settings),
+            settings => ApplyProcessing(settings),
             settings =>
             {
                 _settings = _settings with { Processing = settings };
@@ -213,10 +213,6 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         CancelPairingCommand = ReactiveCommand.Create(() => _server.Kick());
         InstallCameraCommand = ReactiveCommand.CreateFromTask(InstallCameraAsync);
         ToggleFullScreenCommand = ReactiveCommand.Create(() => { IsFullScreen = !IsFullScreen; });
-        // One button switches every experimental feature off; it is disabled while all of them already are.
-        DisableExperimentsCommand = ReactiveCommand.Create(DisableExperiments,
-            this.WhenAnyValue(m => m.Vision.IsEnabled, m => m.Hands.IsEnabled, m => m.Processing.SelectedArtifactReduction,
-                (vision, hands, artifacts) => vision || hands || artifacts.Level > 0));
 
         // An unobserved command error would crash the app; show it where the user clicked instead.
         DisconnectCommand.ThrownExceptions.Subscribe(ex => StatusText = Loc.ActionFailed(ex.Message));
@@ -247,14 +243,32 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public ReactiveCommand<Unit, Unit> ToggleFullScreenCommand { get; }
 
-    /// <summary>Switches object analysis, hand tracking and NVIDIA artifact removal off.</summary>
-    public ReactiveCommand<Unit, Unit> DisableExperimentsCommand { get; }
-
-    public void DisableExperiments()
+    /// <summary>
+    /// Master switch of the experimental features: NVIDIA noise removal, object analysis, hands. Off, none of them
+    /// runs; their own switches keep their positions, so switching back on restores what was on. Saved.
+    /// </summary>
+    public bool ExperimentsEnabled
     {
-        Vision.IsEnabled = false;
-        Hands.IsEnabled = false;
-        Processing.SelectedArtifactReduction = Processing.ArtifactReductionOptions[0];
+        get => _settings.Experiments;
+        set
+        {
+            if (value == _settings.Experiments)
+                return;
+            _settings = _settings with { Experiments = value };
+            _settings.Save();
+            this.RaisePropertyChanged();
+            ApplyProcessing(Processing.EffectiveNative());
+            ApplyVision();
+            ApplyHands();
+        }
+    }
+
+    /// <summary>Picture processing for the decoder; NVIDIA artifact removal only while the experiments are on.</summary>
+    private void ApplyProcessing(HitCamProcessing settings)
+    {
+        if (!_settings.Experiments)
+            settings.ArtifactReduction = ProcessingSettings.ArtifactReductionOff;
+        _pipeline.SetProcessing(settings);
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
@@ -531,7 +545,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private void ApplyVision()
     {
         var model = Vision.SelectedModel?.Model;
-        var active = Vision.IsEnabled && IsConnected && model is not null;
+        var active = ExperimentsEnabled && Vision.IsEnabled && IsConnected && model is not null;
         if (model is not null)
             _vision.Options = Vision.Settings.ToOptions(model);
         Vision.IsActive = active;
@@ -559,7 +573,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     /// <summary>Tracking runs while it is on, the models are there and a phone is connected; otherwise they are unloaded.</summary>
     private void ApplyHands()
     {
-        var active = Hands.IsEnabled && Hands.HasModels && IsConnected;
+        var active = ExperimentsEnabled && Hands.IsEnabled && Hands.HasModels && IsConnected;
         Hands.IsActive = active;
         _shotsToCamera = active && Hands.ShotsEnabled && Hands.CameraShots;
         _handsToCamera = active ? Hands.Settings : null;

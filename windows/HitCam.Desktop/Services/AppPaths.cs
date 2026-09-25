@@ -35,6 +35,12 @@ public sealed partial record AppSettings
 
     private ProcessingSettings _processing = new();
 
+    /// <summary>
+    /// The master switch of the experimental features (NVIDIA noise removal, object analysis, hands). Off: none of
+    /// them runs, but their own settings are kept, so switching back on restores what was on.
+    /// </summary>
+    public bool Experiments { get; set; } = true;
+
     /// <summary>Object analysis; off by default.</summary>
     public VisionSettings Vision
     {

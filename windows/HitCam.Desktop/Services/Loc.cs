@@ -129,13 +129,12 @@ public static class Loc
     public static string TabCamera => Russian ? "Камера" : "Camera";
     public static string TabExperiments => Russian ? "Эксперименты" : "Experiments";
     public static string ExperimentsTitle => Russian ? "Экспериментальные функции" : "Experimental features";
-    public static string ExperimentsDisableAll => Russian ? "Выключить все экспериментальные функции" : "Switch all experimental features off";
-    public static string ExperimentsDisableAllHint => Russian
-        ? "Выключает удаление артефактов NVIDIA, анализ объектов и отслеживание рук; их настройки сохраняются"
-        : "Switches NVIDIA artifact removal, object analysis and hand tracking off; their settings are kept";
+    public static string ExperimentsSwitchHint => Russian
+        ? "Включает и выключает все экспериментальные функции сразу; при включении работает то, что было включено"
+        : "Switches all experimental features on and off at once; switched on, what was on runs again";
     public static string ExperimentsHint => Russian
-        ? "Нейросети на этом ПК: шумодав NVIDIA, анализ объектов и рук, жесты. Всё ещё в разработке и может работать нестабильно"
-        : "Neural networks on this PC: NVIDIA noise removal, object and hand analysis, gestures. Still in development and may be unstable";
+        ? "Нейросети на этом ПК: шумодав NVIDIA, анализ объектов и рук, жесты. Всё ещё в разработке и может работать нестабильно. Переключатель рядом с названием вкладки включает и выключает их все"
+        : "Neural networks on this PC: NVIDIA noise removal, object and hand analysis, gestures. Still in development and may be unstable. The switch next to the tab's name turns them all on and off";
     public static string ArtifactReductionTitle => Russian ? "Шумодав NVIDIA" : "NVIDIA noise removal";
 
     // Object analysis (HitCam Vision)

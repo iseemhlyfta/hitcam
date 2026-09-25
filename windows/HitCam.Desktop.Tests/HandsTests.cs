@@ -49,6 +49,15 @@ public sealed class HandsTests : IDisposable
     }
 
     [Fact]
+    public void Experiments_are_on_by_default_and_the_switch_is_saved()
+    {
+        Assert.True(AppSettings.Parse("""{"serverId":"a"}"""u8)!.Experiments);
+        var path = Path.Combine(_directory, "settings.json");
+        (AppSettings.Load(path) with { Experiments = false }).Save(path);
+        Assert.False(AppSettings.Load(path).Experiments);
+    }
+
+    [Fact]
     public void Hand_settings_survive_a_save_and_load()
     {
         var path = Path.Combine(_directory, "settings.json");

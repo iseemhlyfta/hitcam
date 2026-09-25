@@ -354,7 +354,19 @@
                   </TabItem>
 
                   <!--  AI on this PC: object analysis and hands. Experimental  -->
-                  <TabItem Header="{x:Static svc:Loc.TabExperiments}">
+                  <TabItem>
+                    <TabItem.Resources>
+                        <!--  A switch without the Fluent "On/Off" text column, which is 154 px wide  -->
+                        <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+                    </TabItem.Resources>
+                    <!--  The master switch of all experimental features, right in the tab's header  -->
+                    <TabItem.Header>
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <TextBlock VerticalAlignment="Center" Text="{x:Static svc:Loc.TabExperiments}" />
+                            <ToggleSwitch VerticalAlignment="Center" MinWidth="0" OnContent="{x:Null}" OffContent="{x:Null}" IsChecked="{Binding ExperimentsEnabled}"
+                                          ToolTip.Tip="{x:Static svc:Loc.ExperimentsSwitchHint}" AutomationProperties.Name="{x:Static svc:Loc.ExperimentsTitle}" />
+                        </StackPanel>
+                    </TabItem.Header>
                 <ScrollViewer>
                     <StackPanel>
                         <Border Margin="20,14,20,16" Padding="12" CornerRadius="10" Classes="softAccent">
@@ -363,11 +375,11 @@
                                     <TextBlock Classes="strong" Text="{x:Static svc:Loc.ExperimentsTitle}" />
                                     <TextBlock Classes="muted" Text="{x:Static svc:Loc.ExperimentsHint}" TextWrapping="Wrap" />
                                 </StackPanel>
-                                <Button HorizontalAlignment="Stretch" Height="34" Classes="secondary" Command="{Binding DisableExperimentsCommand}"
-                                        Content="{x:Static svc:Loc.ExperimentsDisableAll}" ToolTip.Tip="{x:Static svc:Loc.ExperimentsDisableAllHint}" />
                             </StackPanel>
                         </Border>
 
+                        <!--  Everything below is greyed out while the master switch is off  -->
+                        <StackPanel IsEnabled="{Binding ExperimentsEnabled}">
                         <!--  NVIDIA artifact removal (RTX): a neural network on the GPU; shown only when its runtime is installed  -->
                         <StackPanel Margin="20,0,20,16" Spacing="8" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel"
                                     IsVisible="{Binding IsArtifactReductionAvailable}">
@@ -396,6 +408,7 @@
                         <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
                             <views:HandsPanel DataContext="{Binding Hands}" />
                         </Border>
+                        </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
                   </TabItem>
