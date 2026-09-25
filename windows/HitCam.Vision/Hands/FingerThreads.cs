@@ -17,17 +17,23 @@ public sealed record FingerThreadOptions
     /// <summary>Tips closer than this (in hand sizes: wrist to the middle finger's base) touch.</summary>
     public float TouchDistance { get; init; } = 0.3f;
 
-    /// <summary>Frames in a row the tips must touch before a thread appears (a passing hand does not tie one).</summary>
+    /// <summary>
+    /// After a touch, the tips must move at least this far apart (in hand sizes) before the next touch counts: holding
+    /// them together does not tie and untie over and over.
+    /// </summary>
+    public float ReleaseDistance { get; init; } = 0.6f;
+
+    /// <summary>Frames in a row the tips must touch for it to count (a passing hand does not tie one).</summary>
     public int TouchFrames { get; init; } = 2;
 
-    /// <summary>A finger folded this much (straightness below it) breaks its thread.</summary>
-    public float BreakStraightness { get; init; } = 0.6f;
+    /// <summary>Fingers folded this much (straightness below it) do not tie or untie: a fist bump is not a touch.</summary>
+    public float TouchStraightness { get; init; } = 0.6f;
 }
 
 /// <summary>
-/// Ties threads between the same fingertips of two hands when they touch; a thread then stretches between the tips
-/// as the hands move apart, and breaks when its finger folds or either hand is lost. Fills go between neighbouring
-/// threads (in finger order). Not thread-safe.
+/// Threads between the same fingertips of two hands, switched by touching: touching tips tie a thread, which then
+/// stretches between them however the hands move (folding the finger or losing a hand for a while does not break
+/// it); touching again unties it. Fills go between neighbouring threads (in finger order). Not thread-safe.
 /// </summary>
 public sealed class FingerThreads(FingerThreadOptions? options = null)
 {
@@ -36,38 +42,36 @@ public sealed class FingerThreads(FingerThreadOptions? options = null)
     private readonly FingerThreadOptions _options = options ?? new FingerThreadOptions();
     private readonly bool[] _tied = new bool[5];
     private readonly int[] _touching = new int[5];
-    private (int A, int B)? _pair;
+    // The tips were apart since the last touch: the next touch counts.
+    private readonly bool[] _apart = [true, true, true, true, true];
 
+    /// <summary>Unties everything (another camera or picture).</summary>
     public void Reset()
     {
         Array.Clear(_tied);
         Array.Clear(_touching);
-        _pair = null;
+        Array.Fill(_apart, true);
     }
 
+    /// <summary>Fingers with a thread, 0 the thumb … 4 the little finger.</summary>
+    public IEnumerable<int> Tied => Enumerable.Range(0, 5).Where(f => _tied[f]);
+
     /// <summary>
-    /// This frame's threads and fills. <paramref name="width"/> and <paramref name="height"/>: the frame size, to
-    /// measure in square pixels.
+    /// This frame's threads and fills; none while there are not two hands (the threads come back with them).
+    /// <paramref name="width"/> and <paramref name="height"/>: the frame size, to measure in square pixels.
     /// </summary>
     public (IReadOnlyList<FingerThread> Threads, IReadOnlyList<ThreadFill> Fills) Update(IReadOnlyList<TrackedHand> hands, int width, int height)
     {
-        var two = hands.Where(h => h.Points.Count >= HandLandmarker.PointCount).Take(3).ToList();
+        var two = hands.Where(h => h.Points.Count >= HandLandmarker.PointCount).ToList();
         if (two.Count != 2)
         {
-            Reset();
+            Array.Clear(_touching);
             return ([], []);
-        }
-        // Another pair of hands than before (one was lost and found again): old threads are gone.
-        var ids = (Math.Min(two[0].Id, two[1].Id), Math.Max(two[0].Id, two[1].Id));
-        if (_pair != ids)
-        {
-            Reset();
-            _pair = ids;
         }
 
         var left = Pixels(two[0], width, height);
         var right = Pixels(two[1], width, height);
-        // The hand whose wrist is further left gets the "left" colour.
+        // The hand whose wrist is further left is "left": its tip is the thread's left end, its side gets that colour.
         if (left[0].X > right[0].X)
             (left, right) = (right, left);
         var size = (PoseClassifier.HandSize(left) + PoseClassifier.HandSize(right)) / 2;
@@ -76,18 +80,15 @@ public sealed class FingerThreads(FingerThreadOptions? options = null)
         for (var finger = 0; finger < 5; finger++)
         {
             var tip = Tips[finger];
-            if (_tied[finger] && (IsFolded(left, finger) || IsFolded(right, finger)))
+            var distance = size > 0 ? PoseClassifier.Distance(left[tip], right[tip]) / size : float.MaxValue;
+            if (distance > _options.ReleaseDistance)
+                _apart[finger] = true;
+            var touching = distance < _options.TouchDistance && !IsFolded(left, finger) && !IsFolded(right, finger);
+            _touching[finger] = touching ? _touching[finger] + 1 : 0;
+            if (_apart[finger] && _touching[finger] >= _options.TouchFrames)
             {
-                _tied[finger] = false;
-                _touching[finger] = 0;
-            }
-            if (!_tied[finger])
-            {
-                var touching = size > 0 && PoseClassifier.Distance(left[tip], right[tip]) < _options.TouchDistance * size
-                               && !IsFolded(left, finger) && !IsFolded(right, finger);
-                _touching[finger] = touching ? _touching[finger] + 1 : 0;
-                if (_touching[finger] >= _options.TouchFrames)
-                    _tied[finger] = true;
+                _tied[finger] = !_tied[finger];
+                _apart[finger] = false;
             }
             if (_tied[finger])
             {
@@ -107,7 +108,7 @@ public sealed class FingerThreads(FingerThreadOptions? options = null)
     {
         var b = finger * 4 + 1;   // base of the finger: 1, 5, 9, 13, 17
         var length = PoseClassifier.Distance(p[b], p[b + 1]) + PoseClassifier.Distance(p[b + 1], p[b + 2]) + PoseClassifier.Distance(p[b + 2], p[b + 3]);
-        return length <= 0 || PoseClassifier.Distance(p[b], p[b + 3]) / length < _options.BreakStraightness;
+        return length <= 0 || PoseClassifier.Distance(p[b], p[b + 3]) / length < _options.TouchStraightness;
     }
 
     private static PointF[] Pixels(TrackedHand hand, int width, int height) =>

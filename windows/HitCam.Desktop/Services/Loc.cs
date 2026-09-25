@@ -180,10 +180,13 @@ public static class Loc
         : "Without the points the hands are still tracked, and shots still work";
     public static string HandsThreads => Russian ? "Нити между пальцами" : "Threads between fingers";
     public static string HandsThreadsHint => Russian
-        ? "Коснитесь кончиками одинаковых пальцев двух рук — между ними натянется нить. Нить рвётся, если согнуть палец. Между соседними нитями — цветная заливка"
-        : "Touch the same fingertips of both hands and a thread stretches between them. Folding the finger breaks it. Neighbouring threads get a colour fill between them";
+        ? "Коснитесь кончиками одинаковых пальцев двух рук — между ними натянется нить; коснитесь снова — она исчезнет. Между соседними нитями — заливка: у каждой свои цвета, а перевёрнутая показывает обратную сторону другого цвета"
+        : "Touch the same fingertips of both hands and a thread stretches between them; touch again and it goes. Neighbouring threads get a fill: each its own colours, and turned over it shows its other side in another colour";
     public static string HandsLeftColor => Russian ? "Цвет у левой руки" : "Colour at the left hand";
     public static string HandsRightColor => Russian ? "Цвет у правой руки" : "Colour at the right hand";
+    public static string HandsColorsHint => Russian
+        ? "Цвета первой заливки. Остальные заливки и их обратные стороны — те же цвета с оттенком, повёрнутым по кругу"
+        : "Colours of the first fill. The other fills and their back sides use the same colours with the hue turned round the wheel";
     public static string HandsFillOpacity => Russian ? "Непрозрачность заливки" : "Fill opacity";
     public static string HandsCamera => Russian ? "Показывать в камере «HitCam»" : "Show in the “HitCam” camera";
     public static string HandsCameraHint => Russian

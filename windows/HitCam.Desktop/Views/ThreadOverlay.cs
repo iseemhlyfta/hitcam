@@ -75,6 +75,8 @@ public sealed class ThreadOverlay : Control
         set => SetValue(FillOpacityProperty, value);
     }
 
+    private static uint Rgb(Color color) => (uint)(color.R << 16 | color.G << 8 | color.B);
+
     public override void Render(DrawingContext context)
     {
         if (Threads is not { Count: > 0 } threads || Source is not { } source)
@@ -94,26 +96,35 @@ public sealed class ThreadOverlay : Control
                 {
                     if (!byFinger.TryGetValue(fill.First, out var a) || !byFinger.TryGetValue(fill.Second, out var b))
                         continue;
-                    var corners = HandStyle.FillCorners(a, b).Select(Map).ToArray();
-                    var geometry = new StreamGeometry();
-                    using (var g = geometry.Open())
+                    // One gradient axis for the whole ribbon: middle of the left edge to middle of the right edge.
+                    var from = Map(new System.Drawing.PointF((a.Left.X + b.Left.X) / 2, (a.Left.Y + b.Left.Y) / 2));
+                    var to = Map(new System.Drawing.PointF((a.Right.X + b.Right.X) / 2, (a.Right.Y + b.Right.Y) / 2));
+                    var aspect = (float)(picture.Width / picture.Height);
+                    foreach (var piece in HandStyle.FillPieces(a, b, aspect))
                     {
-                        g.BeginFigure(corners[0], true);
-                        for (var i = 1; i < 4; i++)
-                            g.LineTo(corners[i]);
-                        g.EndFigure(true);
+                        var corners = piece.Corners.Select(Map).ToArray();
+                        var geometry = new StreamGeometry();
+                        using (var g = geometry.Open())
+                        {
+                            g.BeginFigure(corners[0], true);
+                            for (var i = 1; i < 4; i++)
+                                g.LineTo(corners[i]);
+                            g.EndFigure(true);
+                        }
+                        var (rgbFrom, rgbTo) = HandStyle.FillColors(Rgb(LeftColor), Rgb(RightColor), fill.First, piece.Side);
+                        var brush = new LinearGradientBrush
+                        {
+                            StartPoint = new RelativePoint(from, RelativeUnit.Absolute),
+                            EndPoint = new RelativePoint(to, RelativeUnit.Absolute),
+                            Opacity = opacity,
+                            GradientStops =
+                            {
+                                new GradientStop(Color.FromUInt32(0xFF000000 | rgbFrom), 0),
+                                new GradientStop(Color.FromUInt32(0xFF000000 | rgbTo), 1),
+                            },
+                        };
+                        context.DrawGeometry(brush, null, geometry);
                     }
-                    // Left colour at the middle of the left edge, right colour at the middle of the right edge.
-                    var from = new Point((corners[0].X + corners[3].X) / 2, (corners[0].Y + corners[3].Y) / 2);
-                    var to = new Point((corners[1].X + corners[2].X) / 2, (corners[1].Y + corners[2].Y) / 2);
-                    var brush = new LinearGradientBrush
-                    {
-                        StartPoint = new RelativePoint(from, RelativeUnit.Absolute),
-                        EndPoint = new RelativePoint(to, RelativeUnit.Absolute),
-                        Opacity = opacity,
-                        GradientStops = { new GradientStop(LeftColor, 0), new GradientStop(RightColor, 1) },
-                    };
-                    context.DrawGeometry(brush, null, geometry);
                 }
             }
 

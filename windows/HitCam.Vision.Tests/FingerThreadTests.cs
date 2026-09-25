@@ -108,27 +108,65 @@ public sealed class FingerThreadTests
     }
 
     [Fact]
-    public void Folding_a_finger_breaks_its_thread()
+    public void Folding_a_finger_keeps_its_thread()
     {
         var detector = new FingerThreads();
         Run(detector, Facing(0), Facing(0));
 
         var (threads, _) = detector.Update(Facing(300, leftFolded: [1]), Width, Height);
-        Assert.DoesNotContain(threads, t => t.Finger == 1);
-        Assert.Contains(threads, t => t.Finger == 2);
-
-        // Straightened again, far apart: still broken until the tips touch again.
-        (threads, _) = detector.Update(Facing(300), Width, Height);
-        Assert.DoesNotContain(threads, t => t.Finger == 1);
+        Assert.Contains(threads, t => t.Finger == 1);
     }
 
     [Fact]
-    public void Losing_a_hand_breaks_all_threads()
+    public void A_lost_hand_hides_the_threads_until_it_is_back()
     {
         var detector = new FingerThreads();
         Run(detector, Facing(0), Facing(0));
 
         Assert.Empty(detector.Update([Facing(300)[0]], Width, Height).Threads);
+        // Found again, even as a new track: the threads are still tied.
+        var back = Facing(300);
+        Assert.Equal(5, detector.Update([back[0], back[1] with { Id = 7 }], Width, Height).Threads.Count);
+    }
+
+    [Fact]
+    public void Touching_again_unties_and_a_third_touch_ties_again()
+    {
+        var detector = new FingerThreads();
+        Run(detector, Facing(0), Facing(0));
+        Assert.Equal(5, detector.Update(Facing(0), Width, Height).Threads.Count);   // held together: stays tied
+
+        Run(detector, Facing(300));                                                  // apart
+        Assert.Empty(Run(detector, Facing(0), Facing(0)).Threads);                   // touch: untied
+        Assert.Empty(Run(detector, Facing(0), Facing(0), Facing(0)).Threads);        // held: stays untied
+
+        Run(detector, Facing(300));
+        Assert.Equal(5, Run(detector, Facing(0), Facing(0)).Threads.Count);
+    }
+
+    [Fact]
+    public void Coming_close_without_really_parting_does_not_untie()
+    {
+        var detector = new FingerThreads();
+        Run(detector, Facing(0), Facing(0));
+        // 20 px apart is less than the release distance (0.6 hand sizes = 36 px): the next touch does not count.
+        Assert.Equal(5, Run(detector, Facing(20), Facing(0), Facing(0)).Threads.Count);
+    }
+
+    [Fact]
+    public void Folded_fingers_touching_do_not_switch_threads()
+    {
+        var detector = new FingerThreads();
+        Assert.DoesNotContain(Run(detector, Facing(0, leftFolded: [1]), Facing(0, leftFolded: [1])).Threads, t => t.Finger == 1);
+    }
+
+    [Fact]
+    public void Reset_unties_everything()
+    {
+        var detector = new FingerThreads();
+        Run(detector, Facing(0), Facing(0));
+        detector.Reset();
+        Assert.Empty(detector.Tied);
         Assert.Empty(detector.Update(Facing(300), Width, Height).Threads);
     }
 
@@ -140,15 +178,5 @@ public sealed class FingerThreadTests
         detector.Update(hands, Width, Height);
         var (threads, _) = detector.Update([hands[1], hands[0]], Width, Height);
         Assert.All(threads, t => Assert.True(t.Left.X <= t.Right.X));
-    }
-
-    [Fact]
-    public void A_different_pair_of_hands_starts_over()
-    {
-        var detector = new FingerThreads();
-        Run(detector, Facing(0), Facing(0));
-        var other = Facing(300);
-        TrackedHand[] newPair = [other[0], other[1] with { Id = 7 }];
-        Assert.Empty(detector.Update(newPair, Width, Height).Threads);
     }
 }

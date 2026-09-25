@@ -49,6 +49,18 @@ void CheckFill() {
     Check(Near(f.Y(320, 180), purple.y, 6), "fill blends in between");
     Check(f.Y(150, 180) == 100 && f.Y(320, 80) == 100 && f.U(150, 180) == 128, "outside the fill untouched");
 
+    // A triangle sent as a quad with a repeated corner (half of a twisted ribbon).
+    Nv12 tri(640, 360);
+    HitCamSceneQuad t = Rect(0.25f, 0.25f, 0.75f, 0.75f, 0x00FF00, 0x00FF00, 1);
+    t.x[0] = 0.25f; t.y[0] = 0.25f;
+    t.x[1] = 0.75f; t.y[1] = 0.5f;
+    t.x[2] = 0.75f; t.y[2] = 0.5f;
+    t.x[3] = 0.25f; t.y[3] = 0.75f;
+    tri.Draw({}, {}, {t});
+    const auto green = Expected(0x00FF00);
+    Check(Near(tri.Y(200, 180), green.y) && tri.Y(460, 120) == 100 && tri.Y(460, 240) == 100 && Near(tri.Y(460, 180), green.y),
+          "triangle (repeated corner) filled to its edges only");
+
     Nv12 half(640, 360);
     half.Draw({}, {}, {Rect(0.25f, 0.25f, 0.75f, 0.75f, 0xFF0000, 0xFF0000, 0.5f)});
     Check(Near(half.Y(320, 180), (100 + red.y) / 2), "half transparent fill");

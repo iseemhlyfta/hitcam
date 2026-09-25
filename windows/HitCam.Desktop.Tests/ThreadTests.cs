@@ -78,7 +78,9 @@ public sealed class ThreadTests
         var scene = HandCameraScene.Build(Result(Index, Middle), settings);
 
         var quad = Assert.Single(scene.Quads);
-        Assert.Equal((0x112233u, 0x445566u, 0.4f), (quad.RgbFrom, quad.RgbTo, quad.Alpha));
+        var side = HandStyle.FillPieces(Index, Middle, 960f / 540).Single().Side;
+        Assert.Equal(HandStyle.FillColors(0x112233, 0x445566, 1, side), (quad.RgbFrom, quad.RgbTo));
+        Assert.Equal(0.4f, quad.Alpha);
         // Corners: left index, right index, right middle, left middle.
         Assert.Equal((0.3f, 0.4f), (quad.X[0], quad.Y[0]));
         Assert.Equal((0.7f, 0.42f), (quad.X[1], quad.Y[1]));
@@ -115,6 +117,57 @@ public sealed class ThreadTests
 
         var clear = HandCameraScene.Build(result, new HandSettings { FillOpacity = 0 });
         Assert.Empty(clear.Quads);
+    }
+
+    [Fact]
+    public void Turning_the_hands_over_shows_the_other_side()
+    {
+        var front = HandStyle.FillPieces(Index, Middle, 16f / 9).Single();
+        // The same ribbon upside down: the threads swap places.
+        var back = HandStyle.FillPieces(Index with { Left = Middle.Left, Right = Middle.Right }, Middle with { Left = Index.Left, Right = Index.Right }, 16f / 9).Single();
+        Assert.NotEqual(front.Side, back.Side);
+    }
+
+    [Fact]
+    public void Crossing_threads_twist_the_ribbon_into_two_sides()
+    {
+        // Index goes down to the right, middle up: they cross in the middle.
+        var index = new FingerThread(1, new PointF(0.3f, 0.4f), new PointF(0.7f, 0.6f));
+        var middle = new FingerThread(2, new PointF(0.3f, 0.6f), new PointF(0.7f, 0.4f));
+        var pieces = HandStyle.FillPieces(index, middle, 16f / 9);
+
+        Assert.Equal(2, pieces.Count);
+        Assert.NotEqual(pieces[0].Side, pieces[1].Side);
+        var crossing = pieces[0].Corners[1];
+        Assert.Equal(0.5f, crossing.X, 1e-5f);
+        Assert.Equal(0.5f, crossing.Y, 1e-5f);
+        Assert.Equal(crossing, pieces[1].Corners[0]);
+        // Left piece from the left tips, right piece to the right tips.
+        Assert.Equal(index.Left, pieces[0].Corners[0]);
+        Assert.Equal(index.Right, pieces[1].Corners[1]);
+    }
+
+    [Fact]
+    public void Every_gap_and_side_gets_its_own_colours()
+    {
+        var left = HandSettings.ParseColor(HandSettings.DefaultLeftColor);
+        var right = HandSettings.ParseColor(HandSettings.DefaultRightColor);
+        var pairs = Enumerable.Range(0, 4).SelectMany(gap => new[] { 0, 1 }.Select(side => HandStyle.FillColors(left, right, gap, side))).ToList();
+
+        Assert.Equal(8, pairs.Distinct().Count());
+        Assert.Equal(8, pairs.Select(p => p.From).Distinct().Count());
+        Assert.Equal((left, right), pairs[0]);   // the first gap's front: the chosen colours
+    }
+
+    [Theory]
+    [InlineData(0xFF0000u, 120f, 0x00FF00u)]
+    [InlineData(0xFF0000u, 240f, 0x0000FFu)]
+    [InlineData(0x22D3EEu, 0f, 0x22D3EEu)]
+    [InlineData(0x22D3EEu, 360f, 0x22D3EEu)]
+    [InlineData(0x808080u, 90f, 0x808080u)]
+    public void Hue_turns_round_the_wheel(uint rgb, float degrees, uint expected)
+    {
+        Assert.Equal(expected, HandStyle.RotateHue(rgb, degrees));
     }
 
     [Fact]

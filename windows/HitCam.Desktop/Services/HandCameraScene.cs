@@ -90,7 +90,100 @@ public static class HandStyle
     /// first, right tip of the second, left tip of the second.
     /// </summary>
     public static PointF[] FillCorners(FingerThread first, FingerThread second) => [first.Left, first.Right, second.Right, second.Left];
+
+    /// <summary>
+    /// The fill between two threads as a ribbon with two sides: one piece, or two when the threads cross (the ribbon
+    /// is twisted: the part left of the crossing shows one side, the part right of it the other). Each piece has four
+    /// corners (a triangle repeats its crossing point) and <see cref="FillPiece.Side"/> 0 or 1, from the direction its
+    /// corners go round: turning the hands over turns the ribbon over. <paramref name="aspect"/>: frame width / height.
+    /// </summary>
+    public static IReadOnlyList<FillPiece> FillPieces(FingerThread first, FingerThread second, float aspect)
+    {
+        var a1 = first.Left;
+        var b1 = first.Right;
+        var b2 = second.Right;
+        var a2 = second.Left;
+        if (Crossing(a1, b1, a2, b2, aspect) is { } x)
+        {
+            return
+            [
+                new FillPiece([a1, x, x, a2], SideOf([a1, x, a2], aspect)),
+                new FillPiece([x, b1, b2, x], SideOf([x, b1, b2], aspect)),
+            ];
+        }
+        return [new FillPiece([a1, b1, b2, a2], SideOf([a1, b1, b2, a2], aspect))];
+    }
+
+    /// <summary>
+    /// Colours of a fill piece, from its left end to its right end: the chosen pair for the first gap's front, the same
+    /// pair turned round the colour wheel for every other gap (<paramref name="gap"/>: the first thread's finger,
+    /// 0..3) and side, so all eight differ: gap × 45°, the back side 180° further.
+    /// </summary>
+    public static (uint From, uint To) FillColors(uint left, uint right, int gap, int side)
+    {
+        var turn = gap * 45f + side * 180f;
+        return (RotateHue(left, turn), RotateHue(right, turn));
+    }
+
+    /// <summary>The colour with its hue turned by <paramref name="degrees"/> (saturation and value kept).</summary>
+    public static uint RotateHue(uint rgb, float degrees)
+    {
+        var r = ((rgb >> 16) & 0xFF) / 255f;
+        var g = ((rgb >> 8) & 0xFF) / 255f;
+        var b = (rgb & 0xFF) / 255f;
+        var max = Math.Max(r, Math.Max(g, b));
+        var min = Math.Min(r, Math.Min(g, b));
+        var delta = max - min;
+        float hue = delta == 0 ? 0 : max == r ? 60 * ((g - b) / delta % 6) : max == g ? 60 * ((b - r) / delta + 2) : 60 * ((r - g) / delta + 4);
+        var saturation = max == 0 ? 0 : delta / max;
+        hue = ((hue + degrees) % 360 + 360) % 360;
+        var c = max * saturation;
+        var x = c * (1 - Math.Abs(hue / 60 % 2 - 1));
+        var m = max - c;
+        var (r1, g1, b1) = (int)(hue / 60) switch
+        {
+            0 => (c, x, 0f),
+            1 => (x, c, 0f),
+            2 => (0f, c, x),
+            3 => (0f, x, c),
+            4 => (x, 0f, c),
+            _ => (c, 0f, x),
+        };
+        static uint Byte(float v) => (uint)Math.Clamp((int)MathF.Round(v * 255), 0, 255);
+        return Byte(r1 + m) << 16 | Byte(g1 + m) << 8 | Byte(b1 + m);
+    }
+
+    /// <summary>Where thread a1–b1 crosses thread a2–b2 (inside both), in square pixels; null if they do not.</summary>
+    private static PointF? Crossing(PointF a1, PointF b1, PointF a2, PointF b2, float aspect)
+    {
+        float px = a1.X * aspect, py = a1.Y, rx = (b1.X - a1.X) * aspect, ry = b1.Y - a1.Y;
+        float qx = a2.X * aspect, qy = a2.Y, sx = (b2.X - a2.X) * aspect, sy = b2.Y - a2.Y;
+        var denominator = rx * sy - ry * sx;
+        if (MathF.Abs(denominator) < 1e-9f)
+            return null;
+        var t = ((qx - px) * sy - (qy - py) * sx) / denominator;
+        var u = ((qx - px) * ry - (qy - py) * rx) / denominator;
+        if (t <= 0 || t >= 1 || u <= 0 || u >= 1)
+            return null;
+        return new PointF(a1.X + (b1.X - a1.X) * t, a1.Y + (b1.Y - a1.Y) * t);
+    }
+
+    /// <summary>0 or 1 by the sign of the polygon's area (shoelace), in square pixels.</summary>
+    private static int SideOf(PointF[] corners, float aspect)
+    {
+        var area = 0f;
+        for (var i = 0; i < corners.Length; i++)
+        {
+            var p = corners[i];
+            var q = corners[(i + 1) % corners.Length];
+            area += p.X * aspect * q.Y - q.X * aspect * p.Y;
+        }
+        return area >= 0 ? 0 : 1;
+    }
 }
+
+/// <summary>A piece of a fill: four corners (normalized to the frame) and which side of the ribbon it shows.</summary>
+public sealed record FillPiece(PointF[] Corners, int Side);
 
 /// <summary>What the hands draw into the "HitCam" camera picture for one analysed frame.</summary>
 public sealed record HandCameraScene(HitCamSceneDot[] Dots, HitCamSceneLine[] Lines, HitCamSceneQuad[] Quads)
@@ -120,19 +213,26 @@ public sealed record HandCameraScene(HitCamSceneDot[] Dots, HitCamSceneLine[] Li
             {
                 if (!byFinger.TryGetValue(fill.First, out var a) || !byFinger.TryGetValue(fill.Second, out var b))
                     continue;
-                var corners = HandStyle.FillCorners(a, b);
-                var quad = new HitCamSceneQuad
+                // The gradient runs from the middle of the left edge to the middle of the right edge, over all pieces.
+                var fromX = (a.Left.X + b.Left.X) / 2;
+                var fromY = (a.Left.Y + b.Left.Y) / 2;
+                var toX = (a.Right.X + b.Right.X) / 2;
+                var toY = (a.Right.Y + b.Right.Y) / 2;
+                foreach (var piece in HandStyle.FillPieces(a, b, aspect))
                 {
-                    RgbFrom = from, RgbTo = to, Alpha = settings.FillOpacity / 100f,
-                    FromX = (a.Left.X + b.Left.X) / 2, FromY = (a.Left.Y + b.Left.Y) / 2,
-                    ToX = (a.Right.X + b.Right.X) / 2, ToY = (a.Right.Y + b.Right.Y) / 2,
-                };
-                for (var i = 0; i < 4; i++)
-                {
-                    quad.X[i] = corners[i].X;
-                    quad.Y[i] = corners[i].Y;
+                    var (rgbFrom, rgbTo) = HandStyle.FillColors(from, to, fill.First, piece.Side);
+                    var quad = new HitCamSceneQuad
+                    {
+                        RgbFrom = rgbFrom, RgbTo = rgbTo, Alpha = settings.FillOpacity / 100f,
+                        FromX = fromX, FromY = fromY, ToX = toX, ToY = toY,
+                    };
+                    for (var i = 0; i < 4; i++)
+                    {
+                        quad.X[i] = piece.Corners[i].X;
+                        quad.Y[i] = piece.Corners[i].Y;
+                    }
+                    quads.Add(quad);
                 }
-                quads.Add(quad);
             }
         }
 

@@ -75,6 +75,7 @@
                                      AutomationProperties.Name="{x:Static svc:Loc.HandsRightColor}" />
                         <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.HandsRightColor}" />
                     </DockPanel>
+                    <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.HandsColorsHint}" TextWrapping="Wrap" />
                     <StackPanel>
                         <DockPanel>
                             <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding FillOpacityText}" />
