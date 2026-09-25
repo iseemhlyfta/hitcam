@@ -131,7 +131,11 @@ public sealed class ThreadTests
         Assert.True(noThreads.IsEmpty);
 
         var clear = HandCameraScene.Build(result, new HandSettings { FillOpacity = 0 });
-        Assert.Empty(clear.Quads);
+        Assert.True(clear.IsEmpty);   // fully transparent threads are not drawn either
+
+        var faint = HandCameraScene.Build(result, new HandSettings { FillOpacity = 40 });
+        Assert.All(faint.Lines, l => Assert.True(l.Alpha <= 0.4f + 1e-6f, $"line alpha {l.Alpha}"));
+        Assert.Contains(faint.Lines, l => Math.Abs(l.Alpha - 0.4f) < 1e-6f);
     }
 
     [Fact]

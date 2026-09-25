@@ -195,7 +195,7 @@ public static class Loc
     public static string HandsColorsHint => Russian
         ? "Цвета первой заливки. Остальные заливки и их обратные стороны — те же цвета с оттенком, повёрнутым по кругу"
         : "Colours of the first fill. The other fills and their back sides use the same colours with the hue turned round the wheel";
-    public static string HandsFillOpacity => Russian ? "Непрозрачность заливки" : "Fill opacity";
+    public static string HandsFillOpacity => Russian ? "Непрозрачность нитей и заливки" : "Thread and fill opacity";
     public static string HandsCamera => Russian ? "Показывать в камере «HitCam»" : "Show in the “HitCam” camera";
     public static string HandsCameraHint => Russian
         ? "Что увидят в Zoom, Discord, OBS. В превью всё показывается всегда"

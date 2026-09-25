@@ -41,7 +41,7 @@ public sealed record HandSettings
         set => _rightColor = NormalizeColor(value, DefaultRightColor);
     }
 
-    /// <summary>Fill opacity in percent.</summary>
+    /// <summary>Opacity of the threads and fills in percent.</summary>
     public int FillOpacity
     {
         get => _fillOpacity;

@@ -254,13 +254,15 @@ public sealed record HandCameraScene(HitCamSceneDot[] Dots, HitCamSceneLine[] Li
             }
         }
 
-        if (settings.CameraThreads)
+        // The opacity setting covers the threads as well as the fills.
+        var opacity = settings.FillOpacity / 100f;
+        if (settings.CameraThreads && opacity > 0)
         {
             var threadLines = HandStyle.ThreadLines(threads, result.Fills);
             foreach (var (a, b) in threadLines)
-                lines.Add(Line(a, b, HandStyle.ThreadGlowWidth, HandStyle.Thread, HandStyle.ThreadGlowAlpha));
+                lines.Add(Line(a, b, HandStyle.ThreadGlowWidth, HandStyle.Thread, HandStyle.ThreadGlowAlpha * opacity));
             foreach (var (a, b) in threadLines)
-                lines.Add(Line(a, b, HandStyle.ThreadWidth, HandStyle.Thread, 1));
+                lines.Add(Line(a, b, HandStyle.ThreadWidth, HandStyle.Thread, opacity));
         }
 
         if (settings.CameraPoints)

@@ -128,9 +128,12 @@ public sealed class ThreadOverlay : Control
                 }
             }
 
-            var glow = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White, HandStyle.ThreadGlowAlpha),
+            // The opacity setting covers the threads as well as the fills.
+            if (opacity <= 0)
+                return;
+            var glow = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White, HandStyle.ThreadGlowAlpha * opacity),
                 Math.Max(1.5, HandStyle.ThreadGlowWidth * picture.Height), lineCap: PenLineCap.Round);
-            var core = new ImmutablePen(Brushes.White.ToImmutable(), Math.Max(1, HandStyle.ThreadWidth * picture.Height),
+            var core = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White, opacity), Math.Max(1, HandStyle.ThreadWidth * picture.Height),
                 lineCap: PenLineCap.Round);
             var threadLines = HandStyle.ThreadLines(threads, Fills ?? []);
             foreach (var (a, b) in threadLines)
