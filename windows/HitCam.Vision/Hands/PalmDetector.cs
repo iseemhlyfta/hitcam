@@ -53,7 +53,8 @@ public sealed class PalmDetector : IDisposable
     private static void WarmUp(InferenceSession session)
     {
         using var input = OrtValue.CreateTensorValueFromMemory(new float[InputSize * InputSize * 3], [1, InputSize, InputSize, 3]);
-        using var _ = session.Run(new RunOptions(), [session.InputMetadata.Keys.First()], [input], [.. session.OutputMetadata.Keys]);
+        using var runOptions = new RunOptions();
+        using var _ = session.Run(runOptions, [session.InputMetadata.Keys.First()], [input], [.. session.OutputMetadata.Keys]);
     }
 
     /// <summary>Palms at least <paramref name="threshold"/> sure, best first, in pixels of the frame.</summary>
@@ -61,8 +62,11 @@ public sealed class PalmDetector : IDisposable
     {
         var sampler = _sampler is { } s && s.Width == width && s.Height == height ? s : _sampler = new Sampler(width, height);
         sampler.Run(bgra, stride, _input);
-        using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
-        return Decode(outputs[0].GetTensorDataAsSpan<float>(), outputs[1].GetTensorDataAsSpan<float>(), sampler, threshold);
+        lock (OnnxGate.Lock)
+        {
+            using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
+            return Decode(outputs[0].GetTensorDataAsSpan<float>(), outputs[1].GetTensorDataAsSpan<float>(), sampler, threshold);
+        }
     }
 
     /// <summary>Raw outputs to palms in the frame.</summary>
@@ -94,9 +98,12 @@ public sealed class PalmDetector : IDisposable
 
     public void Dispose()
     {
-        _inputValue.Dispose();
-        _runOptions.Dispose();
-        _session.Dispose();
+        lock (OnnxGate.Lock)
+        {
+            _inputValue.Dispose();
+            _runOptions.Dispose();
+            _session.Dispose();
+        }
     }
 
     /// <summary>

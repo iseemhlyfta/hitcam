@@ -25,8 +25,11 @@ internal static class OnnxLoader
                     GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
                 };
                 options.AppendExecutionProvider_DML(0);
-                session = new InferenceSession(path, options);
-                warmUp(session);
+                lock (OnnxGate.Lock)
+                {
+                    session = new InferenceSession(path, options);
+                    warmUp(session);
+                }
                 return (session, Detector.DirectML);
             }
             catch (Exception ex) when (ex is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
@@ -41,10 +44,13 @@ internal static class OnnxLoader
             // Small models: two threads are plenty and leave the rest to the decoder and the app.
             IntraOpNumThreads = Math.Clamp(Environment.ProcessorCount / 4, 1, 2),
         };
-        var cpu = new InferenceSession(path, cpuOptions);
+        InferenceSession cpu;
+        lock (OnnxGate.Lock)
+            cpu = new InferenceSession(path, cpuOptions);
         try
         {
-            warmUp(cpu);
+            lock (OnnxGate.Lock)
+                warmUp(cpu);
             return (cpu, Detector.Cpu);
         }
         catch

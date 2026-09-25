@@ -60,18 +60,22 @@ public sealed class HandLandmarker : IDisposable
     private static void WarmUp(InferenceSession session)
     {
         using var input = OrtValue.CreateTensorValueFromMemory(new float[InputSize * InputSize * 3], [1, InputSize, InputSize, 3]);
-        using var _ = session.Run(new RunOptions(), [session.InputMetadata.Keys.First()], [input], [.. session.OutputMetadata.Keys]);
+        using var runOptions = new RunOptions();
+        using var _ = session.Run(runOptions, [session.InputMetadata.Keys.First()], [input], [.. session.OutputMetadata.Keys]);
     }
 
     public HandLandmarks Run(ReadOnlySpan<byte> bgra, int width, int height, int stride, HandRoi roi)
     {
         Crop(bgra, width, height, stride, roi, _input);
-        using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
-        var raw = outputs[0].GetTensorDataAsSpan<float>();
-        var points = new PointF[PointCount];
-        for (var i = 0; i < PointCount; i++)
-            points[i] = roi.ToFrame(raw[i * 3] / InputSize - 0.5f, raw[i * 3 + 1] / InputSize - 0.5f);
-        return new HandLandmarks(points, outputs[1].GetTensorDataAsSpan<float>()[0], outputs[2].GetTensorDataAsSpan<float>()[0]);
+        lock (OnnxGate.Lock)
+        {
+            using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
+            var raw = outputs[0].GetTensorDataAsSpan<float>();
+            var points = new PointF[PointCount];
+            for (var i = 0; i < PointCount; i++)
+                points[i] = roi.ToFrame(raw[i * 3] / InputSize - 0.5f, raw[i * 3 + 1] / InputSize - 0.5f);
+            return new HandLandmarks(points, outputs[1].GetTensorDataAsSpan<float>()[0], outputs[2].GetTensorDataAsSpan<float>()[0]);
+        }
     }
 
     /// <summary>
@@ -165,8 +169,11 @@ public sealed class HandLandmarker : IDisposable
 
     public void Dispose()
     {
-        _inputValue.Dispose();
-        _runOptions.Dispose();
-        _session.Dispose();
+        lock (OnnxGate.Lock)
+        {
+            _inputValue.Dispose();
+            _runOptions.Dispose();
+            _session.Dispose();
+        }
     }
 }

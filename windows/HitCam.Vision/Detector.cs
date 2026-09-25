@@ -123,7 +123,8 @@ public sealed class Detector : IObjectDetector
         InferenceSession? session = null;
         try
         {
-            session = new InferenceSession(model.ModelPath, options);
+            lock (OnnxGate.Lock)
+                session = new InferenceSession(model.ModelPath, options);
             return new Detector(model, session, provider, gpuError);
         }
         catch
@@ -140,7 +141,10 @@ public sealed class Detector : IObjectDetector
     private void WarmUp()
     {
         Array.Clear(_input);
-        using var _ = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
+        lock (OnnxGate.Lock)
+        {
+            using var _ = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
+        }
     }
 
     public IReadOnlyList<Detection> Detect(VisionFrame frame, DetectionOptions options) =>
@@ -150,21 +154,28 @@ public sealed class Detector : IObjectDetector
     {
         var started = Stopwatch.GetTimestamp();
         _preprocessor.Run(bgra, width, height, stride, _input, Model.InputWidth, Model.InputHeight, Model.Mean, Model.Std);
-        using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
-        var boxes = outputs[0];
-        var logits = outputs[1];
-        var logitsShape = logits.GetTensorTypeAndShape().Shape;
-        var columns = (int)logitsShape[^1];
-        var queries = (int)logitsShape[^2];
-        var detections = Decoder.Decode(boxes.GetTensorDataAsSpan<float>(), logits.GetTensorDataAsSpan<float>(), queries, columns, Model.Classes, options);
+        IReadOnlyList<Detection> detections;
+        lock (OnnxGate.Lock)
+        {
+            using var outputs = _session.Run(_runOptions, _inputNames, [_inputValue], _outputNames);
+            var boxes = outputs[0];
+            var logits = outputs[1];
+            var logitsShape = logits.GetTensorTypeAndShape().Shape;
+            var columns = (int)logitsShape[^1];
+            var queries = (int)logitsShape[^2];
+            detections = Decoder.Decode(boxes.GetTensorDataAsSpan<float>(), logits.GetTensorDataAsSpan<float>(), queries, columns, Model.Classes, options);
+        }
         LastMilliseconds = Stopwatch.GetElapsedTime(started).TotalMilliseconds;
         return detections;
     }
 
     public void Dispose()
     {
-        _inputValue.Dispose();
-        _runOptions.Dispose();
-        _session.Dispose();
+        lock (OnnxGate.Lock)
+        {
+            _inputValue.Dispose();
+            _runOptions.Dispose();
+            _session.Dispose();
+        }
     }
 }
