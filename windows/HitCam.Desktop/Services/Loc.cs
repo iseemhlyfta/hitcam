@@ -126,6 +126,9 @@ public static class Loc
         : $"Artifact removal is not working (NVIDIA code {code}). Portrait video, for example, is not supported.";
 
     // Panel tabs
+    public static string ProcessingSwitchHint => Russian
+        ? "Выключено — кадры идут без обработки и видеокарта не нагружается; настройки ползунков сохраняются. Шумодав телефона работает независимо"
+        : "Off, frames go through untouched and the GPU is not loaded; the sliders keep their values. The phone's noise reduction works regardless";
     public static string TabCamera => Russian ? "Камера" : "Camera";
     public static string TabExperiments => Russian ? "Эксперименты" : "Experiments";
     public static string ExperimentsTitle => Russian ? "Экспериментальные функции" : "Experimental features";

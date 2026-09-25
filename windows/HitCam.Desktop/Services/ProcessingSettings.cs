@@ -13,6 +13,13 @@ public sealed record ProcessingSettings
     public const int ArtifactReductionGentle = 1;
     public const int ArtifactReductionStrong = 2;
 
+    /// <summary>
+    /// Master switch of the processing on this PC (noise reduction, colour, sharpness). Off, the frames go through
+    /// untouched and the GPU is not used for them; the sliders keep their values. NVIDIA artifact removal has its own
+    /// switch (experiments).
+    /// </summary>
+    public bool Enabled { get; set; } = true;
+
     /// <summary>Temporal noise reduction, 0 (off) to 100.</summary>
     public int TemporalStrength { get; set; }
 
@@ -40,7 +47,9 @@ public sealed record ProcessingSettings
     /// The struct passed to HitCam_BridgeSetProcessing: -100..100 becomes -1..1, 0..100 becomes 0..1. Out-of-range
     /// values (a hand-edited settings file) are clamped.
     /// </summary>
-    public HitCamProcessing ToNative() => new()
+    public HitCamProcessing ToNative() => !Enabled
+        ? new HitCamProcessing { ArtifactReduction = Math.Clamp(ArtifactReduction, ArtifactReductionOff, ArtifactReductionStrong) }
+        : new()
     {
         TemporalStrength = Math.Clamp(TemporalStrength, 0, 100),
         ArtifactReduction = Math.Clamp(ArtifactReduction, ArtifactReductionOff, ArtifactReductionStrong),

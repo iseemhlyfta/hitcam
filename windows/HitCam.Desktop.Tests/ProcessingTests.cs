@@ -158,4 +158,18 @@ public sealed class ProcessingTests
         processing.ClearStats();
         Assert.False(processing.HasStats || processing.HasArtifactError);
     }
+
+    [Fact]
+    public void Processing_switched_off_sends_neutral_settings_but_keeps_the_sliders()
+    {
+        var settings = new ProcessingSettings { Enabled = false, TemporalStrength = 52, Brightness = -23, Shadows = 40, ArtifactReduction = 1 };
+        var native = settings.ToNative();
+
+        Assert.Equal(0, native.TemporalStrength);
+        Assert.Equal(0f, native.Brightness);
+        Assert.Equal(0f, native.Shadows);
+        Assert.Equal(1, native.ArtifactReduction);   // NVIDIA has its own switch (experiments)
+        Assert.Equal(52, settings.TemporalStrength);
+        Assert.True(AppSettings.Parse("""{"processing":{"temporalStrength":10}}"""u8)!.Processing.Enabled);
+    }
 }

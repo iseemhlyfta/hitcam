@@ -58,6 +58,9 @@ public sealed class ProcessingViewModel : ReactiveObject
     // Noise reduction
 
     /// <summary>0 (off) to 100.</summary>
+    /// <summary>Processing on this PC on or off; off, the sliders keep their values and the GPU rests.</summary>
+    public bool IsEnabled { get => _settings.Enabled; set => Update(_settings with { Enabled = value }); }
+
     public double TemporalStrength
     {
         get => _settings.TemporalStrength;
@@ -199,7 +202,7 @@ public sealed class ProcessingViewModel : ReactiveObject
         nameof(Brightness), nameof(BrightnessText), nameof(Contrast), nameof(ContrastText),
         nameof(Saturation), nameof(SaturationText), nameof(Shadows), nameof(ShadowsText),
         nameof(Highlights), nameof(HighlightsText), nameof(Sharpness), nameof(SharpnessText),
-        nameof(IsColorAdjusted), nameof(Settings),
+        nameof(IsColorAdjusted), nameof(Settings), nameof(IsEnabled),
     ];
 
     private static int Round(double value, int min, int max) =>

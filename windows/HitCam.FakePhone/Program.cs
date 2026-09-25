@@ -1,5 +1,5 @@
 // Development tool: pretends to be the phone app so the PC side can be tested without a phone.
-// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30] [--video file.h264 --size 1280x720]
+// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30] [--video file.h264 --size 1280x720] [--fps 30]
 // Frames are dummy (not decodable) H.264-shaped access units at 30 fps, ~8 Mbit/s, or with --video a real H.264
 // Annex B stream played in a loop: each access unit must start with an access unit delimiter (x264: aud=1) and the
 // stream with an IDR frame.
@@ -14,6 +14,7 @@ var pinArg = Option("--pin");
 var seconds = int.Parse(Option("--seconds") ?? "30");
 var video = Option("--video") is { } videoPath ? SplitAccessUnits(File.ReadAllBytes(videoPath)) : null;
 var size = (Option("--size") ?? "1920x1080").Split('x').Select(int.Parse).ToArray();
+var fps = int.Parse(Option("--fps") ?? "30");
 var tokenFile = Path.Combine(Path.GetTempPath(), "hitcam-fakephone.token");
 const string deviceId = "fake-phone-0001";
 
@@ -69,8 +70,8 @@ else if (ack.Status != HelloStatus.Accepted)
     return 1;
 }
 
-await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", size[0], size[1], 30, 8000), ProtocolJson.Default.StreamConfig, Now()));
-await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", 30, 8000, 0), ProtocolJson.Default.Status, Now()));
+await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", size[0], size[1], fps, 8000), ProtocolJson.Default.StreamConfig, Now()));
+await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", fps, 8000, 0), ProtocolJson.Default.Status, Now()));
 
 // Cameras and state like a phone with three back lenses, so the PC's camera settings can be exercised.
 var capabilities = new Capabilities(
@@ -112,7 +113,7 @@ _ = Task.Run(async () =>
 });
 
 var random = new Random(1);
-var frameInterval = TimeSpan.FromSeconds(1.0 / 30);
+var frameInterval = TimeSpan.FromSeconds(1.0 / fps);
 var start = clock.Elapsed;
 var end = start + TimeSpan.FromSeconds(seconds);
 for (var i = 0; clock.Elapsed < end; i++)

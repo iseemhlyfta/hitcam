@@ -238,16 +238,25 @@
                     <!--  Processing: on this PC (sliders, NVIDIA) and, for noise, also on the phone before compression  -->
                     <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
                         <StackPanel Spacing="16">
-                            <StackPanel Spacing="2">
-                                <TextBlock Classes="title" Text="{x:Static svc:Loc.Processing}" />
-                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.ProcessingHint}" TextWrapping="Wrap" />
-                            </StackPanel>
+                            <DockPanel>
+                                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" VerticalAlignment="Center" MinWidth="0" OnContent="{x:Null}" OffContent="{x:Null}"
+                                              IsChecked="{Binding Processing.IsEnabled}" ToolTip.Tip="{x:Static svc:Loc.ProcessingSwitchHint}"
+                                              AutomationProperties.Name="{x:Static svc:Loc.Processing}">
+                                    <ToggleSwitch.Resources>
+                                        <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+                                    </ToggleSwitch.Resources>
+                                </ToggleSwitch>
+                                <StackPanel Spacing="2">
+                                    <TextBlock Classes="title" Text="{x:Static svc:Loc.Processing}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.ProcessingHint}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </DockPanel>
 
                             <!--  Noise reduction  -->
                             <StackPanel Spacing="12">
                                 <TextBlock Classes="strong" Text="{x:Static svc:Loc.NoiseReduction}" />
 
-                                <StackPanel DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                                <StackPanel DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel" IsEnabled="{Binding IsEnabled}">
                                     <DockPanel>
                                         <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding TemporalStrengthText}" />
                                         <TextBlock Classes="muted" Text="{x:Static svc:Loc.TemporalNoiseReduction}" ToolTip.Tip="{x:Static svc:Loc.TemporalNoiseReductionHint}" />
@@ -279,7 +288,7 @@
                             </StackPanel>
 
                             <!--  Colour and sharpness  -->
-                            <StackPanel Spacing="10" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                            <StackPanel Spacing="10" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel" IsEnabled="{Binding IsEnabled}">
                                 <DockPanel>
                                     <Button DockPanel.Dock="Right" Classes="secondary" Height="28" Padding="10,0" FontSize="12"
                                             Command="{Binding ResetColorCommand}" Content="{x:Static svc:Loc.ResetColor}"
