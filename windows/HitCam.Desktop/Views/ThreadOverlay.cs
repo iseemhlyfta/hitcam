@@ -129,8 +129,8 @@ public sealed class ThreadOverlay : Control
             }
 
             var glow = new ImmutablePen(new ImmutableSolidColorBrush(Colors.White, HandStyle.ThreadGlowAlpha),
-                Math.Max(2, HandStyle.ThreadGlowWidth * picture.Height), lineCap: PenLineCap.Round);
-            var core = new ImmutablePen(Brushes.White.ToImmutable(), Math.Max(1.5, HandStyle.ThreadWidth * picture.Height),
+                Math.Max(1.5, HandStyle.ThreadGlowWidth * picture.Height), lineCap: PenLineCap.Round);
+            var core = new ImmutablePen(Brushes.White.ToImmutable(), Math.Max(1, HandStyle.ThreadWidth * picture.Height),
                 lineCap: PenLineCap.Round);
             foreach (var t in threads)
                 context.DrawLine(glow, Map(t.Left), Map(t.Right));

@@ -38,6 +38,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     // The settings the camera scene is built with while tracking runs; null: nothing for the camera.
     private volatile HandSettings? _handsToCamera;
     private bool _handSceneSent;
+    private bool _threadsWereOn;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -548,6 +549,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         Hands.IsActive = active;
         _shotsToCamera = active && Hands.ShotsEnabled && Hands.CameraShots;
         _handsToCamera = active ? Hands.Settings : null;
+        // Threads switched off are untied, so switching them on again starts from none.
+        if (_threadsWereOn && !Hands.ThreadsEnabled)
+            _hands.ResetTracks();
+        _threadsWereOn = Hands.ThreadsEnabled;
         if (!active)
             _pipeline.SetHandScene(HandCameraScene.Empty);
         if (active)

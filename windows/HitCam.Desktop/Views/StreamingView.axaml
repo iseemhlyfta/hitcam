@@ -103,17 +103,7 @@
         <!--  Camera settings  -->
         <Border Grid.Column="1" Width="320" Classes="card" IsVisible="{Binding IsNotFullScreen}">
             <DockPanel>
-                <!--  Virtual camera status  -->
-                <Border Margin="20,0,20,18" Padding="12" DockPanel.Dock="Bottom" CornerRadius="10"
-                        Background="{DynamicResource HcOkSoft}" IsVisible="{Binding IsCameraReady}">
-                    <Grid ColumnDefinitions="Auto,*" ColumnSpacing="10">
-                        <Path Classes="icon" Width="18" Height="18" VerticalAlignment="Top" StrokeThickness="2" Stroke="{DynamicResource HcOk}" Data="{StaticResource IconCheckCircle}" />
-                        <StackPanel Grid.Column="1" Spacing="2">
-                            <TextBlock Classes="strong" Text="{Binding CameraTitle}" />
-                            <TextBlock Classes="muted" Text="{Binding CameraDetail}" TextWrapping="Wrap" />
-                        </StackPanel>
-                    </Grid>
-                </Border>
+                <!--  Only when the camera needs something: installing, an update, an error  -->
                 <Border Margin="20,0,20,18" Padding="12" DockPanel.Dock="Bottom" CornerRadius="10" Classes="softAccent"
                         IsVisible="{Binding IsCameraAttention}">
                     <StackPanel Spacing="10">
@@ -126,9 +116,11 @@
                     </StackPanel>
                 </Border>
 
+                <TabControl Classes="panelTabs" SelectedIndex="0">
+                  <TabItem Header="{x:Static svc:Loc.TabCamera}">
                 <ScrollViewer>
                     <StackPanel>
-                    <StackPanel Margin="20,18,20,16" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel" Spacing="16">
+                    <StackPanel Margin="20,14,20,16" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel" Spacing="16">
                         <StackPanel Spacing="2">
                             <TextBlock Classes="title" Text="{x:Static svc:Loc.CameraSettings}" />
                             <TextBlock Classes="muted" Text="{x:Static svc:Loc.CameraSettingsHint}" />
@@ -372,17 +364,34 @@
                         </StackPanel>
                     </Border>
 
-                    <!--  Object analysis (HitCam Vision): boxes over the preview and, if asked, in the camera picture  -->
-                    <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
-                        <views:VisionPanel DataContext="{Binding Vision}" />
-                    </Border>
-
-                    <!--  Hand tracking: points on the fingers over the preview  -->
-                    <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
-                        <views:HandsPanel DataContext="{Binding Hands}" />
-                    </Border>
                     </StackPanel>
                 </ScrollViewer>
+                  </TabItem>
+
+                  <!--  AI on this PC: object analysis and hands. Experimental  -->
+                  <TabItem Header="{x:Static svc:Loc.TabExperiments}">
+                <ScrollViewer>
+                    <StackPanel>
+                        <Border Margin="20,14,20,16" Padding="12" CornerRadius="10" Classes="softAccent">
+                            <StackPanel Spacing="2">
+                                <TextBlock Classes="strong" Text="{x:Static svc:Loc.ExperimentsTitle}" />
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.ExperimentsHint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                        </Border>
+
+                        <!--  Object analysis (HitCam Vision): boxes over the preview and, if asked, in the camera picture  -->
+                        <Border Margin="20,0,20,16">
+                            <views:VisionPanel DataContext="{Binding Vision}" />
+                        </Border>
+
+                        <!--  Hand tracking: points on the fingers, gestures, threads  -->
+                        <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
+                            <views:HandsPanel DataContext="{Binding Hands}" />
+                        </Border>
+                    </StackPanel>
+                </ScrollViewer>
+                  </TabItem>
+                </TabControl>
             </DockPanel>
         </Border>
     </Grid>

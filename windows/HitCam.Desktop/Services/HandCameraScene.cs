@@ -43,15 +43,15 @@ public static class HandStyle
 
     /// <summary>The dark ring under each dot.</summary>
     public const uint Outline = 0x000000;
-    public const float OutlineWidth = 0.0015f;
+    public const float OutlineWidth = 0.001f;
     public const uint Thread = 0xFFFFFF;
 
     /// <summary>Thread: a white core in a soft glow.</summary>
-    public const float ThreadWidth = 0.0045f;
-    public const float ThreadGlowWidth = 0.014f;
+    public const float ThreadWidth = 0.0022f;
+    public const float ThreadGlowWidth = 0.007f;
     public const float ThreadGlowAlpha = 0.3f;
 
-    public const float BoneWidth = 0.0028f;
+    public const float BoneWidth = 0.0016f;
     public const float BoneAlpha = 0.8f;
 
     /// <summary>Finger of a landmark: 0 the wrist, 1 the thumb … 5 the little finger.</summary>
@@ -64,7 +64,7 @@ public static class HandStyle
     /// the picture height: grows with the hand, within limits.
     /// </summary>
     public static float DotRadius(float handSize, int landmark) =>
-        Math.Clamp(handSize * 0.06f, 0.004f, 0.011f) * (IsFingertip(landmark) ? 1.3f : 1f);
+        Math.Clamp(handSize * 0.035f, 0.0025f, 0.0065f) * (IsFingertip(landmark) ? 1.25f : 1f);
 
     /// <summary>Pairs of landmarks joined by a line: the palm, then each finger from its base.</summary>
     public static IReadOnlyList<(int From, int To)> Bones { get; } =

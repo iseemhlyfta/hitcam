@@ -188,6 +188,28 @@
         <Setter Property="Opacity" Value="0.4" />
     </Style>
 
+    <!--  Tabs of the settings panel: compact headers with the accent underline, content fills the rest  -->
+    <Style Selector="TabControl.panelTabs">
+        <Setter Property="Padding" Value="0" />
+    </Style>
+    <Style Selector="TabControl.panelTabs /template/ ItemsPresenter#PART_ItemsPresenter">
+        <Setter Property="Margin" Value="20,12,20,0" />
+    </Style>
+    <Style Selector="TabControl.panelTabs TabItem">
+        <Setter Property="FontSize" Value="14" />
+        <Setter Property="MinHeight" Value="36" />
+        <Setter Property="Padding" Value="0,0,0,0" />
+        <Setter Property="Margin" Value="0,0,20,0" />
+        <Setter Property="Foreground" Value="{DynamicResource HcText2}" />
+    </Style>
+    <Style Selector="TabControl.panelTabs TabItem:selected">
+        <Setter Property="Foreground" Value="{DynamicResource HcText}" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TabControl.panelTabs TabItem:selected /template/ Border#PART_SelectedPipe">
+        <Setter Property="Background" Value="{DynamicResource HcAccent}" />
+    </Style>
+
     <!--  Sliders drawn over a colored track (white balance)  -->
     <Style Selector="Border.gradientTrack">
         <Setter Property="Height" Value="4" />

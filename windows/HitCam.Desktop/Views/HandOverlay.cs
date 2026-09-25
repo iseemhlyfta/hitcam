@@ -87,7 +87,7 @@ public sealed class HandOverlay : Control
                 }
                 for (var i = 0; i < points.Length; i++)
                 {
-                    var r = Math.Max(2.5, HandStyle.DotRadius(size, i) * picture.Height);
+                    var r = Math.Max(1.8, HandStyle.DotRadius(size, i) * picture.Height);
                     var ring = r + Math.Max(1, HandStyle.OutlineWidth * picture.Height);
                     context.DrawEllipse(OutlineBrush, null, points[i], ring, ring);
                     context.DrawEllipse(FingerBrushes[HandStyle.FingerOf(i)], null, points[i], r, r);

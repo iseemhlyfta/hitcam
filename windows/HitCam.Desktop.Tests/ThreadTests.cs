@@ -173,9 +173,9 @@ public sealed class ThreadTests
     [Fact]
     public void Dots_grow_with_the_hand_within_limits()
     {
-        Assert.Equal(0.004f, HandStyle.DotRadius(0.01f, 0), 1e-6f);
-        Assert.Equal(0.011f, HandStyle.DotRadius(1f, 0), 1e-6f);
-        Assert.Equal(0.006f * 1.3f, HandStyle.DotRadius(0.1f, 8), 1e-6f);
+        Assert.Equal(0.0025f, HandStyle.DotRadius(0.01f, 0), 1e-6f);
+        Assert.Equal(0.0065f, HandStyle.DotRadius(1f, 0), 1e-6f);
+        Assert.Equal(0.0035f * 1.25f, HandStyle.DotRadius(0.1f, 8), 1e-6f);
     }
 
     // Panel

@@ -129,6 +129,9 @@ public sealed class HandEngine : IDisposable
                     models?.Dispose();
                     models = null;
                     tracker = null;
+                    // Switched off or on again: threads and gestures start from nothing.
+                    gestures.Reset();
+                    threads.Reset();
                     fps.Reset();
                     lastSequence = 0;
                     if (requested)

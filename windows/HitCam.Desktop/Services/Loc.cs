@@ -125,6 +125,14 @@ public static class Loc
         ? $"Удаление артефактов не работает (код NVIDIA {code}). Например, вертикальное видео не поддерживается."
         : $"Artifact removal is not working (NVIDIA code {code}). Portrait video, for example, is not supported.";
 
+    // Panel tabs
+    public static string TabCamera => Russian ? "Камера" : "Camera";
+    public static string TabExperiments => Russian ? "Эксперименты" : "Experiments";
+    public static string ExperimentsTitle => Russian ? "Экспериментальные функции" : "Experimental features";
+    public static string ExperimentsHint => Russian
+        ? "Нейросети на этом ПК: анализ объектов и рук, жесты. Всё ещё в разработке и может работать нестабильно"
+        : "Neural networks on this PC: object and hand analysis, gestures. Still in development and may be unstable";
+
     // Object analysis (HitCam Vision)
     public static string Vision => Russian ? "Анализ объектов" : "Object analysis";
     public static string VisionHint => Russian
