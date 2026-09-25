@@ -215,7 +215,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         ToggleFullScreenCommand = ReactiveCommand.Create(() => { IsFullScreen = !IsFullScreen; });
         // One button switches every experimental feature off; it is disabled while all of them already are.
         DisableExperimentsCommand = ReactiveCommand.Create(DisableExperiments,
-            this.WhenAnyValue(m => m.Vision.IsEnabled, m => m.Hands.IsEnabled, (vision, hands) => vision || hands));
+            this.WhenAnyValue(m => m.Vision.IsEnabled, m => m.Hands.IsEnabled, m => m.Processing.SelectedArtifactReduction,
+                (vision, hands, artifacts) => vision || hands || artifacts.Level > 0));
 
         // An unobserved command error would crash the app; show it where the user clicked instead.
         DisconnectCommand.ThrownExceptions.Subscribe(ex => StatusText = Loc.ActionFailed(ex.Message));
@@ -246,13 +247,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public ReactiveCommand<Unit, Unit> ToggleFullScreenCommand { get; }
 
-    /// <summary>Switches object analysis and hand tracking off.</summary>
+    /// <summary>Switches object analysis, hand tracking and NVIDIA artifact removal off.</summary>
     public ReactiveCommand<Unit, Unit> DisableExperimentsCommand { get; }
 
     public void DisableExperiments()
     {
         Vision.IsEnabled = false;
         Hands.IsEnabled = false;
+        Processing.SelectedArtifactReduction = Processing.ArtifactReductionOptions[0];
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>

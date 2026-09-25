@@ -257,20 +257,6 @@
                                             AutomationProperties.Name="{x:Static svc:Loc.TemporalNoiseReduction}" />
                                 </StackPanel>
 
-                                <StackPanel Spacing="6" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel"
-                                            IsVisible="{Binding IsArtifactReductionAvailable}">
-                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.ArtifactReduction}" TextWrapping="Wrap"
-                                               ToolTip.Tip="{x:Static svc:Loc.ArtifactReductionHint}" />
-                                    <ListBox Classes="segmented" ItemsSource="{Binding ArtifactReductionOptions}" SelectedItem="{Binding SelectedArtifactReduction}"
-                                             ToolTip.Tip="{x:Static svc:Loc.ArtifactReductionHint}" AutomationProperties.Name="{x:Static svc:Loc.ArtifactReduction}">
-                                        <ListBox.ItemTemplate>
-                                            <DataTemplate x:DataType="vm:ArtifactReductionOption">
-                                                <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
-                                            </DataTemplate>
-                                        </ListBox.ItemTemplate>
-                                    </ListBox>
-                                </StackPanel>
-
                                 <StackPanel Spacing="6" DataContext="{Binding Controls}" x:DataType="vm:CameraControlsViewModel"
                                             IsVisible="{Binding SupportsNoiseReduction}">
                                     <TextBlock Classes="muted" Text="{x:Static svc:Loc.PhoneNoiseReduction}" ToolTip.Tip="{x:Static svc:Loc.PhoneNoiseReductionHint}" />
@@ -359,7 +345,6 @@
                             <!--  Last frame's cost on the GPU; why artifact removal is not running  -->
                             <StackPanel Spacing="4" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
                                 <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
-                                <TextBlock Classes="muted" Text="{Binding ArtifactErrorText}" TextWrapping="Wrap" IsVisible="{Binding HasArtifactError}" />
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -383,8 +368,27 @@
                             </StackPanel>
                         </Border>
 
+                        <!--  NVIDIA artifact removal (RTX): a neural network on the GPU; shown only when its runtime is installed  -->
+                        <StackPanel Margin="20,0,20,16" Spacing="8" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel"
+                                    IsVisible="{Binding IsArtifactReductionAvailable}">
+                            <StackPanel Spacing="2">
+                                <TextBlock Classes="title" Text="{x:Static svc:Loc.ArtifactReductionTitle}" />
+                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.ArtifactReductionHint}" TextWrapping="Wrap" />
+                            </StackPanel>
+                            <ListBox Classes="segmented" ItemsSource="{Binding ArtifactReductionOptions}" SelectedItem="{Binding SelectedArtifactReduction}"
+                                     AutomationProperties.Name="{x:Static svc:Loc.ArtifactReduction}">
+                                <ListBox.ItemTemplate>
+                                    <DataTemplate x:DataType="vm:ArtifactReductionOption">
+                                        <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                                    </DataTemplate>
+                                </ListBox.ItemTemplate>
+                            </ListBox>
+                            <TextBlock Classes="muted" Foreground="{StaticResource HcLive}" Text="{Binding ArtifactErrorText}" TextWrapping="Wrap"
+                                       IsVisible="{Binding HasArtifactError}" />
+                        </StackPanel>
+
                         <!--  Object analysis (HitCam Vision): boxes over the preview and, if asked, in the camera picture  -->
-                        <Border Margin="20,0,20,16">
+                        <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
                             <views:VisionPanel DataContext="{Binding Vision}" />
                         </Border>
 
