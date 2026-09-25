@@ -373,9 +373,13 @@
                 <ScrollViewer>
                     <StackPanel>
                         <Border Margin="20,14,20,16" Padding="12" CornerRadius="10" Classes="softAccent">
-                            <StackPanel Spacing="2">
-                                <TextBlock Classes="strong" Text="{x:Static svc:Loc.ExperimentsTitle}" />
-                                <TextBlock Classes="muted" Text="{x:Static svc:Loc.ExperimentsHint}" TextWrapping="Wrap" />
+                            <StackPanel Spacing="10">
+                                <StackPanel Spacing="2">
+                                    <TextBlock Classes="strong" Text="{x:Static svc:Loc.ExperimentsTitle}" />
+                                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.ExperimentsHint}" TextWrapping="Wrap" />
+                                </StackPanel>
+                                <Button HorizontalAlignment="Stretch" Height="34" Classes="secondary" Command="{Binding DisableExperimentsCommand}"
+                                        Content="{x:Static svc:Loc.ExperimentsDisableAll}" ToolTip.Tip="{x:Static svc:Loc.ExperimentsDisableAllHint}" />
                             </StackPanel>
                         </Border>
 

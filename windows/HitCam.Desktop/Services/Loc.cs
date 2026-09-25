@@ -129,6 +129,10 @@ public static class Loc
     public static string TabCamera => Russian ? "Камера" : "Camera";
     public static string TabExperiments => Russian ? "Эксперименты" : "Experiments";
     public static string ExperimentsTitle => Russian ? "Экспериментальные функции" : "Experimental features";
+    public static string ExperimentsDisableAll => Russian ? "Выключить все экспериментальные функции" : "Switch all experimental features off";
+    public static string ExperimentsDisableAllHint => Russian
+        ? "Выключает анализ объектов и отслеживание рук; их настройки сохраняются"
+        : "Switches object analysis and hand tracking off; their settings are kept";
     public static string ExperimentsHint => Russian
         ? "Нейросети на этом ПК: анализ объектов и рук, жесты. Всё ещё в разработке и может работать нестабильно"
         : "Neural networks on this PC: object and hand analysis, gestures. Still in development and may be unstable";
