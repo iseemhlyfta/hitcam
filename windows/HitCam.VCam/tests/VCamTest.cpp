@@ -10,6 +10,7 @@
 //                     of the decoder bridge; no camera and no camera output needed
 //   --overlay         detection boxes burnt into the camera frames (HitCam_BridgeSetOverlay); no camera output
 //   --shot            the finger-gun shot effect in the camera frames (HitCam_BridgeShot); no camera output
+//   --crashlog        the native crash log (HitCam_InstallCrashLog) records a fault with module and stack
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
 //   --dshow           the DirectShow camera (Windows 10) of the DLLs built next to this test, without registration
@@ -32,6 +33,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <share.h>
 #include <cstring>
 #include <string>
 #include <mutex>
@@ -63,6 +65,7 @@ extern "C" void __stdcall HitCam_BridgeProcessFrame(void* handle, uint8_t* nv12,
 extern "C" void __stdcall HitCam_BridgePreviewOnly(void* handle);
 extern "C" void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count);
 extern "C" void __stdcall HitCam_BridgeShot(void* handle, const HitCamShot* shot);
+extern "C" BOOL __stdcall HitCam_InstallCrashLog(const wchar_t* path);
 extern "C" void __stdcall HitCam_TestShotFrame(const HitCamShot* shot, double elapsedMs, uint8_t* nv12, uint32_t width, uint32_t height);
 using TestOutputCallback = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgeTestOutput(void* handle, TestOutputCallback callback, void* context);
@@ -598,6 +601,7 @@ int RunSourceCheck() {
 #include "ProcessCheck.inl"
 #include "OverlayCheck.inl"
 #include "ShotCheck.inl"
+#include "CrashLogCheck.inl"
 
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -613,9 +617,16 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0) return process_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--overlay") == 0) return overlay_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--shot") == 0) return shot_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--crashlog") == 0) return crashlog_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
     if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run(false);
     if (argc > 1 && std::strcmp(argv[1], "--dshow-installed") == 0) return dshow_check::Run(true);
+    // Anything else is a typo, not a request for the end-to-end run below: that one adds a camera and writes frames
+    // into the shared memory the installed "HitCam" camera reads.
+    if (argc > 1) {
+        std::printf("Unknown option %s; see the list at the top of VCamTest.cpp. The end-to-end check runs without options.\n", argv[1]);
+        return 2;
+    }
 
     // Diagnostics: the registered class is an IMFActivate that creates the media source (as the frame server does).
     {

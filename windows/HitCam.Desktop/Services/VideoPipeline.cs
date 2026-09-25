@@ -23,9 +23,15 @@ public sealed class VideoPipeline : IDisposable
     private volatile string? _error;
     private volatile bool _overlayUnsupported;
     private volatile bool _shotUnsupported;
+    private readonly bool _previewOnly;
 
-    public VideoPipeline()
+    /// <param name="previewOnly">
+    /// Frames go to the preview only, never to the "HitCam" camera (a debug instance started with --port must not
+    /// feed the camera another instance serves).
+    /// </param>
+    public VideoPipeline(bool previewOnly = false)
     {
+        _previewOnly = previewOnly;
         _thread = new Thread(Run) { IsBackground = true, Name = "HitCam decoder" };
         _thread.Start();
     }
@@ -218,6 +224,8 @@ public sealed class VideoPipeline : IDisposable
             return;
         }
 
+        if (_previewOnly)
+            NativeMethods.HitCam_BridgePreviewOnly(bridge);
         lock (_bridgeLock)
         {
             _bridge = bridge;

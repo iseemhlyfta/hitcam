@@ -23,6 +23,10 @@ internal static class NativeMethods
     [DllImport(Library)]
     public static extern void HitCam_BridgeClearSignal(IntPtr handle);
 
+    /// <summary>Decoded frames of this bridge go to the preview only, never to a camera.</summary>
+    [DllImport(Library)]
+    public static extern void HitCam_BridgePreviewOnly(IntPtr handle);
+
     [DllImport(Library)]
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool HitCam_BridgeIsLinked(IntPtr handle);
@@ -51,6 +55,11 @@ internal static class NativeMethods
     /// <summary>Copies the boxes; count 0 clears them. The DLL drops boxes older than a second by itself.</summary>
     [DllImport(Library)]
     public static extern unsafe void HitCam_BridgeSetOverlay(IntPtr handle, HitCamOverlayBox* boxes, int count);
+
+    /// <summary>Appends native faults of this process (module + offset, stack) to the file; see CrashLog.cpp.</summary>
+    [DllImport(Library, CharSet = CharSet.Unicode)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool HitCam_InstallCrashLog(string path);
 
     /// <summary>Plays a finger-gun shot in the camera picture for about 0.2 s from now; the DLL copies it.</summary>
     [DllImport(Library)]

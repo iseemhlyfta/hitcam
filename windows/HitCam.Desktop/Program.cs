@@ -15,6 +15,7 @@ internal static partial class Program
     public static int Main(string[] args)
     {
         DiagnosticLog.Install();
+        DiagnosticLog.InstallNativeCrashLog();
         DiagnosticLog.Write($"start {typeof(Program).Assembly.GetName().Version} ({Environment.OSVersion}) {string.Join(' ', args)}");
 
         var index = Array.IndexOf(args, "--port");

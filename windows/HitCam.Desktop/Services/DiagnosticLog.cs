@@ -39,6 +39,25 @@ public static class DiagnosticLog
         Trace.Listeners.Add(new Listener { Filter = new EventTypeFilter(SourceLevels.Warning) });
     }
 
+    /// <summary>
+    /// Native faults (access violations in the DLLs) go to <c>native-crash.log</c> next to the log: they can end the
+    /// process before .NET or Windows Error Reporting record anything.
+    /// </summary>
+    public static void InstallNativeCrashLog()
+    {
+        try
+        {
+            var path = Path.Combine(Path.GetDirectoryName(FilePath)!, "native-crash.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+            if (!NativeMethods.HitCam_InstallCrashLog(path))
+                Write("native crash log not installed");
+        }
+        catch (Exception ex) when (ex is DllNotFoundException or EntryPointNotFoundException or BadImageFormatException)
+        {
+            Write($"native crash log unavailable: {ex.Message}");
+        }
+    }
+
     public static void Write(string message)
     {
         try

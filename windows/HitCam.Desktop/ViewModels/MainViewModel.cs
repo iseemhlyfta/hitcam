@@ -28,7 +28,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly DispatcherTimer _addressTimer;
     private NetworkAddressChangedEventHandler? _networkChanged;
     private int _disposed;
-    private readonly VideoPipeline _pipeline = new();
+    // A debug instance (--port) shows the preview only: the camera belongs to the real instance.
+    private readonly VideoPipeline _pipeline = new(previewOnly: Program.PortOverride is not null);
     private readonly VirtualCamera _camera = new();
     private readonly VisionEngine _vision;
     private readonly HandEngine _hands;
