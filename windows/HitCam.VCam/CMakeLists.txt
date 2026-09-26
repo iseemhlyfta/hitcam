@@ -64,7 +64,7 @@ foreach(entry TemporalLuma TemporalChroma ClarityDown ClarityBlurX ClarityBlurY 
 endforeach()
 # Background blur and replacement (Compositor.cpp).
 set(COMPOSITE_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/Composite.hlsl)
-foreach(entry DownLuma DownChroma BlurLumaX BlurLumaY BlurChromaX BlurChromaY CompositeLuma CompositeChroma)
+foreach(entry DownLuma DownChroma BlurLumaX BlurLumaY BlurChromaX BlurChromaY CompositeLuma CompositeChroma CropLuma CropChroma)
     set(header ${CMAKE_CURRENT_BINARY_DIR}/shaders/${entry}.h)
     add_custom_command(OUTPUT ${header}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders

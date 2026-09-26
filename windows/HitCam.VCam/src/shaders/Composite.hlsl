@@ -14,6 +14,7 @@ cbuffer Params : register(b0) {
     uint mode;              // 1 blur, 2 replace
     uint maskValid;         // 0: no usable mask, the whole frame is background
     uint3 padding;
+    float4 crop;            // auto-framing: left, top, width, height of the part shown (normalized)
 };
 
 SamplerState linearClamp : register(s0);
@@ -149,4 +150,26 @@ void CompositeChroma(uint3 id : SV_DispatchThreadID) {
         background = b.z > 1e-3 ? b.xy / b.z : source;
     }
     chromaResult[p] = lerp(background, source, PersonAt(uv));
+}
+
+// ---- Crop (auto-framing): the part `crop` of the frame scaled back to the whole frame, bilinear. Runs last, after
+// faces, boxes and hands are drawn, so what is hidden stays hidden.
+Texture2D<float> cropLumaIn : register(t0);
+RWTexture2D<float> cropLumaOut : register(u0);
+
+[numthreads(16, 8, 1)]
+void CropLuma(uint3 id : SV_DispatchThreadID) {
+    if (any(id.xy >= lumaSize)) return;
+    const float2 uv = crop.xy + (float2(id.xy) + 0.5) / float2(lumaSize) * crop.zw;
+    cropLumaOut[id.xy] = cropLumaIn.SampleLevel(linearClamp, uv, 0);
+}
+
+Texture2D<float2> cropChromaIn : register(t0);
+RWTexture2D<float2> cropChromaOut : register(u0);
+
+[numthreads(16, 8, 1)]
+void CropChroma(uint3 id : SV_DispatchThreadID) {
+    if (any(id.xy >= chromaSize)) return;
+    const float2 uv = crop.xy + (float2(id.xy) + 0.5) / float2(chromaSize) * crop.zw;
+    cropChromaOut[id.xy] = cropChromaIn.SampleLevel(linearClamp, uv, 0);
 }

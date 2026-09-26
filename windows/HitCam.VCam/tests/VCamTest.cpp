@@ -10,6 +10,7 @@
 //                     of the decoder bridge; no camera and no camera output needed
 //   --overlay         detection boxes burnt into the camera frames (HitCam_BridgeSetOverlay); no camera output
 //   --segment         background blur and replacement from a person mask (HitCam_BridgeSetBackground); no camera output
+//   --frame           auto-framing crop (HitCam_BridgeSetFraming); no camera output
 //   --shot            the finger-gun shot effect in the camera frames (HitCam_BridgeShot); no camera output
 //   --scene           points, threads and fills for the hands in the camera frames (HitCam_BridgeSetHandScene)
 //   --faces           hidden faces (mosaic, blur, fill) in the camera frames (HitCam_BridgeSetFaceRegions)
@@ -69,6 +70,7 @@ extern "C" void __stdcall HitCam_BridgeSetBackground(void* handle, const HitCamB
 extern "C" void __stdcall HitCam_BridgeSetSegmentMask(void* handle, const uint8_t* mask, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgeSetBackgroundImage(void* handle, const uint8_t* bgra, uint32_t width, uint32_t height, uint32_t stride);
 extern "C" double __stdcall HitCam_BridgeCompositeMs(void* handle);
+extern "C" void __stdcall HitCam_BridgeSetFraming(void* handle, const HitCamFraming* framing);
 extern "C" void __stdcall HitCam_BridgeDisplayPreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame);
 extern "C" BOOL __stdcall HitCam_BridgeCopyDisplayPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height);
 extern "C" BOOL __stdcall HitCam_ArtifactReductionAvailable();
@@ -631,6 +633,7 @@ int RunSourceCheck() {
 #include "ProcessCheck.inl"
 #include "OverlayCheck.inl"
 #include "SegmentCheck.inl"
+#include "FrameCheck.inl"
 #include "ShotCheck.inl"
 #include "CrashLogCheck.inl"
 #include "SceneCheck.inl"
@@ -650,6 +653,7 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--process") == 0) return process_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--overlay") == 0) return overlay_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--segment") == 0) return segment_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--frame") == 0) return frame_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--shot") == 0) return shot_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--crashlog") == 0) return crashlog_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--scene") == 0) return scene_check::Run();

@@ -302,6 +302,13 @@ struct FrameSink {
                 own();
                 shots.Draw(packed.data(), width, height, now);
             }
+            // Auto-framing last: everything above is drawn in the frame's coordinates and zooms with it, and what is
+            // hidden stays hidden.
+            HitCamFraming framing{};
+            if (compositor.CurrentFraming(&framing)) {
+                own();
+                compositor.Crop(packed.data(), width, height, framing);
+            }
         }
         if (previewOnly) {
             testOutput(testContext, luma, chroma, pitch, width, height);
@@ -655,6 +662,13 @@ __declspec(dllexport) void __stdcall HitCam_BridgeSetSegmentMask(void* handle, c
 // The replacement picture, BGRA rows of `stride` bytes; null clears it.
 __declspec(dllexport) void __stdcall HitCam_BridgeSetBackgroundImage(void* handle, const uint8_t* bgra, uint32_t width, uint32_t height, uint32_t stride) {
     if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.compositor.SetImage(bgra, width, height, stride); });
+}
+
+// Auto-framing: the part of the frame the camera shows (normalized); null or the whole frame turns it off. Dropped
+// when not refreshed within a second. Any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetFraming(void* handle, const HitCamFraming* framing) {
+    if (!handle) return;
+    hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.compositor.SetFraming(framing ? *framing : HitCamFraming{0, 0, 1, 1}); });
 }
 
 // Milliseconds the background took on the last frame; -1 if off or it did not run.

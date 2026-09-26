@@ -14,6 +14,8 @@
 #include "shaders/BlurLumaY.h"
 #include "shaders/CompositeChroma.h"
 #include "shaders/CompositeLuma.h"
+#include "shaders/CropChroma.h"
+#include "shaders/CropLuma.h"
 #include "shaders/DownChroma.h"
 #include "shaders/DownLuma.h"
 
@@ -32,6 +34,7 @@ struct Params {
     uint32_t mode;
     uint32_t maskValid;
     uint32_t padding[3];
+    float crop[4];
 };
 static_assert(sizeof(Params) % 16 == 0);
 
@@ -91,6 +94,74 @@ void Compositor::SetImage(const uint8_t* bgra, uint32_t width, uint32_t height, 
     inputs_.imageWidth = width;
     inputs_.imageHeight = height;
     ++inputs_.imageVersion;
+}
+
+void Compositor::SetFraming(const HitCamFraming& value) {
+    auto finite = [](float v) { return v >= -1.0f && v <= 2.0f; };  // NaN fails both
+    HitCamFraming framing{0, 0, 1, 1};
+    if (finite(value.left) && finite(value.top) && finite(value.right) && finite(value.bottom)) {
+        framing.left = std::clamp(value.left, 0.0f, 1.0f);
+        framing.top = std::clamp(value.top, 0.0f, 1.0f);
+        framing.right = std::clamp(value.right, framing.left, 1.0f);
+        framing.bottom = std::clamp(value.bottom, framing.top, 1.0f);
+    }
+    std::lock_guard guard(lock_);
+    inputs_.framing = framing;
+    inputs_.framingMs = GetTickCount64();
+}
+
+bool Compositor::CurrentFraming(HitCamFraming* framing) {
+    std::lock_guard guard(lock_);
+    const HitCamFraming& f = inputs_.framing;
+    // At most 8x (a crop smaller than 1/8 of the frame is not framing), and not the whole frame.
+    const bool cropped = f.right - f.left >= 0.125f && f.bottom - f.top >= 0.125f &&
+                         (f.left > 0.001f || f.top > 0.001f || f.right < 0.999f || f.bottom < 0.999f);
+    if (!cropped || GetTickCount64() - inputs_.framingMs > kFramingStaleMs) return false;
+    *framing = f;
+    return true;
+}
+
+bool Compositor::Crop(uint8_t* nv12, uint32_t width, uint32_t height, const HitCamFraming& framing) {
+    if (width < 16 || height < 16 || (width | height) & 1) return false;
+    if (!EnsureDevice()) return false;
+    if (!EnsureFrames(width, height)) {
+        ReleaseDevice();
+        return false;
+    }
+    Params params{};
+    params.lumaSize[0] = width;
+    params.lumaSize[1] = height;
+    params.chromaSize[0] = width / 2;
+    params.chromaSize[1] = height / 2;
+    params.crop[0] = framing.left;
+    params.crop[1] = framing.top;
+    params.crop[2] = framing.right - framing.left;
+    params.crop[3] = framing.bottom - framing.top;
+    context_->UpdateSubresource(params_.Get(), 0, nullptr, &params, 0, 0);
+    context_->UpdateSubresource(lumaIn_.texture.Get(), 0, nullptr, nv12, width, 0);
+    context_->UpdateSubresource(chromaIn_.texture.Get(), 0, nullptr, nv12 + static_cast<size_t>(width) * height, width, 0);
+    ID3D11Buffer* constants[] = {params_.Get()};
+    context_->CSSetConstantBuffers(0, 1, constants);
+    ID3D11SamplerState* samplers[] = {linearClamp_.Get()};
+    context_->CSSetSamplers(0, 1, samplers);
+    ID3D11ShaderResourceView* noView = nullptr;
+    ID3D11UnorderedAccessView* noTarget = nullptr;
+    auto dispatch = [&](ID3D11ComputeShader* shader, ID3D11ShaderResourceView* input, ID3D11UnorderedAccessView* target, uint32_t w, uint32_t h) {
+        context_->CSSetShader(shader, nullptr, 0);
+        context_->CSSetShaderResources(0, 1, &input);
+        context_->CSSetUnorderedAccessViews(0, 1, &target, nullptr);
+        context_->Dispatch(Groups(w, kGroupWidth), Groups(h, kGroupHeight), 1);
+        context_->CSSetShaderResources(0, 1, &noView);
+        context_->CSSetUnorderedAccessViews(0, 1, &noTarget, nullptr);
+    };
+    dispatch(cropLuma_.Get(), lumaIn_.srv.Get(), lumaOut_.uav.Get(), width, height);
+    dispatch(cropChroma_.Get(), chromaIn_.srv.Get(), chromaOut_.uav.Get(), width / 2, height / 2);
+    context_->CSSetShader(nullptr, nullptr, 0);
+    if (!ReadBack(nv12, width, height)) {
+        ReleaseDevice();
+        return false;
+    }
+    return true;
 }
 
 bool Compositor::Active() {
@@ -170,6 +241,8 @@ bool Compositor::EnsureDevice() {
         {g_BlurChromaY, sizeof(g_BlurChromaY), &blurChromaY_},
         {g_CompositeLuma, sizeof(g_CompositeLuma), &compositeLuma_},
         {g_CompositeChroma, sizeof(g_CompositeChroma), &compositeChroma_},
+        {g_CropLuma, sizeof(g_CropLuma), &cropLuma_},
+        {g_CropChroma, sizeof(g_CropChroma), &cropChroma_},
     };
     for (const Shader& shader : shaders) {
         if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(shader.code, shader.size, nullptr, shader.target->ReleaseAndGetAddressOf());
@@ -376,9 +449,16 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
              chromaOut_.uav.Get(), cw, ch);
     context_->CSSetShader(nullptr, nullptr, 0);
 
+    return ReadBack(nv12, width, height);
+}
+
+// lumaOut_ and chromaOut_ into the frame. Both planes are mapped before anything is copied: a failure leaves the frame as
+// it was.
+bool Compositor::ReadBack(uint8_t* nv12, uint32_t width, uint32_t height) {
+    uint8_t* chroma = nv12 + static_cast<size_t>(width) * height;
+    const uint32_t ch = height / 2;
     context_->CopyResource(lumaStaging_.Get(), lumaOut_.texture.Get());
     context_->CopyResource(chromaStaging_.Get(), chromaOut_.texture.Get());
-    // Both planes are mapped before anything is copied: a failure leaves the frame as it was.
     D3D11_MAPPED_SUBRESOURCE lumaMapped{}, chromaMapped{};
     const bool lumaOk = SUCCEEDED(context_->Map(lumaStaging_.Get(), 0, D3D11_MAP_READ, 0, &lumaMapped));
     const bool chromaOk = lumaOk && SUCCEEDED(context_->Map(chromaStaging_.Get(), 0, D3D11_MAP_READ, 0, &chromaMapped));
@@ -424,6 +504,8 @@ void Compositor::ReleaseDevice() {
     blurChromaY_.Reset();
     compositeLuma_.Reset();
     compositeChroma_.Reset();
+    cropLuma_.Reset();
+    cropChroma_.Reset();
     linearClamp_.Reset();
     params_.Reset();
     context_.Reset();

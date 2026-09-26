@@ -21,6 +21,15 @@ struct HitCamBackground {
 #pragma pack(pop)
 static_assert(sizeof(HitCamBackground) == 24, "shared with the C# app");
 
+// Auto-framing: the part of the frame the camera shows, normalized; (0, 0, 1, 1) is the whole frame
+// (HitCam_BridgeSetFraming).
+#pragma pack(push, 4)
+struct HitCamFraming {
+    float left, top, right, bottom;
+};
+#pragma pack(pop)
+static_assert(sizeof(HitCamFraming) == 16, "shared with the C# app");
+
 namespace hitcam {
 
 // Blurs or replaces the background behind the person with Direct3D 11 compute shaders, from a low-resolution mask
@@ -51,9 +60,19 @@ public:
 
     // Decoder thread: the effect on a contiguous NV12 frame (pitch == width), in place. Returns true if it changed.
     bool Composite(uint8_t* nv12, uint32_t width, uint32_t height);
-    // Decoder thread: frees the frame textures once the effect is off (keeps the device).
+    // Auto-framing crop (any thread); dropped (whole frame) when not refreshed within kFramingStaleMs.
+    static constexpr unsigned long long kFramingStaleMs = 1000;
+    void SetFraming(const HitCamFraming& framing);
+    // The crop to apply now, or false for the whole frame.
+    bool CurrentFraming(HitCamFraming* framing);
+
+    // Decoder thread: the crop scaled back to the whole frame (bilinear), in place. Returns true if it changed.
+    bool Crop(uint8_t* nv12, uint32_t width, uint32_t height, const HitCamFraming& framing);
+
+    // Decoder thread: frees the frame textures once nothing is on (keeps the device).
     void ReleaseIfOff() {
-        if (width_ != 0 && !Active()) ReleaseFrames();
+        HitCamFraming unused{};
+        if (width_ != 0 && !Active() && !CurrentFraming(&unused)) ReleaseFrames();
     }
     // Milliseconds of the last Composite (upload, GPU, readback); -1 if none ran.
     double LastMilliseconds() const { return lastMs_; }
@@ -77,6 +96,8 @@ private:
         std::shared_ptr<const std::vector<uint8_t>> image;  // BGRA, pitch = imageWidth * 4
         uint32_t imageWidth = 0, imageHeight = 0;
         uint64_t imageVersion = 0;
+        HitCamFraming framing{0, 0, 1, 1};
+        unsigned long long framingMs = 0;
     };
 
     bool EnsureDevice();
@@ -85,6 +106,7 @@ private:
     bool EnsureImage(const Inputs& inputs, uint32_t width, uint32_t height);
     bool CreatePlane(Plane& plane, uint32_t width, uint32_t height, DXGI_FORMAT format, bool writable);
     bool Run(uint8_t* nv12, uint32_t width, uint32_t height, const Inputs& inputs, bool maskValid, unsigned long long maskAgeMs);
+    bool ReadBack(uint8_t* nv12, uint32_t width, uint32_t height);
     void ReleaseFrames();
     void ReleaseDevice();
 
@@ -95,6 +117,7 @@ private:
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11ComputeShader> downLuma_, downChroma_, blurLumaX_, blurLumaY_, blurChromaX_, blurChromaY_;
     ComPtr<ID3D11ComputeShader> compositeLuma_, compositeChroma_;
+    ComPtr<ID3D11ComputeShader> cropLuma_, cropChroma_;
     ComPtr<ID3D11SamplerState> linearClamp_;
     ComPtr<ID3D11Buffer> params_;
     unsigned long long retryDeviceMs_ = 0;
