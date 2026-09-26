@@ -10,6 +10,8 @@ struct ConnectView: View {
     @State private var inputError: String?
     @State private var cameraDenied = false
     @FocusState private var addressFocused: Bool
+    // PCs announcing themselves on this network, while this screen is shown.
+    @StateObject private var browser = PcBrowser()
 
     var body: some View {
         ScrollView {
@@ -19,12 +21,15 @@ struct ConnectView: View {
                 if let message = inputError ?? error ?? (cameraDenied ? L10n.cameraDenied : nil) {
                     NoticeBox(text: message)
                 }
+                foundCard
                 recentCard
             }
             .padding(20)
             .frame(maxWidth: 520)
             .frame(maxWidth: .infinity)
         }
+        .onAppear { browser.start() }
+        .onDisappear { browser.stop() }
         .scrollDismissesKeyboard(.interactively)
         .background(HC.ground.ignoresSafeArea())
         .sheet(isPresented: $showScanner) {
@@ -104,6 +109,45 @@ struct ConnectView: View {
                 .frame(width: 20, height: 20)
                 .background(HC.accentSoft, in: Circle())
             Text(text).font(.caption2).foregroundStyle(HC.text2).lineLimit(2).minimumScaleFactor(0.85)
+        }
+    }
+
+    @ViewBuilder
+    private var foundCard: some View {
+        if !browser.found.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(L10n.found).font(.caption).foregroundStyle(HC.text2).padding(.leading, 4)
+                VStack(spacing: 0) {
+                    ForEach(Array(browser.found.enumerated()), id: \.element) { index, pc in
+                        if index > 0 { Divider().overlay(HC.border) }
+                        Button {
+                            // Paired at this address: the saved entry (with its token). Otherwise the address alone, and
+                            // the PC asks for its PIN: the announced id is only a claim.
+                            let known = LocalStore.recentServers.first { $0.host == pc.host && $0.port == pc.port }
+                            start(known ?? pc.address)
+                        } label: {
+                            HStack(spacing: 12) {
+                                Image(systemName: "wifi")
+                                    .font(.system(size: 16))
+                                    .foregroundStyle(HC.text)
+                                    .frame(width: 36, height: 36)
+                                    .background(HC.surface2, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(pc.name).foregroundStyle(HC.text)
+                                    Text(pc.address.display).font(.caption).monospacedDigit().foregroundStyle(HC.text2)
+                                }
+                                Spacer()
+                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(HC.text2)
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 10)
+                            .contentShape(Rectangle())
+                        }
+                    }
+                }
+                .background(HC.surface, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(HC.border))
+            }
         }
     }
 

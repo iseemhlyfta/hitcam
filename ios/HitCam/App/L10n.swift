@@ -9,6 +9,7 @@ enum L10n {
     static var connect: String { ru ? "Подключиться" : "Connect" }
     static var scanQr: String { ru ? "Сканировать QR-код" : "Scan QR code" }
     static var recent: String { ru ? "Недавние" : "Recent" }
+    static var found: String { ru ? "В этой сети" : "On this network" }
     static var invalidAddress: String { ru ? "Неверный адрес" : "Invalid address" }
     static var connecting: String { ru ? "Подключение…" : "Connecting…" }
     static var reconnecting: String { ru ? "Связь потеряна, переподключаюсь…" : "Connection lost, reconnecting…" }
