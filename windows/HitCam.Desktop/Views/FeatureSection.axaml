@@ -9,7 +9,8 @@
         <Setter Property="Template">
             <ControlTemplate>
                 <StackPanel Spacing="14">
-                    <DockPanel>
+                    <!--  A click anywhere on the header (except the switch) expands or collapses; transparent, so gaps count too  -->
+                    <DockPanel Name="PART_Header" Background="Transparent" Cursor="Hand">
                         <ToggleSwitch Name="PART_Switch" Margin="6,0,0,0" DockPanel.Dock="Right" VerticalAlignment="Center" MinWidth="0"
                                       OnContent="{x:Null}" OffContent="{x:Null}" IsChecked="{TemplateBinding IsOn, Mode=TwoWay}"
                                       AutomationProperties.Name="{TemplateBinding Title}" />

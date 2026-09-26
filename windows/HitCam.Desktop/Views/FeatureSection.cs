@@ -1,12 +1,16 @@
 using Avalonia;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Data;
+using Avalonia.Input;
+using Avalonia.VisualTree;
 
 namespace HitCam.Desktop.Views;
 
 /// <summary>
 /// A feature on the experiments tab: title, hint, an arrow that shows or hides its settings and a switch that turns it
-/// on. The settings (the content) are greyed out while it is off. The look is in FeatureSection.axaml.
+/// on. The settings (the content) are greyed out while it is off. A click anywhere on the header but the switch expands
+/// or collapses it too. The look is in FeatureSection.axaml.
 /// </summary>
 public sealed class FeatureSection : ContentControl
 {
@@ -44,5 +48,26 @@ public sealed class FeatureSection : ContentControl
     {
         get => GetValue(IsExpandedProperty);
         set => SetValue(IsExpandedProperty, value);
+    }
+
+    private Control? _header;
+
+    protected override void OnApplyTemplate(TemplateAppliedEventArgs e)
+    {
+        base.OnApplyTemplate(e);
+        if (_header is not null)
+            _header.Tapped -= OnHeaderTapped;
+        _header = e.NameScope.Find<Control>("PART_Header");
+        if (_header is not null)
+            _header.Tapped += OnHeaderTapped;
+    }
+
+    // The switch turns the feature on and the arrow toggles by itself; anything else on the header toggles here.
+    private void OnHeaderTapped(object? sender, TappedEventArgs e)
+    {
+        if (e.Source is Visual source && source.GetSelfAndVisualAncestors().Any(v => v is ToggleSwitch or ToggleButton))
+            return;
+        IsExpanded = !IsExpanded;
+        e.Handled = true;
     }
 }

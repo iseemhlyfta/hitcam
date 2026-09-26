@@ -1,3 +1,4 @@
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.Presenters;
 using Avalonia.Headless;
@@ -60,8 +61,28 @@ public sealed class FeatureSectionTests
             section.IsOn = true;
             Dispatcher.UIThread.RunJobs();
             Assert.True(content.IsEffectivelyEnabled);
+
+            // A click on the title collapses (anywhere on the header does); a click on the switch only switches.
+            Click(window, new Avalonia.Point(20, 10));
+            Assert.False(section.IsExpanded);
+            Click(window, new Avalonia.Point(20, 10));
+            Assert.True(section.IsExpanded);
+            var toggle = section.GetVisualDescendants().OfType<ToggleSwitch>().Single();
+            var center = toggle.TranslatePoint(new Avalonia.Point(toggle.Bounds.Width / 2, toggle.Bounds.Height / 2), window)!.Value;
+            Click(window, center);
+            Assert.True(section.IsExpanded);
+            Assert.False(section.IsOn);
             Assert.NotNull(window.CaptureRenderedFrame());
             window.Close();
         }, CancellationToken.None);
+    }
+
+    private static void Click(Window window, Avalonia.Point point)
+    {
+        window.MouseDown(point, Avalonia.Input.MouseButton.Left);
+        window.MouseUp(point, Avalonia.Input.MouseButton.Left);
+        Dispatcher.UIThread.RunJobs();
+        // Two clicks in a row must not be taken for a double click.
+        Thread.Sleep(600);
     }
 }
