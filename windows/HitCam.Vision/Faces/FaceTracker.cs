@@ -188,6 +188,9 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             .FirstOrDefault();
         if (best.Person is not null)
             face.Person = best.Person;
+        else if (face.Person is null && _people.AnyHidden)
+            // Maybe someone hidden on purpose, not recognizable yet: shown by default meanwhile, so look again soon.
+            face.FingerprintTime = now - _options.Refresh + _options.Recheck;
     }
 
     /// <summary>Running average of unit vectors, normalized again (older and newer weigh 3:1).</summary>

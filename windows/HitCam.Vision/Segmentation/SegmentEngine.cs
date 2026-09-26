@@ -33,6 +33,8 @@ public sealed class SegmentEngine : IDisposable
     private bool _requested;
     private VisionStatus _status = VisionStatus.Stopped;
     private int _reset;
+    // Bumped by Reset: a run on a frame from before it is dropped.
+    private int _generation;
     private volatile bool _paused;
     private volatile bool _disposed;
 
@@ -103,6 +105,7 @@ public sealed class SegmentEngine : IDisposable
     /// <summary>Forgets the mask history before the next frame (a new stream).</summary>
     public void Reset()
     {
+        Interlocked.Increment(ref _generation);
         Interlocked.Exchange(ref _reset, 1);
         _wake.Set();
     }
@@ -201,6 +204,7 @@ public sealed class SegmentEngine : IDisposable
                 lastSequence = frame.Sequence;
 
                 var started = _time.GetTimestamp();
+                var generation = Volatile.Read(ref _generation);
                 lastRun = started;
                 try
                 {
@@ -240,6 +244,8 @@ public sealed class SegmentEngine : IDisposable
                     if (_requestVersion != version)
                         continue;
                 }
+                if (generation != Volatile.Read(ref _generation))
+                    continue;
                 var rate = fps.Add(_time.GetElapsedTime(0, now));
                 try
                 {

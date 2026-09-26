@@ -17,7 +17,9 @@ public static class BackgroundImage
     {
         try
         {
-            using var codec = SKCodec.Create(path);
+            // Read first, retrying briefly: a file just saved is often held for a moment (antivirus, sync).
+            using var data = SKData.CreateCopy(ReadAll(path));
+            using var codec = SKCodec.Create(data);
             if (codec is null)
                 return null;
             var origin = codec.EncodedOrigin;
@@ -54,6 +56,21 @@ public static class BackgroundImage
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or OutOfMemoryException)
         {
             return null;
+        }
+    }
+
+    private static byte[] ReadAll(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return File.ReadAllBytes(path);
+            }
+            catch (IOException) when (attempt < 5 && File.Exists(path))
+            {
+                Thread.Sleep(100);
+            }
         }
     }
 

@@ -272,6 +272,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _vision.ResetTracks();
             _hands.ResetTracks();
             _segment.Reset();
+            _pipeline.SetSegmentMask([], 0, 0);
             _faces.ResetTracks();
             ApplyVision();
             ApplyHands();
@@ -867,13 +868,33 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private int _framingZoom;
 
     /// <summary>Framing timer (pool thread, 30 Hz): steps the crop towards the faces and hands it to the camera.</summary>
+    private int _framingStepping;
+
     private void StepFraming()
+    {
+        // Timer callbacks may overlap (SetFraming waits for the bridge): the controller is not thread-safe.
+        if (Interlocked.Exchange(ref _framingStepping, 1) == 1)
+            return;
+        try
+        {
+            StepFramingOnce();
+        }
+        finally
+        {
+            Volatile.Write(ref _framingStepping, 0);
+        }
+    }
+
+    private void StepFramingOnce()
     {
         if (_framingController is not { } controller)
             return;
         if (Interlocked.Exchange(ref _framingReset, 0) == 1)
             controller.Reset();
         var crop = controller.Update(_framingFaces, TimeSpan.FromTicks(Stopwatch.GetTimestamp() * TimeSpan.TicksPerSecond / Stopwatch.Frequency));
+        // Turned off meanwhile: ApplyFraming has sent the whole frame, which must stay.
+        if (!ReferenceEquals(_framingController, controller))
+            return;
         _pipeline.SetFraming(HitCamFraming.From(crop));
         // The preview zooms with the camera, every step so it moves as smoothly.
         System.Drawing.RectangleF? shown = crop == FramingController.Full ? null : crop;

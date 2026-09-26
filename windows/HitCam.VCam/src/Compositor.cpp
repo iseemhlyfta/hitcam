@@ -490,7 +490,9 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     // stays the coarse mask on flat areas and noise.
     params.guideEps = 1e-3f;
     // Pyramid depth from the strength: 2 levels below half size is a light blur, 5 a heavy one.
-    const int depth = std::min(levels_ - 1, 2 + static_cast<int>(std::lround(s.strength * 3)));
+    // Without a mask the whole frame stands in for the room: always the strongest blur, whatever the setting (a light
+    // one would leave faces and papers readable).
+    const int depth = maskValid ? std::min(levels_ - 1, 2 + static_cast<int>(std::lround(s.strength * 3))) : levels_ - 1;
     params.mode = static_cast<uint32_t>(s.mode == 2 && inputs.image ? 2 : 1);
     params.maskValid = maskValid ? 1 : 0;
     context_->UpdateSubresource(params_.Get(), 0, nullptr, &params, 0, 0);
