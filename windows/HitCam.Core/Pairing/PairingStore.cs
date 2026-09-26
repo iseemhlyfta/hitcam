@@ -129,12 +129,18 @@ public sealed class FilePairingStore : InMemoryPairingStore
         {
             if (!File.Exists(path))
                 return;
-            using var stream = File.OpenRead(path);
-            var devices = JsonSerializer.Deserialize(stream, PairingJson.Default.PairedDeviceArray);
+            var devices = JsonSerializer.Deserialize(ReadAll(path), PairingJson.Default.PairedDeviceArray);
             if (devices is not null)
                 Restore(devices.Where(d => d is not null));
         }
-        catch (Exception ex) when (ex is JsonException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Held by another program (antivirus, sync) or no access: the paired phones are in there, so never save
+            // an empty list over them. Pairing a new phone fails until the next start.
+            Trace.TraceWarning($"HitCam: could not read the pairing store {path}: {ex.Message}");
+            _unreadable = true;
+        }
+        catch (JsonException ex)
         {
             // Start empty: the phones only have to pair again. Keep the unreadable file for inspection,
             // since the next save replaces it.
@@ -149,8 +155,28 @@ public sealed class FilePairingStore : InMemoryPairingStore
         }
     }
 
+    private readonly bool _unreadable;
+
+    /// <summary>The file's bytes, retried briefly while another process holds it.</summary>
+    private static byte[] ReadAll(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return File.ReadAllBytes(path);
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(100);
+            }
+        }
+    }
+
     protected override void Save(IReadOnlyList<PairedDevice> devices)
     {
+        if (_unreadable)
+            throw new IOException($"{_path} could not be read at start; not replacing it");
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(_path))!);
         // Write a flushed temp file and swap it in, so a crash or power loss never leaves a half-written store.
         var temp = _path + ".tmp";

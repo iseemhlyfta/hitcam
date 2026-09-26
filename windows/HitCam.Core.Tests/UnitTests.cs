@@ -172,6 +172,29 @@ public class PairingTests
     }
 
     [Fact]
+    public void A_file_store_locked_at_start_is_never_overwritten_with_an_empty_list()
+    {
+        var path = TempStorePath();
+        try
+        {
+            var token = new FilePairingStore(path).Pair("phone-1", "iPhone");
+            var before = File.ReadAllBytes(path);
+
+            FilePairingStore locked;
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None))
+                locked = new FilePairingStore(path);
+
+            Assert.ThrowsAny<IOException>(() => locked.Pair("phone-2", "iPhone 2"));
+            Assert.Equal(before, File.ReadAllBytes(path));
+            Assert.True(new FilePairingStore(path).Verify("phone-1", token));
+        }
+        finally
+        {
+            Directory.Delete(Path.GetDirectoryName(path)!, recursive: true);
+        }
+    }
+
+    [Fact]
     public void Corrupt_file_store_starts_empty_and_keeps_a_backup()
     {
         var path = TempStorePath();

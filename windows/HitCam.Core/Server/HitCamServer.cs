@@ -93,7 +93,15 @@ public sealed class HitCamServer : IAsyncDisposable
 
         // Fields only once listening: a port in use leaves the server stopped (and disposable), not half started.
         var listener = new TcpListener(_options.BindAddress, _options.Port);
-        listener.Start();
+        try
+        {
+            listener.Start();
+        }
+        catch
+        {
+            listener.Dispose();
+            throw;
+        }
         _cts = new CancellationTokenSource();
         _listener = listener;
         Port = ((IPEndPoint)listener.LocalEndpoint).Port;
