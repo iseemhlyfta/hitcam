@@ -1,9 +1,9 @@
 import Foundation
 
-// HitCam protocol v1. Keep in sync with docs/protocol.md and windows/HitCam.Core/Protocol.
+// HitCam protocol v2 (over TLS). Keep in sync with docs/protocol.md and windows/HitCam.Core/Protocol.
 
 enum ProtocolInfo {
-    static let version = 1
+    static let version = 2
     static let defaultPort: UInt16 = 47800
     static let bonjourType = "_hitcam._tcp"
     static let uriScheme = "hitcam"
@@ -14,6 +14,9 @@ enum MessageType: UInt8 {
     case helloAck = 0x02
     case pairRequest = 0x03
     case pairResult = 0x04
+    // v2 pairing: the PC, then the phone, open their PIN commitments (see PinProof).
+    case pairReveal = 0x05
+    case pairConfirm = 0x06
     case streamConfig = 0x10
     case videoFrame = 0x11
     case requestKeyframe = 0x12
@@ -121,9 +124,19 @@ struct HelloAck: Codable {
     var status: String
     var serverName: String
     var serverId: String
+    /// pairingRequired: the PC's PIN commitment, hex.
+    var pinCommit: String?
 }
 
-struct PairRequest: Codable { var pin: String }
+struct PairRequest: Codable {
+    /// v1 only: in v2 the PIN never leaves the phone.
+    var pin: String?
+    /// v2: the phone's PIN commitment, hex.
+    var commit: String?
+}
+
+/// PairReveal and PairConfirm: the nonce that opens a PIN commitment, hex.
+struct PairNonce: Codable { var nonce: String }
 
 struct PairResult: Codable {
     var ok: Bool
@@ -231,6 +244,8 @@ struct ServerAddress: Equatable, Codable, Hashable {
     var port: UInt16
     var serverId: String?
     var name: String?
+    /// The PC's certificate (SHA-256 hex), trusted like serverId: from the QR code or a completed pairing only.
+    var fingerprint: String? = nil
 
     static func parse(_ text: String) -> ServerAddress? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -241,11 +256,15 @@ struct ServerAddress: Equatable, Codable, Hashable {
                 guard let exact = UInt16(exactly: raw), exact > 0 else { return nil }
                 port = exact
             }
+            // A QR code with a damaged fingerprint is not half trusted: the whole code is rejected.
+            let fingerprint = items.first { $0.name == "fp" }?.value?.lowercased()
+            if let fingerprint, Data(hex: fingerprint, size: 32) == nil { return nil }
             return ServerAddress(
                 host: host,
                 port: port,
                 serverId: items.first { $0.name == "id" }?.value,
-                name: items.first { $0.name == "name" }?.value)
+                name: items.first { $0.name == "name" }?.value,
+                fingerprint: fingerprint)
         }
         // Manual entry: "192.168.1.5" or "192.168.1.5:47800".
         let parts = trimmed.split(separator: ":", omittingEmptySubsequences: false)

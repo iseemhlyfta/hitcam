@@ -1,7 +1,16 @@
 import Foundation
 import Network
 
-/// A TCP connection speaking HitCam framing. All callbacks run on `queue`.
+/// Why a connection ended before or while securing it.
+enum ConnectionSecurityError: Error {
+    /// The PC's certificate is not the one pinned for it: another PC, or someone in between.
+    case fingerprintMismatch
+    /// No TLS with the PC (most likely HitCam 0.3.0 or older there).
+    case tlsFailed
+}
+
+/// A TLS connection speaking HitCam framing, the PC's self-signed certificate pinned by fingerprint (no certificate
+/// authority). All callbacks run on `queue`.
 final class FramedConnection {
     enum Event {
         case ready
@@ -16,21 +25,48 @@ final class FramedConnection {
     private var isReady = false
     private let encoder = JSONEncoder()
 
+    /// What the TLS verify block saw; on `queue`, like everything else.
+    private final class CertificateCheck {
+        var seen: Data?
+        var mismatch = false
+    }
+    private let check: CertificateCheck
+
+    /// The PC's certificate fingerprint, known once `.ready` arrives.
+    var seenFingerprint: Data? { check.seen }
+
     /// Video frames handed to the socket but not yet written out. Used for low-latency frame dropping.
     private(set) var framesInFlight = 0
 
-    init(address: ServerAddress, queue: DispatchQueue, handler: @escaping (Event) -> Void) {
+    /// `expected`: the certificate to insist on (from the QR code or an earlier pairing); nil while pairing, when
+    /// any certificate is accepted and the PIN commitments check it.
+    init(address: ServerAddress, expected: Data?, queue: DispatchQueue, handler: @escaping (Event) -> Void) {
         let tcp = NWProtocolTCP.Options()
         tcp.noDelay = true
         tcp.connectionTimeout = 5
         tcp.enableKeepalive = true
         tcp.keepaliveIdle = 2
-        let parameters = NWParameters(tls: nil, tcp: tcp)
+        let check = CertificateCheck()
+        let tls = NWProtocolTLS.Options()
+        sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, complete in
+            let chain = SecTrustCopyCertificateChain(sec_trust_copy_ref(trust).takeRetainedValue()) as? [SecCertificate]
+            guard let leaf = chain?.first else { return complete(false) }
+            let fingerprint = PinProof.fingerprint(of: leaf)
+            check.seen = fingerprint
+            if let expected, !PinProof.same(expected, fingerprint) {
+                check.mismatch = true
+                return complete(false)
+            }
+            complete(true)
+        }, queue)
+        let parameters = NWParameters(tls: tls, tcp: tcp)
         parameters.prohibitedInterfaceTypes = [.cellular]   // local network only
         connection = NWConnection(
             host: NWEndpoint.Host(address.host),
             port: NWEndpoint.Port(rawValue: address.port) ?? 47800,
             using: parameters)
+        self.check = check
         self.queue = queue
         self.handler = handler
     }
@@ -44,7 +80,10 @@ final class FramedConnection {
                 self.handler(.ready)
                 self.receiveHeader()
             case .failed(let error):
-                self.finish(error)
+                self.finish(self.securityError(error).map { $0 as Error } ?? error)
+            case .waiting(let error) where self.securityError(error) != nil:
+                // TLS will not get better by waiting.
+                self.finish(self.securityError(error))
             case .waiting(let error):
                 // Either no route (wrong IP, Wi-Fi off) or iOS is showing the Local Network permission
                 // prompt. Give the user time to answer, then report the error instead of waiting forever.
@@ -59,6 +98,12 @@ final class FramedConnection {
             }
         }
         connection.start(queue: queue)
+    }
+
+    private func securityError(_ error: NWError) -> ConnectionSecurityError? {
+        if check.mismatch { return .fingerprintMismatch }
+        if case .tls = error { return .tlsFailed }
+        return nil
     }
 
     func cancel() {

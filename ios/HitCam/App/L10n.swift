@@ -15,7 +15,10 @@ enum L10n {
     static var reconnecting: String { ru ? "Связь потеряна, переподключаюсь…" : "Connection lost, reconnecting…" }
     static var cancel: String { ru ? "Отмена" : "Cancel" }
     static var enterPin: String { ru ? "Введите PIN с экрана ПК" : "Enter the PIN shown on the PC" }
-    static func wrongPin(_ left: Int) -> String { ru ? "Неверный PIN, осталось попыток: \(left)" : "Wrong PIN, \(left) attempts left" }
+    static func wrongPin(_ left: Int) -> String {
+        ru ? "Код не подошёл. Введите новый код с экрана ПК (осталось попыток: \(left))"
+           : "The code did not match. Enter the new code shown on the PC (\(left) attempts left)"
+    }
     static var pair: String { ru ? "Сопрячь" : "Pair" }
     static var disconnect: String { ru ? "Отключить" : "Disconnect" }
     static var dim: String { ru ? "Затемнить" : "Dim" }
@@ -39,6 +42,14 @@ enum L10n {
     static var protocolError: String { ru ? "ПК ответил что-то непонятное" : "Unexpected response from the PC" }
     static var otherPc: String {
         ru ? "Это другой компьютер: отсканируйте его QR-код заново" : "This is a different PC: scan its QR code again"
+    }
+    static var keyMismatch: String {
+        ru ? "Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен или кто-то подменяет соединение. Отсканируйте QR-код на ПК заново"
+           : "The PC's key is not the saved one: HitCam was reinstalled there, or someone is intercepting the connection. Scan the QR code on the PC again"
+    }
+    static var secureFailed: String {
+        ru ? "Не удалось установить защищённое соединение. Обновите HitCam на ПК до версии 0.3.1 или новее"
+           : "Could not set up a secure connection. Update HitCam on the PC to 0.3.1 or later"
     }
     static var closedByPc: String { ru ? "ПК завершил соединение" : "The PC closed the connection" }
     static var connectionClosed: String { ru ? "Соединение закрыто" : "Connection closed" }

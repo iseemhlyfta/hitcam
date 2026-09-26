@@ -11,11 +11,40 @@ enum ServerTrust {
         [address.serverId, "\(address.host):\(address.port)"].compactMap { $0 }
     }
 
-    /// After PairResult ok the server proved it holds the PC's PIN, so the id it claimed becomes trusted.
-    static func afterPairing(_ address: ServerAddress, claimedServerId: String?) -> ServerAddress {
+    /// After PairResult ok the server proved it holds the PC's PIN, so the id it claimed becomes trusted, and so does
+    /// the certificate the pairing was bound to.
+    static func afterPairing(_ address: ServerAddress, claimedServerId: String?, fingerprint: String? = nil) -> ServerAddress {
         var paired = address
         if paired.serverId == nil { paired.serverId = claimedServerId }
+        if let fingerprint { paired.fingerprint = fingerprint }
         return paired
+    }
+}
+
+/// A pairing token as stored: `v2:<fingerprint>:<token>`, sent only to the PC behind that certificate (SHA-256 hex).
+/// Tokens stored bare by apps up to 0.3.0 (protocol v1, no certificate) do not parse: that PC is paired again once,
+/// with its PIN, and its certificate pinned from then on.
+struct StoredPairing: Equatable {
+    var fingerprint: String
+    var token: String
+
+    private static let prefix = "v2:"
+
+    var encoded: String { StoredPairing.prefix + fingerprint + ":" + token }
+
+    init(fingerprint: String, token: String) {
+        self.fingerprint = fingerprint
+        self.token = token
+    }
+
+    init?(stored: String) {
+        guard stored.hasPrefix(StoredPairing.prefix) else { return nil }
+        let rest = stored.dropFirst(StoredPairing.prefix.count)
+        guard let colon = rest.firstIndex(of: ":") else { return nil }
+        let fingerprint = String(rest[..<colon])
+        let token = String(rest[rest.index(after: colon)...])
+        guard fingerprint.count == 64, !token.isEmpty else { return nil }
+        self.init(fingerprint: fingerprint, token: token)
     }
 }
 
@@ -53,6 +82,13 @@ final class StreamSession: ObservableObject {
     private var isStreaming = false
     private var needKeyframe = true
     private var sentToken: String?
+    // v2 pairing (see PinProof): the PC's commitment from HelloAck, what the user typed and our nonce.
+    private var pinCommit: Data?
+    private var typedPin: String?
+    private var pinNonce: Data?
+    // The last PIN did not match: the next pairing window says so. Attempts as the PC last reported them.
+    private var pinRejected = false
+    private var attemptsLeft = 5
 
     // Owned by `queue`: the session's copy of the camera state and the matching encoder size.
     private var state: CameraState
@@ -107,8 +143,14 @@ final class StreamSession: ObservableObject {
 
     func submitPin(_ pin: String) {
         queue.async {
-            guard case .pairing = self.currentPhase else { return }
-            self.connection?.send(.pairRequest, json: PairRequest(pin: pin))
+            // v2: the PIN itself never leaves the phone, only a commitment to it and the certificate seen.
+            guard case .pairing = self.currentPhase, pin.utf8.count == 6, self.typedPin == nil,
+                  let connection = self.connection, let seen = connection.seenFingerprint else { return }
+            let nonce = PinProof.newNonce()
+            self.typedPin = pin
+            self.pinNonce = nonce
+            let commit = PinProof.commit(label: PinProof.phoneLabel, fingerprint: seen, pin: pin, nonce: nonce)
+            connection.send(.pairRequest, json: PairRequest(pin: nil, commit: commit.hex))
         }
     }
 
@@ -139,7 +181,12 @@ final class StreamSession: ObservableObject {
         // Events from an older, cancelled connection must not tear down this one.
         let id = UUID()
         connectionId = id
-        let connection = FramedConnection(address: address, queue: queue) { [weak self] event in
+        pinCommit = nil
+        typedPin = nil
+        pinNonce = nil
+        // The certificate to insist on: from the QR code, or the one an earlier pairing was made behind.
+        let expected = (address.fingerprint ?? storedPairings().first?.fingerprint).flatMap { Data(hex: $0, size: 32) }
+        let connection = FramedConnection(address: address, expected: expected, queue: queue) { [weak self] event in
             guard let self, self.connectionId == id else { return }
             self.handle(event)
         }
@@ -160,6 +207,7 @@ final class StreamSession: ObservableObject {
             connectionId = nil
             teardown()
             guard !userStopped, address != nil else { return }
+            if (error as? ConnectionSecurityError) == .fingerprintMismatch { return fail(L10n.keyMismatch) }
             if wasStreaming, let address {
                 // Wi-Fi hiccup or PC restarted: keep trying while the app is open.
                 setPhase(.reconnecting(address))
@@ -168,6 +216,8 @@ final class StreamSession: ObservableObject {
                 scheduleReconnect()
             } else if case .failed = currentPhase {
                 // Keep the more specific message from the handshake.
+            } else if (error as? ConnectionSecurityError) == .tlsFailed {
+                fail(L10n.secureFailed)
             } else {
                 fail(error.map { L10n.connectionFailed($0.localizedDescription) } ?? L10n.connectionClosed)
             }
@@ -193,8 +243,15 @@ final class StreamSession: ObservableObject {
         return ServerTrust.tokenKeys(for: address)
     }
 
+    /// Tokens stored for this PC that were issued over TLS (bare v1 tokens are never sent: that PC pairs again once).
+    private func storedPairings() -> [StoredPairing] {
+        tokenKeys().compactMap { TokenStore.token(for: $0).flatMap(StoredPairing.init(stored:)) }
+    }
+
     private func sendHello() {
-        let token = tokenKeys().lazy.compactMap { TokenStore.token(for: $0) }.first
+        // Only to the certificate the token was issued behind.
+        let seen = connection?.seenFingerprint?.hex
+        let token = storedPairings().first { $0.fingerprint == seen }?.token
         sentToken = token
         let hello = Hello(
             protocolVersion: ProtocolInfo.version,
@@ -223,7 +280,11 @@ final class StreamSession: ObservableObject {
                 startStreaming(serverName: ack.serverName)
             case HelloStatus.pairingRequired:
                 forgetRejectedToken()
-                if let address { setPhase(.pairing(address, attemptsLeft: 5, wrongPin: false)) }
+                guard let commit = ack.pinCommit.flatMap({ Data(hex: $0, size: 32) }) else { return fail(L10n.protocolError) }
+                pinCommit = commit
+                let wrong = pinRejected
+                pinRejected = false
+                if let address { setPhase(.pairing(address, attemptsLeft: attemptsLeft, wrongPin: wrong)) }
             case HelloStatus.busy:
                 fail(L10n.busy)
             case HelloStatus.pairingLocked:
@@ -231,16 +292,33 @@ final class StreamSession: ObservableObject {
             default:
                 fail(L10n.versionMismatch)
             }
+        case .pairReveal:
+            guard case .pairing = currentPhase, let pin = typedPin, let nonce = pinNonce, let commit = pinCommit,
+                  let seen = connection?.seenFingerprint else { return }
+            guard let theirs = (try? decoder.decode(PairNonce.self, from: payload)).flatMap({ Data(hex: $0.nonce, size: PinProof.nonceSize) }) else {
+                return fail(L10n.protocolError)
+            }
+            let expected = PinProof.commit(label: PinProof.pcLabel, fingerprint: seen, pin: pin, nonce: theirs)
+            guard PinProof.same(expected, commit) else {
+                // A mistyped PIN, or a certificate that is not the PC's (someone in between): our commitment stays
+                // closed. The PC counts it as a wrong PIN and shows a new one on the next connection.
+                attemptsLeft = max(1, attemptsLeft - 1)
+                return retryPairing()
+            }
+            connection?.send(.pairConfirm, json: PairNonce(nonce: nonce.hex))
         case .pairResult:
             guard case .pairing = currentPhase,
                   let result = try? decoder.decode(PairResult.self, from: payload), var address else { return }
             if result.ok, let token = result.token {
-                address = ServerTrust.afterPairing(address, claimedServerId: claimedServerId)
+                guard let seen = connection?.seenFingerprint?.hex else { return fail(L10n.protocolError) }
+                address = ServerTrust.afterPairing(address, claimedServerId: claimedServerId, fingerprint: seen)
                 self.address = address
-                tokenKeys().forEach { TokenStore.save(token, for: $0) }
+                let stored = StoredPairing(fingerprint: seen, token: token).encoded
+                tokenKeys().forEach { TokenStore.save(stored, for: $0) }
                 startStreaming(serverName: address.name ?? address.host)
             } else if result.attemptsLeft > 0 {
-                setPhase(.pairing(address, attemptsLeft: result.attemptsLeft, wrongPin: true))
+                attemptsLeft = result.attemptsLeft
+                retryPairing()
             } else {
                 fail(L10n.pairingLocked)
             }
@@ -260,11 +338,17 @@ final class StreamSession: ObservableObject {
         }
     }
 
+    /// The PIN is used up: a new connection gets a new pairing window (and a new PIN on the PC).
+    private func retryPairing() {
+        pinRejected = true
+        openConnection(reconnecting: false)
+    }
+
     /// The PC asked for a PIN although a token was sent: it was revoked there, so drop it here too.
     private func forgetRejectedToken() {
         guard let sent = sentToken else { return }
         sentToken = nil
-        for key in tokenKeys() where TokenStore.token(for: key) == sent {
+        for key in tokenKeys() where TokenStore.token(for: key).flatMap(StoredPairing.init(stored:))?.token == sent {
             TokenStore.remove(for: key)
         }
     }
