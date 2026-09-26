@@ -24,6 +24,7 @@ public sealed class VideoPipeline : IDisposable
     private volatile bool _overlayUnsupported;
     private volatile bool _shotUnsupported;
     private volatile bool _sceneUnsupported;
+    private volatile bool _facesUnsupported;
     private readonly bool _previewOnly;
 
     /// <param name="previewOnly">
@@ -216,6 +217,31 @@ public sealed class VideoPipeline : IDisposable
             catch (EntryPointNotFoundException)
             {
                 _sceneUnsupported = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Faces hidden (or framed) in the camera picture (never the preview); empty clears them. The DLL copies them and
+    /// drops them if not refreshed within a second. Any thread. Does nothing before the decoder exists or with a DLL
+    /// that predates faces.
+    /// </summary>
+    public unsafe void SetFaceRegions(ReadOnlySpan<HitCamFaceRegion> regions)
+    {
+        if (_facesUnsupported)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                fixed (HitCamFaceRegion* pointer = regions)
+                    NativeMethods.HitCam_BridgeSetFaceRegions(_bridge, pointer, regions.Length);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _facesUnsupported = true;
             }
         }
     }

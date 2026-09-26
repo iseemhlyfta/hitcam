@@ -75,6 +75,7 @@ add_library(HitCamVCam SHARED
     src/ShotEffect.cpp
     src/CrashLog.cpp
     src/HandScene.cpp
+    src/FaceEffect.cpp
     ${SHADER_HEADERS}
     src/DllMain.cpp
     src/HitCamVCam.def

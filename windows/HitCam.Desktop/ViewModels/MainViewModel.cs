@@ -12,6 +12,7 @@ using HitCam.Core.Protocol;
 using HitCam.Core.Server;
 using HitCam.Desktop.Services;
 using HitCam.Vision;
+using HitCam.Vision.Faces;
 using HitCam.Vision.Hands;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
@@ -39,6 +40,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private volatile HandSettings? _handsToCamera;
     private bool _handSceneSent;
     private bool _threadsWereOn;
+    private readonly FaceEngine _faces;
+    // The settings the camera regions are built with while face hiding runs; null: nothing for the camera.
+    private volatile FaceSettings? _facesToCamera;
+    private bool _faceRegionsSent;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -142,6 +147,30 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             this.RaisePropertyChanged(nameof(ShowHandPoints));
         });
 
+        // Face hiding: its own thread and frames too; clicks in the preview go to the engine.
+        _faces = new FaceEngine(_pipeline.CopyPreviewTo);
+        Faces = new FacesViewModel(
+            _settings.Faces,
+            () => FaceModelFiles.Find() is not null,
+            _ => ApplyFaces(),
+            settings =>
+            {
+                _settings = _settings with { Faces = settings };
+                _settings.Save();
+            },
+            _faces.Toggle,
+            _faces.ForgetPeople,
+            AvaloniaScheduler.Instance);
+        _faces.StatusChanged += s => Dispatcher.UIThread.Post(() => Faces.ShowStatus(s));
+        _faces.ResultReady += r =>
+        {
+            SendFaceRegions(r);
+            Dispatcher.UIThread.Post(() => Faces.ShowResult(r));
+        };
+        Faces.WhenAnyValue(f => f.IsActive).Subscribe(_ => this.RaisePropertyChanged(nameof(ShowFaces)));
+        Faces.ToggleCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Face toggle: {ex.Message}"));
+        Faces.HideEveryoneCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Hide everyone: {ex.Message}"));
+
         _server = new HitCamServer(
             new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
             new FilePairingStore(AppPaths.PairedDevices));
@@ -162,8 +191,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _previewTimer!.Start();
             _vision.ResetTracks();
             _hands.ResetTracks();
+            _faces.ResetTracks();
             ApplyVision();
             ApplyHands();
+            ApplyFaces();
         });
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
@@ -178,6 +209,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             Processing.ClearStats();
             ApplyVision();
             ApplyHands();
+            ApplyFaces();
             _cameraOverlay.Clear();
             Interlocked.Exchange(ref _streamSize, 0);
         });
@@ -196,6 +228,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             Interlocked.Exchange(ref _streamSize, ((long)c.Width << 32) | (uint)c.Height);
             _vision.ResetTracks();
             _hands.ResetTracks();
+            _faces.ResetTracks();
             LiveText = $"LIVE · {Math.Min(c.Width, c.Height)}p · {c.Fps} fps";
         });
         _server.StatusReceived += s => Dispatcher.UIThread.Post(() =>
@@ -260,6 +293,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             ApplyProcessing(Processing.EffectiveNative());
             ApplyVision();
             ApplyHands();
+            ApplyFaces();
         }
     }
 
@@ -288,6 +322,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     /// <summary>Points on the hands are drawn: tracking runs, there is a picture and they are not hidden.</summary>
     public bool ShowHandPoints => ShowHands && Hands.ShowPoints;
+
+    /// <summary>Face hiding: settings panel, stats and the faces for the preview overlay.</summary>
+    public FacesViewModel Faces { get; }
+
+    /// <summary>Squares around faces are drawn over the preview: hiding runs and there is a picture.</summary>
+    public bool ShowFaces => Faces.IsActive && HasPreview;
 
     /// <summary>Phone camera settings, editable from the PC.</summary>
     public CameraControlsViewModel Controls { get; }
@@ -376,6 +416,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             this.RaisePropertyChanged(nameof(ShowDetections));
             this.RaisePropertyChanged(nameof(ShowHands));
             this.RaisePropertyChanged(nameof(ShowHandPoints));
+            this.RaisePropertyChanged(nameof(ShowFaces));
         }
     }
 
@@ -553,6 +594,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _vision.Start(model!);
         else
             _vision.Stop();
+        _cameraOverlay.ShowLabels = Vision.ShowLabels;
         _cameraOverlay.SetEnabled(active && Vision.BurnIn);
     }
 
@@ -590,6 +632,34 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     }
 
     /// <summary>
+    /// Faces for the camera picture, on the face thread: sent with every result while there is something to draw (the
+    /// DLL drops regions not refreshed within a second), and empty once when there no longer is.
+    /// </summary>
+    private void SendFaceRegions(FaceResult result)
+    {
+        var settings = _facesToCamera;
+        var regions = settings is null ? [] : FaceStyle.CameraRegions(result.Faces, settings);
+        if (regions.Length == 0 && !_faceRegionsSent)
+            return;
+        _pipeline.SetFaceRegions(regions);
+        _faceRegionsSent = regions.Length > 0;
+    }
+
+    /// <summary>Face hiding runs while it is on, the models are there and a phone is connected; otherwise they are unloaded.</summary>
+    private void ApplyFaces()
+    {
+        var active = ExperimentsEnabled && Faces.IsEnabled && Faces.HasModels && IsConnected;
+        Faces.IsActive = active;
+        _facesToCamera = active ? Faces.Settings : null;
+        if (!active)
+            _pipeline.SetFaceRegions([]);
+        if (active)
+            _faces.Start();
+        else
+            _faces.Stop();
+    }
+
+    /// <summary>
     /// Height in pixels of the picture the camera sends, for the size of burnt-in labels: the phone's stream in the
     /// preview's orientation, or twice the preview (which is at most 960×540) before the stream is known.
     /// </summary>
@@ -621,11 +691,29 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             if (!_pipeline.CopyPreview(buffer.Address, buffer.RowBytes, width, height))
                 return;
+            HideFaces(buffer.Address, buffer.RowBytes, width, height);
         }
 
         _lastPreviewFrame = frame;
         _nextPreviewBuffer ^= 1;
         Preview = bitmap;
+    }
+
+    /// <summary>
+    /// Covers the hidden faces in the preview bitmap. Analysis reads the decoder's own copy, so it still sees them.
+    /// </summary>
+    private unsafe void HideFaces(IntPtr pixels, int stride, int width, int height)
+    {
+        if (!Faces.IsActive || Faces.Faces.Count == 0)
+            return;
+        var settings = Faces.Settings;
+        var picture = new Span<byte>((void*)pixels, stride * height);
+        foreach (var face in Faces.Faces)
+        {
+            if (face.Hidden)
+                FaceEffects.Apply(picture, width, height, stride, face.Box, settings.Effect, settings.Strength / 100f,
+                    HandSettings.ParseColor(settings.FillColor));
+        }
     }
 
     private void UpdateStats()
@@ -692,6 +780,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         Processing.SaveNow();
         Vision.SaveNow();
         Hands.SaveNow();
+        Faces.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -708,6 +797,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         // Analysis reads the decoder's preview: it goes first.
         _vision.Dispose();
         _hands.Dispose();
+        _faces.Dispose();
         _cameraOverlay.Clear();
         _pipeline.Dispose();
         _cameraOverlay.Dispose();

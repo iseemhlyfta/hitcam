@@ -69,13 +69,13 @@ try {
         Write-Host "  python export_default.py --out $installDir\models   (see vision\README.md)"
     }
 
-    # Hand tracking models: from vision\output\hands if there, otherwise downloaded (checked by SHA-256).
+    # Hand and face models: from vision\output if there, otherwise downloaded (checked by SHA-256).
     try {
-        & (Join-Path $PSScriptRoot "get-hand-models.ps1") -Destination (Join-Path $installDir "models\hands")
+        & (Join-Path $PSScriptRoot "get-models.ps1") -Destination (Join-Path $installDir "models")
     }
     catch {
-        Write-Host "Hand tracking models could not be downloaded ($($_.Exception.Message)); hand tracking stays off."
-        Write-Host "  Run windows\get-hand-models.ps1 -Destination $installDir\models\hands later to add them."
+        Write-Host "Hand and face models could not be downloaded ($($_.Exception.Message)); those features stay off."
+        Write-Host "  Run windows\get-models.ps1 -Destination $installDir\models later to add them."
     }
 }
 finally {

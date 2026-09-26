@@ -15,6 +15,9 @@ public sealed record VisionSettings
     /// <summary>Boxes are also drawn into the picture of the "HitCam" camera.</summary>
     public bool BurnIn { get; set; }
 
+    /// <summary>Labels ("person 92%") on the boxes, in the preview and in the camera; off: bare boxes.</summary>
+    public bool ShowLabels { get; set; } = true;
+
     /// <summary>File name of the model without extension (<see cref="ModelCatalog"/>).</summary>
     public string ModelId
     {
@@ -50,10 +53,10 @@ public sealed record VisionSettings
     }
 
     public bool Equals(VisionSettings? other) =>
-        other is not null && Enabled == other.Enabled && BurnIn == other.BurnIn && ModelId == other.ModelId
+        other is not null && Enabled == other.Enabled && BurnIn == other.BurnIn && ShowLabels == other.ShowLabels && ModelId == other.ModelId
         && Threshold == other.Threshold && ExcludedClasses.SequenceEqual(other.ExcludedClasses);
 
-    public override int GetHashCode() => HashCode.Combine(Enabled, BurnIn, ModelId, Threshold, ExcludedClasses.Count);
+    public override int GetHashCode() => HashCode.Combine(Enabled, BurnIn, ShowLabels, ModelId, Threshold, ExcludedClasses.Count);
 
     private static IReadOnlyList<string> Normalize(IEnumerable<string?>? names) =>
         names is null

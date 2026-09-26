@@ -101,6 +101,7 @@ public sealed class CameraOverlay : IDisposable
     private bool _enabled;
     private bool _hasBoxes;
     private int _frameHeight = 1080;
+    private bool _showLabels = true;
 
     public CameraOverlay(Sink sink) => _sink = sink;
 
@@ -109,6 +110,13 @@ public sealed class CameraOverlay : IDisposable
     {
         get => Volatile.Read(ref _frameHeight);
         set => Volatile.Write(ref _frameHeight, Math.Max(value, 1));
+    }
+
+    /// <summary>Labels on the boxes; off: bare boxes. Any thread; applies from the next result.</summary>
+    public bool ShowLabels
+    {
+        get => Volatile.Read(ref _showLabels);
+        set => Volatile.Write(ref _showLabels, value);
     }
 
     public bool IsEnabled
@@ -153,13 +161,12 @@ public sealed class CameraOverlay : IDisposable
             var boxes = new HitCamOverlayBox[tracks.Count];
             var handles = new GCHandle[tracks.Count];
             var frameHeight = FrameHeight;
+            var showLabels = ShowLabels;
             try
             {
                 for (var i = 0; i < tracks.Count; i++)
                 {
                     var track = tracks[i];
-                    var label = _labels.Render(track.Label, frameHeight);
-                    handles[i] = GCHandle.Alloc(label.Alpha, GCHandleType.Pinned);
                     boxes[i] = new HitCamOverlayBox
                     {
                         Left = track.Box.Left,
@@ -167,10 +174,14 @@ public sealed class CameraOverlay : IDisposable
                         Right = track.Box.Right,
                         Bottom = track.Box.Bottom,
                         Rgb = track.Rgb,
-                        LabelWidth = label.Width,
-                        LabelHeight = label.Height,
-                        Label = handles[i].AddrOfPinnedObject(),
                     };
+                    if (!showLabels)
+                        continue;
+                    var label = _labels.Render(track.Label, frameHeight);
+                    handles[i] = GCHandle.Alloc(label.Alpha, GCHandleType.Pinned);
+                    boxes[i].LabelWidth = label.Width;
+                    boxes[i].LabelHeight = label.Height;
+                    boxes[i].Label = handles[i].AddrOfPinnedObject();
                 }
                 _sink(boxes);
                 _hasBoxes = true;

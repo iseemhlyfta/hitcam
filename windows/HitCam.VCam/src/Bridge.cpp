@@ -24,6 +24,7 @@
 #include "Overlay.h"
 #include "ShotEffect.h"
 #include "HandScene.h"
+#include "FaceEffect.h"
 #include "Processing.h"
 #include "Shared.h"
 
@@ -177,6 +178,8 @@ struct FrameSink {
     ShotEffect shots;
     // Points, threads and fills for the hands, drawn into the camera's frames (not the preview).
     HandScene hands;
+    // Hidden faces (mosaic, blur, fill) in the camera's frames (not the preview).
+    FaceEffect faces;
     // HitCamVCamTest only: frames go to the preview alone, not to a camera; `testOutput` (if set) receives what
     // the camera would get.
     using TestOutput = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
@@ -265,6 +268,11 @@ struct FrameSink {
                 chroma = packed.data() + static_cast<size_t>(width) * height;
                 pitch = width;
             };
+            // Faces first: boxes, hands and shots are drawn over the hidden faces.
+            if (const auto regions = faces.Current()) {
+                own();
+                FaceEffect::Draw(*regions, packed.data(), packed.data() + static_cast<size_t>(width) * height, width, width, height);
+            }
             if (const auto boxes = overlay.Current()) {
                 own();
                 Overlay::Draw(*boxes, packed.data(), packed.data() + static_cast<size_t>(width) * height, width, width, height);
@@ -602,6 +610,23 @@ __declspec(dllexport) void __stdcall HitCam_BridgeSetHandScene(void* handle, con
                                                                const HitCamSceneLine* lines, int32_t lineCount,
                                                                const HitCamSceneQuad* quads, int32_t quadCount) {
     if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.hands.Set(dots, dotCount, lines, lineCount, quads, quadCount); });
+}
+
+// Faces to hide in the camera's frames (never in the preview), replacing the previous ones. Any thread; copies
+// everything; count 0 clears. Regions not refreshed for over a second are dropped.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetFaceRegions(void* handle, const HitCamFaceRegion* regions, int32_t count) {
+    if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.faces.Set(regions, count); });
+}
+
+// For HitCamVCamTest: applies face regions to one packed NV12 frame.
+__declspec(dllexport) void __stdcall HitCam_TestFaceFrame(const HitCamFaceRegion* regions, int32_t count, uint8_t* nv12, uint32_t width, uint32_t height) {
+    if (!nv12 || width < 2 || height < 2) return;
+    hitcam::Quietly([&] {
+        hitcam::FaceEffect effect;
+        effect.Set(regions, count);
+        if (const auto current = effect.Current())
+            hitcam::FaceEffect::Draw(*current, nv12, nv12 + static_cast<size_t>(width) * height, width, width, height);
+    });
 }
 
 // For HitCamVCamTest: draws a hand scene onto one packed NV12 frame.

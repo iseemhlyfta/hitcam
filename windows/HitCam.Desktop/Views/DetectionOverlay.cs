@@ -53,6 +53,10 @@ public sealed class DetectionOverlay : Control
     public static readonly StyledProperty<IImage?> SourceProperty =
         AvaloniaProperty.Register<DetectionOverlay, IImage?>(nameof(Source));
 
+    /// <summary>Tabs with "person 92%" over the boxes; off: bare boxes.</summary>
+    public static readonly StyledProperty<bool> ShowLabelsProperty =
+        AvaloniaProperty.Register<DetectionOverlay, bool>(nameof(ShowLabels), true);
+
     private static readonly Typeface LabelTypeface = new(FontFamily.Default, FontStyle.Normal, FontWeight.SemiBold);
     private const double LabelFontSize = 12;
     private const double Outline = 2;
@@ -61,7 +65,7 @@ public sealed class DetectionOverlay : Control
 
     static DetectionOverlay()
     {
-        AffectsRender<DetectionOverlay>(TracksProperty, SourceProperty);
+        AffectsRender<DetectionOverlay>(TracksProperty, SourceProperty, ShowLabelsProperty);
         IsHitTestVisibleProperty.OverrideDefaultValue<DetectionOverlay>(false);
     }
 
@@ -75,6 +79,12 @@ public sealed class DetectionOverlay : Control
     {
         get => GetValue(SourceProperty);
         set => SetValue(SourceProperty, value);
+    }
+
+    public bool ShowLabels
+    {
+        get => GetValue(ShowLabelsProperty);
+        set => SetValue(ShowLabelsProperty, value);
     }
 
     public override void Render(DrawingContext context)
@@ -93,6 +103,8 @@ public sealed class DetectionOverlay : Control
                 var box = OverlayGeometry.Map(track.Box, picture);
                 // The outline is drawn inside the box, so boxes touching the picture's edge keep all four sides.
                 context.DrawRectangle(null, pen, box.Deflate(Outline / 2));
+                if (!ShowLabels)
+                    continue;
 
                 var text = new FormattedText(track.Label, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
                     LabelTypeface, LabelFontSize, Brushes.White);

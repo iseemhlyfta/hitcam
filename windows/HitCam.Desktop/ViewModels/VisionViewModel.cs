@@ -143,6 +143,9 @@ public sealed class VisionViewModel : ReactiveObject
     /// <summary>Also draw the boxes into the "HitCam" camera picture.</summary>
     public bool BurnIn { get => _settings.BurnIn; set => Update(_settings with { BurnIn = value }); }
 
+    /// <summary>Labels on the boxes, in the preview and in the camera.</summary>
+    public bool ShowLabels { get => _settings.ShowLabels; set => Update(_settings with { ShowLabels = value }); }
+
     // Models
 
     public IReadOnlyList<ModelOption> Models
@@ -423,7 +426,7 @@ public sealed class VisionViewModel : ReactiveObject
 
     private static readonly string[] AllProperties =
     [
-        nameof(IsEnabled), nameof(BurnIn), nameof(SelectedModel), nameof(Threshold), nameof(ThresholdText),
+        nameof(IsEnabled), nameof(BurnIn), nameof(ShowLabels), nameof(SelectedModel), nameof(Threshold), nameof(ThresholdText),
         nameof(Settings), nameof(CurrentOptions),
     ];
 }

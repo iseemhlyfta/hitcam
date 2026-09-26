@@ -66,6 +66,10 @@ internal static class NativeMethods
     public static extern unsafe void HitCam_BridgeSetHandScene(IntPtr handle, HitCamSceneDot* dots, int dotCount,
         HitCamSceneLine* lines, int lineCount, HitCamSceneQuad* quads, int quadCount);
 
+    /// <summary>Faces to hide in the camera picture; the DLL copies them. Count 0 clears.</summary>
+    [DllImport(Library)]
+    public static extern unsafe void HitCam_BridgeSetFaceRegions(IntPtr handle, HitCamFaceRegion* regions, int count);
+
     /// <summary>Plays a finger-gun shot in the camera picture for about 0.2 s from now; the DLL copies it.</summary>
     [DllImport(Library)]
     public static extern void HitCam_BridgeShot(IntPtr handle, in HitCamShot shot);

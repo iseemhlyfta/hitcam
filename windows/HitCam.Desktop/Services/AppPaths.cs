@@ -36,7 +36,7 @@ public sealed partial record AppSettings
     private ProcessingSettings _processing = new();
 
     /// <summary>
-    /// The master switch of the experimental features (NVIDIA noise removal, object analysis, hands). Off: none of
+    /// The master switch of the experimental features (NVIDIA noise removal, object analysis, hands, faces). Off: none of
     /// them runs, but their own settings are kept, so switching back on restores what was on.
     /// </summary>
     public bool Experiments { get; set; } = true;
@@ -58,6 +58,15 @@ public sealed partial record AppSettings
     }
 
     private HandSettings _hands = new();
+
+    /// <summary>Face hiding; off by default.</summary>
+    public FaceSettings Faces
+    {
+        get => _faces;
+        set => _faces = value ?? new FaceSettings();
+    }
+
+    private FaceSettings _faces = new();
 
     public static AppSettings Load() => Load(AppPaths.Settings);
 

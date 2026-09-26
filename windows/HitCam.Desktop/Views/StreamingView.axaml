@@ -39,7 +39,7 @@
                   <Panel x:Name="PreviewContent">
                     <Image Source="{Binding Preview}" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="MediumQuality" />
                     <!--  Detected objects, mapped through the same letterboxing as the image  -->
-                    <views:DetectionOverlay Source="{Binding Preview}" Tracks="{Binding Vision.Tracks}" IsVisible="{Binding ShowDetections}" />
+                    <views:DetectionOverlay Source="{Binding Preview}" Tracks="{Binding Vision.Tracks}" ShowLabels="{Binding Vision.ShowLabels}" IsVisible="{Binding ShowDetections}" />
                     <!--  Tracked hands: dots on the fingers, lines if asked  -->
                     <!--  Threads between fingertips of the two hands and the fills between them  -->
                     <views:ThreadOverlay Source="{Binding Preview}" Threads="{Binding Hands.Threads}" Fills="{Binding Hands.Fills}"
@@ -48,6 +48,9 @@
                     <views:HandOverlay Source="{Binding Preview}" Hands="{Binding Hands.Hands}" ShowSkeleton="{Binding Hands.ShowSkeleton}" IsVisible="{Binding ShowHandPoints}" />
                     <!--  Finger-gun shots: flash here, kick on the whole panel  -->
                     <views:ShotOverlay Source="{Binding Preview}" Shots="{Binding Hands.Shots}" ShakeTarget="{Binding #PreviewContent}" IsVisible="{Binding ShowHands}" />
+                    <!--  Squares around faces (the effect is already in the picture); a click uncovers or hides one  -->
+                    <views:FaceOverlay Source="{Binding Preview}" Faces="{Binding Faces.Faces}" ToggleCommand="{Binding Faces.ToggleCommand}"
+                                       IsVisible="{Binding ShowFaces}" />
                   </Panel>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" IsVisible="{Binding !HasPreview}">
                         <Path Classes="icon" Width="40" Height="40" StrokeThickness="1.4" Stroke="{StaticResource HcVideoMuted}" Data="{StaticResource IconVideo}" />
@@ -416,6 +419,11 @@
                         <!--  Hand tracking: points on the fingers, gestures, threads  -->
                         <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
                             <views:HandsPanel DataContext="{Binding Hands}" />
+                        </Border>
+
+                        <!--  Face hiding: mosaic, blur or a fill over faces; a click in the preview uncovers one  -->
+                        <Border Margin="20,0,20,16" Padding="0,16,0,0" BorderBrush="{DynamicResource HcBorder}" BorderThickness="0,1,0,0">
+                            <views:FacesPanel DataContext="{Binding Faces}" />
                         </Border>
                         </StackPanel>
                     </StackPanel>

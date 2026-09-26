@@ -41,6 +41,12 @@
                 <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.VisionBurnIn}" TextWrapping="Wrap" />
             </DockPanel>
 
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.VisionLabelsHint}">
+                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding ShowLabels}"
+                              AutomationProperties.Name="{x:Static svc:Loc.VisionLabels}" />
+                <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.VisionLabels}" TextWrapping="Wrap" />
+            </DockPanel>
+
             <StackPanel Spacing="6">
                 <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionModel}" ToolTip.Tip="{x:Static svc:Loc.VisionModelHint}" />
                 <ListBox Classes="segmented" ItemsSource="{Binding Models}" SelectedItem="{Binding SelectedModel}" IsVisible="{Binding UsesModelSegments}"

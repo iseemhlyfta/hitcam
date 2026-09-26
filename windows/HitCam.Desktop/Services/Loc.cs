@@ -145,6 +145,10 @@ public static class Loc
     public static string VisionHint => Russian
         ? "Находит людей, животных и предметы в кадре и обводит их рамками. Работает на этом ПК"
         : "Finds people, animals and things in the picture and draws boxes around them. Runs on this PC";
+    public static string VisionLabels => Russian ? "Показывать подписи" : "Show labels";
+    public static string VisionLabelsHint => Russian
+        ? "Название и уверенность над рамкой, в превью и в камере «HitCam». Выключено — только рамки."
+        : "Name and confidence above each box, in the preview and in the “HitCam” camera. Off: boxes only.";
     public static string VisionBurnIn => Russian ? "Показывать рамки в камере «HitCam»" : "Show boxes in the “HitCam” camera";
     public static string VisionBurnInHint => Russian
         ? "Рамки увидят и в Zoom, Discord, OBS. Без этого они видны только здесь, в превью"
@@ -218,6 +222,34 @@ public static class Loc
     public static string HandsStats(int hands, double fps, double milliseconds, string provider) => Russian
         ? $"Рук в кадре: {hands} · {fps:0} fps · {milliseconds:0} мс · {provider}"
         : $"Hands in view: {hands} · {fps:0} fps · {milliseconds:0} ms · {provider}";
+
+    // Faces
+    public static string Faces => Russian ? "Скрытие лиц" : "Face hiding";
+    public static string FacesHint => Russian
+        ? "Находит лица и закрывает их. Новое лицо сразу скрыто; кого открыли, узнаётся по лицу, пока программа открыта. Работает на этом ПК"
+        : "Finds faces and covers them. A new face is hidden at once; whoever you uncover is recognized by their face while the app is open. Runs on this PC";
+    public static string FacesEffect => Russian ? "Чем закрывать" : "Cover with";
+    public static string FacesMosaic => Russian ? "Мозаика" : "Mosaic";
+    public static string FacesBlur => Russian ? "Размытие" : "Blur";
+    public static string FacesFill => Russian ? "Заливка" : "Fill";
+    public static string FacesStrength => Russian ? "Сила" : "Strength";
+    public static string FacesFillColor => Russian ? "Цвет заливки" : "Fill colour";
+    public static string FacesCameraEffect => Russian ? "Скрывать лица" : "Hide faces";
+    public static string FacesCameraEffectHint => Russian
+        ? "Выключено — в камере лица видны, скрыты только в превью"
+        : "Off: faces are visible in the camera and hidden only in the preview";
+    public static string FacesCameraFrame => Russian ? "Рамки вокруг лиц" : "Squares around faces";
+    public static string FacesClickHint => Russian
+        ? "Кликните по лицу в превью, чтобы открыть его; ещё раз — снова скрыть"
+        : "Click a face in the preview to uncover it; click again to hide it";
+    public static string FacesHideEveryone => Russian ? "Скрыть всех" : "Hide everyone";
+    public static string FacesNoModels(string folder) => Russian
+        ? $"Модели лиц не найдены. Переустановите HitCam или положите их в папку {folder} (см. vision/README.md)"
+        : $"Face models not found. Reinstall HitCam or put them into {folder} (see vision/README.md)";
+    public static string FacesStarting(string provider) => Russian ? $"Лица: запуск · {provider}" : $"Faces: starting · {provider}";
+    public static string FacesStats(int faces, int hidden, double fps, double milliseconds, string provider) => Russian
+        ? $"Лиц в кадре: {faces} (скрыто {hidden}) · {fps:0} fps · {milliseconds:0} мс · {provider}"
+        : $"Faces in view: {faces} ({hidden} hidden) · {fps:0} fps · {milliseconds:0} ms · {provider}";
     public static string ClassGroupPeople => Russian ? "Люди" : "People";
     public static string ClassGroupVehicles => Russian ? "Транспорт" : "Vehicles";
     public static string ClassGroupStreet => Russian ? "Улица" : "Street";

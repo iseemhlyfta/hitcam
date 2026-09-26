@@ -64,7 +64,7 @@ public sealed record HandSettings
     /// <summary>0xRRGGBB of a "#RRGGBB" setting.</summary>
     public static uint ParseColor(string color) => uint.Parse(color.AsSpan(1), System.Globalization.NumberStyles.HexNumber);
 
-    private static string NormalizeColor(string? value, string fallback)
+    internal static string NormalizeColor(string? value, string fallback)
     {
         var text = value?.Trim() ?? "";
         if (!text.StartsWith('#'))

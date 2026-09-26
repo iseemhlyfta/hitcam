@@ -11,6 +11,7 @@
 //   --overlay         detection boxes burnt into the camera frames (HitCam_BridgeSetOverlay); no camera output
 //   --shot            the finger-gun shot effect in the camera frames (HitCam_BridgeShot); no camera output
 //   --scene           points, threads and fills for the hands in the camera frames (HitCam_BridgeSetHandScene)
+//   --faces           hidden faces (mosaic, blur, fill) in the camera frames (HitCam_BridgeSetFaceRegions)
 //   --crashlog        the native crash log (HitCam_InstallCrashLog) records a fault with module and stack
 //   --source          the media source of the DLL built next to this test, created in-process without
 //                     registration; also checks the shared-memory permissions with the registered camera
@@ -45,6 +46,7 @@
 #include "../src/Processing.h"
 #include "../src/ShotEffect.h"
 #include "../src/HandScene.h"
+#include "../src/FaceEffect.h"
 #include "../src/Shared.h"
 
 using Microsoft::WRL::ComPtr;
@@ -68,6 +70,8 @@ extern "C" void __stdcall HitCam_BridgePreviewOnly(void* handle);
 extern "C" void __stdcall HitCam_BridgeSetOverlay(void* handle, const HitCamOverlayBox* boxes, int32_t count);
 extern "C" void __stdcall HitCam_BridgeShot(void* handle, const HitCamShot* shot);
 extern "C" BOOL __stdcall HitCam_InstallCrashLog(const wchar_t* path);
+extern "C" void __stdcall HitCam_BridgeSetFaceRegions(void* handle, const HitCamFaceRegion* regions, int32_t count);
+extern "C" void __stdcall HitCam_TestFaceFrame(const HitCamFaceRegion* regions, int32_t count, uint8_t* nv12, uint32_t width, uint32_t height);
 extern "C" void __stdcall HitCam_BridgeSetHandScene(void* handle, const HitCamSceneDot* dots, int32_t dotCount, const HitCamSceneLine* lines,
                                                     int32_t lineCount, const HitCamSceneQuad* quads, int32_t quadCount);
 extern "C" void __stdcall HitCam_TestSceneFrame(const HitCamSceneDot* dots, int32_t dotCount, const HitCamSceneLine* lines, int32_t lineCount,
@@ -609,6 +613,7 @@ int RunSourceCheck() {
 #include "ShotCheck.inl"
 #include "CrashLogCheck.inl"
 #include "SceneCheck.inl"
+#include "FaceCheck.inl"
 
 int main(int argc, char** argv) {
     CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -626,6 +631,7 @@ int main(int argc, char** argv) {
     if (argc > 1 && std::strcmp(argv[1], "--shot") == 0) return shot_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--crashlog") == 0) return crashlog_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--scene") == 0) return scene_check::Run();
+    if (argc > 1 && std::strcmp(argv[1], "--faces") == 0) return face_check::Run();
     if (argc > 1 && std::strcmp(argv[1], "--source") == 0) return RunSourceCheck();
     if (argc > 1 && std::strcmp(argv[1], "--dshow") == 0) return dshow_check::Run(false);
     if (argc > 1 && std::strcmp(argv[1], "--dshow-installed") == 0) return dshow_check::Run(true);

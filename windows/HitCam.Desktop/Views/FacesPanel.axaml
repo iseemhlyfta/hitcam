@@ -1,0 +1,88 @@
+<UserControl
+    x:Class="HitCam.Desktop.Views.FacesPanel"
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:vm="clr-namespace:HitCam.Desktop.ViewModels"
+    x:DataType="vm:FacesViewModel">
+
+    <UserControl.Resources>
+        <!--  Switches without the Fluent "On/Off" text column, which is 154 px wide  -->
+        <x:Double x:Key="ToggleSwitchThemeMinWidth">0</x:Double>
+    </UserControl.Resources>
+    <UserControl.Styles>
+        <Style Selector="ToggleSwitch.bare">
+            <Setter Property="OnContent" Value="{x:Null}" />
+            <Setter Property="OffContent" Value="{x:Null}" />
+            <Setter Property="MinWidth" Value="0" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+    </UserControl.Styles>
+
+    <StackPanel Spacing="14">
+        <DockPanel>
+            <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}"
+                          AutomationProperties.Name="{x:Static svc:Loc.Faces}" />
+            <StackPanel Spacing="2">
+                <TextBlock Classes="title" Text="{x:Static svc:Loc.Faces}" />
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.FacesHint}" TextWrapping="Wrap" />
+            </StackPanel>
+        </DockPanel>
+
+        <!--  No models next to the app or in LocalAppData  -->
+        <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModels}">
+            <SelectableTextBlock FontSize="12" Text="{Binding NoModelsText}" TextWrapping="Wrap" />
+        </Border>
+
+        <StackPanel Spacing="14" IsVisible="{Binding HasModels}">
+            <StackPanel Spacing="6">
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.FacesEffect}" />
+                <ListBox Classes="segmented" ItemsSource="{Binding Effects}" SelectedItem="{Binding SelectedEffect}"
+                         AutomationProperties.Name="{x:Static svc:Loc.FacesEffect}">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate x:DataType="vm:FaceEffectOption">
+                            <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </StackPanel>
+
+            <StackPanel IsVisible="{Binding HasStrength}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding StrengthText}" />
+                    <TextBlock Classes="muted" Text="{x:Static svc:Loc.FacesStrength}" />
+                </DockPanel>
+                <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                        Value="{Binding Strength}" AutomationProperties.Name="{x:Static svc:Loc.FacesStrength}" />
+            </StackPanel>
+
+            <DockPanel IsVisible="{Binding IsFill}">
+                <ColorPicker DockPanel.Dock="Right" Color="{Binding FillColor}" IsAlphaVisible="False"
+                             AutomationProperties.Name="{x:Static svc:Loc.FacesFillColor}" />
+                <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.FacesFillColor}" />
+            </DockPanel>
+
+            <!--  What also goes into the camera picture  -->
+            <StackPanel Spacing="6">
+                <TextBlock Classes="muted" Text="{x:Static svc:Loc.HandsCamera}" />
+                <Grid ColumnDefinitions="*,*">
+                    <CheckBox Content="{x:Static svc:Loc.FacesCameraEffect}" IsChecked="{Binding CameraEffect}"
+                              ToolTip.Tip="{x:Static svc:Loc.FacesCameraEffectHint}" />
+                    <CheckBox Grid.Column="1" Content="{x:Static svc:Loc.FacesCameraFrame}" IsChecked="{Binding CameraFrame}" />
+                </Grid>
+            </StackPanel>
+
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Classes="secondary" Height="28" Padding="10,0" FontSize="12" VerticalAlignment="Top"
+                        Content="{x:Static svc:Loc.FacesHideEveryone}" Command="{Binding HideEveryoneCommand}" />
+                <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.FacesClickHint}" TextWrapping="Wrap" />
+            </DockPanel>
+
+            <!--  What runs and how fast; why it does not  -->
+            <StackPanel Spacing="4">
+                <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
+                <TextBlock Classes="muted" Foreground="{StaticResource HcLive}" Text="{Binding ErrorText}" TextWrapping="Wrap" IsVisible="{Binding HasError}" />
+            </StackPanel>
+        </StackPanel>
+    </StackPanel>
+</UserControl>
