@@ -1,0 +1,61 @@
+<ResourceDictionary
+    xmlns="https://github.com/avaloniaui"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:svc="clr-namespace:HitCam.Desktop.Services"
+    xmlns:views="clr-namespace:HitCam.Desktop.Views">
+
+    <!--  A feature on the experiments tab: [title / hint]  [arrow] [switch]; below it the settings, grey while off  -->
+    <ControlTheme x:Key="{x:Type views:FeatureSection}" TargetType="views:FeatureSection">
+        <Setter Property="Template">
+            <ControlTemplate>
+                <StackPanel Spacing="14">
+                    <DockPanel>
+                        <ToggleSwitch Name="PART_Switch" Margin="6,0,0,0" DockPanel.Dock="Right" VerticalAlignment="Center" MinWidth="0"
+                                      OnContent="{x:Null}" OffContent="{x:Null}" IsChecked="{TemplateBinding IsOn, Mode=TwoWay}"
+                                      AutomationProperties.Name="{TemplateBinding Title}" />
+                        <ToggleButton Name="PART_Expand" Margin="12,0,0,0" DockPanel.Dock="Right" VerticalAlignment="Center"
+                                      Width="30" Height="30" Padding="0" CornerRadius="8" Background="Transparent" BorderThickness="0"
+                                      IsChecked="{TemplateBinding IsExpanded, Mode=TwoWay}"
+                                      ToolTip.Tip="{x:Static svc:Loc.SectionExpand}" AutomationProperties.Name="{x:Static svc:Loc.SectionExpand}">
+                            <!--  Only the arrow turns; the button itself stays flat, pressed or not  -->
+                            <ToggleButton.Styles>
+                                <Style Selector="ToggleButton:checked /template/ ContentPresenter#PART_ContentPresenter">
+                                    <Setter Property="Background" Value="Transparent" />
+                                </Style>
+                                <Style Selector="ToggleButton:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+                                    <Setter Property="Background" Value="{DynamicResource HcBorder}" />
+                                </Style>
+                            </ToggleButton.Styles>
+                            <PathIcon Name="PART_Arrow" Width="12" Height="12" Data="M 1,4 L 6,9 L 11,4" RenderTransformOrigin="50%,50%" />
+                        </ToggleButton>
+                        <StackPanel Spacing="2" VerticalAlignment="Center">
+                            <TextBlock Classes="title" Text="{TemplateBinding Title}" />
+                            <TextBlock Classes="muted" Text="{TemplateBinding Hint}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </DockPanel>
+                    <ContentPresenter Name="PART_ContentPresenter" Content="{TemplateBinding Content}"
+                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                      IsVisible="{TemplateBinding IsExpanded}"
+                                      IsEnabled="{TemplateBinding IsOn}" />
+                </StackPanel>
+            </ControlTemplate>
+        </Setter>
+
+        <!--  The arrow is an outline, not a filled shape  -->
+        <Style Selector="^ /template/ PathIcon#PART_Arrow">
+            <Setter Property="Foreground" Value="{DynamicResource HcText2}" />
+            <Setter Property="RenderTransform" Value="rotate(0deg)" />
+            <Setter Property="Template">
+                <ControlTemplate>
+                    <Viewbox>
+                        <Path Data="{TemplateBinding Data}" Stroke="{TemplateBinding Foreground}" StrokeThickness="1.8"
+                              StrokeLineCap="Round" StrokeJoin="Round" Width="12" Height="12" />
+                    </Viewbox>
+                </ControlTemplate>
+            </Setter>
+        </Style>
+        <Style Selector="^[IsExpanded=True] /template/ PathIcon#PART_Arrow">
+            <Setter Property="RenderTransform" Value="rotate(180deg)" />
+        </Style>
+    </ControlTheme>
+</ResourceDictionary>

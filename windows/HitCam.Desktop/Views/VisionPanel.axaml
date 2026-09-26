@@ -20,15 +20,6 @@
     </UserControl.Styles>
 
     <StackPanel Spacing="14">
-        <DockPanel>
-            <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding IsEnabled}"
-                          AutomationProperties.Name="{x:Static svc:Loc.Vision}" />
-            <StackPanel Spacing="2">
-                <TextBlock Classes="title" Text="{x:Static svc:Loc.Vision}" />
-                <TextBlock Classes="muted" Text="{x:Static svc:Loc.VisionHint}" TextWrapping="Wrap" />
-            </StackPanel>
-        </DockPanel>
-
         <!--  No models next to the app or in LocalAppData  -->
         <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModels}">
             <SelectableTextBlock FontSize="12" Text="{Binding NoModelsText}" TextWrapping="Wrap" />

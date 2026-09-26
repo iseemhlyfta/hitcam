@@ -28,6 +28,7 @@ public sealed class ProcessingViewModel : ReactiveObject
     private ProcessingSettings _settings;
     private bool _isDirty;
     private bool _isArtifactReductionAvailable;
+    private int _artifactLevel;
     private string _statsText = "";
     private string _artifactErrorText = "";
 
@@ -41,9 +42,11 @@ public sealed class ProcessingViewModel : ReactiveObject
         _save = save;
         _changed.Throttle(SaveDelay, ui).Subscribe(_ => SaveNow());
 
+        _artifactLevel = initial.ArtifactReduction != ProcessingSettings.ArtifactReductionOff
+            ? initial.ArtifactReduction
+            : ProcessingSettings.ArtifactReductionGentle;
         ArtifactReductionOptions =
         [
-            new(ProcessingSettings.ArtifactReductionOff, Loc.ProcessingOff),
             new(ProcessingSettings.ArtifactReductionGentle, Loc.ArtifactReductionGentle),
             new(ProcessingSettings.ArtifactReductionStrong, Loc.ArtifactReductionStrong),
         ];
@@ -84,16 +87,30 @@ public sealed class ProcessingViewModel : ReactiveObject
 
     public IReadOnlyList<ArtifactReductionOption> ArtifactReductionOptions { get; }
 
+    /// <summary>
+    /// The strength (gentle or strong); while artifact removal is off, the one it comes back with.
+    /// </summary>
     public ArtifactReductionOption SelectedArtifactReduction
     {
-        get => ArtifactReductionOptions.FirstOrDefault(o => o.Level == _settings.ArtifactReduction) ?? ArtifactReductionOptions[0];
+        get => ArtifactReductionOptions.FirstOrDefault(o => o.Level == _artifactLevel) ?? ArtifactReductionOptions[0];
         set
         {
             // The segmented list briefly reports "nothing selected" while it rebuilds; keep the last choice then.
-            if (value is null)
+            if (value is null || value.Level == _artifactLevel)
                 return;
-            Update(_settings with { ArtifactReduction = value.Level });
+            _artifactLevel = value.Level;
+            if (IsArtifactReductionOn)
+                Update(_settings with { ArtifactReduction = value.Level });
+            else
+                this.RaisePropertyChanged();
         }
+    }
+
+    /// <summary>Artifact removal on (at <see cref="SelectedArtifactReduction"/>) or off.</summary>
+    public bool IsArtifactReductionOn
+    {
+        get => _settings.ArtifactReduction != ProcessingSettings.ArtifactReductionOff;
+        set => Update(_settings with { ArtifactReduction = value ? _artifactLevel : ProcessingSettings.ArtifactReductionOff });
     }
 
     // Colour and sharpness: -100..100 (0 neutral), sharpness 0..100.
@@ -198,6 +215,7 @@ public sealed class ProcessingViewModel : ReactiveObject
 
     private static readonly string[] AllProperties =
     [
+        nameof(IsArtifactReductionOn),
         nameof(TemporalStrength), nameof(TemporalStrengthText), nameof(SelectedArtifactReduction),
         nameof(Brightness), nameof(BrightnessText), nameof(Contrast), nameof(ContrastText),
         nameof(Saturation), nameof(SaturationText), nameof(Shadows), nameof(ShadowsText),

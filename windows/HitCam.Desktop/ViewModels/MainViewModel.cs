@@ -184,7 +184,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _server.Connected += d => Dispatcher.UIThread.Post(() =>
         {
             DeviceName = d.DeviceName;
-            DeviceSubtitle = Loc.DeviceSubtitle(d.RemoteEndPoint.Address.ToString());
+            // The address stays off the screen: it would show in screen shares and streams.
+            DeviceSubtitle = Loc.DeviceSubtitle;
             // Frames decoded before this connection belong to the previous one.
             _lastPreviewFrame = _pipeline.PreviewInfo().Frame;
             IsConnected = true;
@@ -303,6 +304,28 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (!_settings.Experiments)
             settings.ArtifactReduction = ProcessingSettings.ArtifactReductionOff;
         _pipeline.SetProcessing(settings);
+    }
+
+    // Which features on the experiments tab show their settings; remembered.
+
+    public bool ArtifactSectionExpanded { get => _settings.Sections.Artifact; set => SetSections(_settings.Sections with { Artifact = value }); }
+
+    public bool VisionSectionExpanded { get => _settings.Sections.Vision; set => SetSections(_settings.Sections with { Vision = value }); }
+
+    public bool HandsSectionExpanded { get => _settings.Sections.Hands; set => SetSections(_settings.Sections with { Hands = value }); }
+
+    public bool FacesSectionExpanded { get => _settings.Sections.Faces; set => SetSections(_settings.Sections with { Faces = value }); }
+
+    private void SetSections(ExperimentSections sections)
+    {
+        if (sections == _settings.Sections)
+            return;
+        _settings = _settings with { Sections = sections };
+        _settings.Save();
+        this.RaisePropertyChanged(nameof(ArtifactSectionExpanded));
+        this.RaisePropertyChanged(nameof(VisionSectionExpanded));
+        this.RaisePropertyChanged(nameof(HandsSectionExpanded));
+        this.RaisePropertyChanged(nameof(FacesSectionExpanded));
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>

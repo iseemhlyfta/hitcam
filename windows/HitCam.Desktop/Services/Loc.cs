@@ -31,7 +31,8 @@ public static class Loc
     public static string Cancel => Russian ? "Отменить" : "Cancel";
 
     // Streaming
-    public static string DeviceSubtitle(string address) => Russian ? $"Wi-Fi · {address} · сопряжён" : $"Wi-Fi · {address} · paired";
+    public static string DeviceSubtitle => Russian ? "Wi-Fi · сопряжён" : "Wi-Fi · paired";
+    public static string SectionExpand => Russian ? "Показать или скрыть настройки" : "Show or hide the settings";
     public static string CameraLiveBadge => Russian ? "Камера «HitCam» в эфире" : "“HitCam” camera is live";
     public static string Disconnect => Russian ? "Отключить" : "Disconnect";
     public static string WaitingForFrame => Russian ? "Ждём первый кадр…" : "Waiting for the first frame…";
@@ -136,8 +137,8 @@ public static class Loc
         ? "Включает и выключает все экспериментальные функции сразу; при включении работает то, что было включено"
         : "Switches all experimental features on and off at once; switched on, what was on runs again";
     public static string ExperimentsHint => Russian
-        ? "Нейросети на этом ПК: шумодав NVIDIA, анализ объектов и рук, жесты. Всё ещё в разработке и может работать нестабильно. Переключатель рядом с названием вкладки включает и выключает их все"
-        : "Neural networks on this PC: NVIDIA noise removal, object and hand analysis, gestures. Still in development and may be unstable. The switch next to the tab's name turns them all on and off";
+        ? "Нейросети на этом ПК: шумодав NVIDIA, анализ объектов и рук, жесты, скрытие лиц. Всё ещё в разработке и может работать нестабильно. Переключатель рядом с названием вкладки включает и выключает их все"
+        : "Neural networks on this PC: NVIDIA noise removal, object and hand analysis, gestures, face hiding. Still in development and may be unstable. The switch next to the tab's name turns them all on and off";
     public static string ArtifactReductionTitle => Russian ? "Шумодав NVIDIA" : "NVIDIA noise removal";
 
     // Object analysis (HitCam Vision)

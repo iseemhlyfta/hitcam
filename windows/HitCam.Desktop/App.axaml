@@ -8,6 +8,9 @@
     <!--  Palette from the design mockup; "Default" follows the Windows light/dark setting.  -->
     <Application.Resources>
         <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceInclude Source="/Views/FeatureSection.axaml" />
+            </ResourceDictionary.MergedDictionaries>
             <ResourceDictionary.ThemeDictionaries>
                 <ResourceDictionary x:Key="Light">
                     <SolidColorBrush x:Key="HcGround" Color="#F4F3F0" />

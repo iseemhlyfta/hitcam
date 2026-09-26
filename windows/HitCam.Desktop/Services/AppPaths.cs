@@ -68,6 +68,15 @@ public sealed partial record AppSettings
 
     private FaceSettings _faces = new();
 
+    /// <summary>Which features on the experiments tab are expanded; all collapsed by default.</summary>
+    public ExperimentSections Sections
+    {
+        get => _sections;
+        set => _sections = value ?? new ExperimentSections();
+    }
+
+    private ExperimentSections _sections = new();
+
     public static AppSettings Load() => Load(AppPaths.Settings);
 
     /// <summary>
@@ -152,6 +161,15 @@ public sealed partial record AppSettings
         "serverId"\s*:\s*"([^"\\\s]{1,100})"
         """, RegexOptions.IgnoreCase)]
     private static partial Regex ServerIdPattern();
+}
+
+/// <summary>Expanded sections of the experiments tab ("sections" in settings.json).</summary>
+public sealed record ExperimentSections
+{
+    public bool Artifact { get; set; }
+    public bool Vision { get; set; }
+    public bool Hands { get; set; }
+    public bool Faces { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

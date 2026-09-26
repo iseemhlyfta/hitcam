@@ -129,10 +129,30 @@ public sealed class ProcessingTests
         processing.IsArtifactReductionAvailable = true;
         Assert.Equal(2, _applied[^1].ArtifactReduction);
 
-        processing.SelectedArtifactReduction = processing.ArtifactReductionOptions[1];
+        processing.SelectedArtifactReduction = processing.ArtifactReductionOptions[0];
         Assert.Equal(1, _applied[^1].ArtifactReduction);
         _time.AdvanceBy(TimeSpan.FromSeconds(1));
         Assert.Equal(1, Assert.Single(_saved).ArtifactReduction);
+    }
+
+    [Fact]
+    public void The_artifact_switch_comes_back_with_the_last_strength()
+    {
+        var processing = Create(new ProcessingSettings());
+        processing.IsArtifactReductionAvailable = true;
+        Assert.False(processing.IsArtifactReductionOn);
+        Assert.Equal(ProcessingSettings.ArtifactReductionGentle, processing.SelectedArtifactReduction.Level);
+
+        processing.IsArtifactReductionOn = true;
+        Assert.Equal(1, _applied[^1].ArtifactReduction);
+        processing.SelectedArtifactReduction = processing.ArtifactReductionOptions[1];
+        Assert.Equal(2, _applied[^1].ArtifactReduction);
+
+        processing.IsArtifactReductionOn = false;
+        Assert.Equal(0, _applied[^1].ArtifactReduction);
+        Assert.Equal(ProcessingSettings.ArtifactReductionStrong, processing.SelectedArtifactReduction.Level);
+        processing.IsArtifactReductionOn = true;
+        Assert.Equal(2, _applied[^1].ArtifactReduction);
     }
 
     [Fact]
