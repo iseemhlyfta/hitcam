@@ -264,6 +264,13 @@ public sealed class FacesTests : IDisposable
             window.MouseUp(square, Avalonia.Input.MouseButton.Left);
             await Settle();
             Assert.Equal([7], toggled);
+
+            // A double click whose second click landed beside the square: the preview cancels the first.
+            window.MouseDown(square, Avalonia.Input.MouseButton.Left);
+            window.MouseUp(square, Avalonia.Input.MouseButton.Left);
+            overlay.CancelPendingToggle();
+            await Settle();
+            Assert.Equal([7], toggled);
             window.Close();
             return true;
         }, CancellationToken.None);

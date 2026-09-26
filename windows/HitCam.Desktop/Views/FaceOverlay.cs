@@ -114,6 +114,16 @@ public sealed class FaceOverlay : Control, ICustomHitTest
 
     private IDisposable? _pendingToggle;
 
+    /// <summary>
+    /// Drops a click still waiting to toggle a face: the preview was double-clicked, maybe with the second click beside
+    /// the square (the face moved).
+    /// </summary>
+    public void CancelPendingToggle()
+    {
+        _pendingToggle?.Dispose();
+        _pendingToggle = null;
+    }
+
     public override void Render(DrawingContext context)
     {
         if (Faces is not { Count: > 0 } faces || Source is not { } source)

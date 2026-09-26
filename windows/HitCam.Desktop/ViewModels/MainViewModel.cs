@@ -721,6 +721,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _facesToCamera = active ? Faces.Settings : null;
         if (!active)
             _pipeline.SetFaceRegions([]);
+        _faces.Paused = !active;
         if (enabled)
             _faces.Start();
         else

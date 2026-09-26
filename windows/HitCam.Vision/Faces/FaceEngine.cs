@@ -86,6 +86,22 @@ public sealed class FaceEngine : IDisposable
         _wake.Set();
     }
 
+    /// <summary>
+    /// No frames are coming (no phone): the engine waits without polling for them, the models stay loaded so faces are
+    /// found at once when frames come back.
+    /// </summary>
+    public bool Paused
+    {
+        get => _paused;
+        set
+        {
+            _paused = value;
+            _wake.Set();
+        }
+    }
+
+    private volatile bool _paused;
+
     /// <summary>Forgets the faces in the picture before the next frame; the uncovered people are kept.</summary>
     public void ResetTracks()
     {
@@ -185,7 +201,7 @@ public sealed class FaceEngine : IDisposable
                 }
                 if (!gotFrame)
                 {
-                    _wake.WaitOne(IdlePoll);
+                    _wake.WaitOne(_paused ? Timeout.InfiniteTimeSpan : IdlePoll);
                     continue;
                 }
                 lastSequence = frame.Sequence;
@@ -211,6 +227,8 @@ public sealed class FaceEngine : IDisposable
                         // Once per start: the fallback (the processor) usually survives what took the GPU down.
                         onFallback = true;
                         Trace.TraceWarning($"HitCam faces: the models failed ({ex.Message}); loading them again on the fallback");
+                        // Loading: nothing says where the faces are meanwhile (the app covers the whole picture).
+                        SetStatus(version, new VisionStatus(VisionState.Loading, null, null, null));
                         try
                         {
                             models = _fallbackFactory();

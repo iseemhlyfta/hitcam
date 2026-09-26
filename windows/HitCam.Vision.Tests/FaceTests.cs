@@ -267,6 +267,26 @@ public sealed class FaceTrackerTests
     }
 
     [Fact]
+    public void An_uncovered_person_hidden_by_a_turned_head_is_checked_again_soon()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models);
+        tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
+
+        // Lost for a moment, found again in profile (the fingerprint does not match): hidden, the safe side...
+        models.Faces.Clear();
+        tracker.Update(Frame, At(0.1));
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 2));
+        Assert.True(Assert.Single(tracker.Update(Frame, At(0.2))).Hidden);
+
+        // ...but facing the camera again, recognized within a fraction of a second, not a whole refresh later.
+        models.Faces[0] = (new RectangleF(100, 100, 100, 100), 1);
+        tracker.Update(Frame, At(0.3));
+        Assert.False(Assert.Single(tracker.Update(Frame, At(0.45))).Hidden);
+    }
+
+    [Fact]
     public void A_stranger_who_slides_into_an_uncovered_track_is_hidden_at_the_next_check()
     {
         var models = new FakeFaceModels();
@@ -362,6 +382,8 @@ public sealed class FaceEngineTests
         using var engine = new FaceEngine(camera.Grab, () => broken, fallbackFactory: () => fallback);
         var results = new BlockingCollection<FaceResult>();
         engine.ResultReady += results.Add;
+        var states = new ConcurrentQueue<VisionState>();
+        engine.StatusChanged += s => states.Enqueue(s.State);
 
         engine.Start();
         camera.Latest = 1;
@@ -380,6 +402,8 @@ public sealed class FaceEngineTests
         Assert.True(Assert.Single(recovered.Faces).Hidden);
         Assert.True(broken.IsDisposed);
         Assert.Equal(VisionState.Running, engine.Status.State);
+        // Loading in between: the camera covers the whole picture while the fallback loads.
+        Assert.Equal([VisionState.Loading, VisionState.Running, VisionState.Loading, VisionState.Running], states);
     }
 
     private sealed class FailingFaceModels : IFaceModels

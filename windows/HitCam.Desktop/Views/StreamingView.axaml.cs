@@ -10,6 +10,8 @@ public partial class StreamingView : UserControl
 
     private void OnPreviewDoubleTapped(object? sender, TappedEventArgs e)
     {
+        // A double click is for full screen only: its first click must not uncover or hide a face.
+        FaceSquares.CancelPendingToggle();
         if (DataContext is MainViewModel viewModel)
             viewModel.IsFullScreen = !viewModel.IsFullScreen;
     }

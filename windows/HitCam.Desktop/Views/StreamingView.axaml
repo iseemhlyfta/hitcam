@@ -49,7 +49,7 @@
                     <!--  Finger-gun shots: flash here, kick on the whole panel  -->
                     <views:ShotOverlay Source="{Binding Preview}" Shots="{Binding Hands.Shots}" ShakeTarget="{Binding #PreviewContent}" IsVisible="{Binding ShowHands}" />
                     <!--  Squares around faces (the effect is already in the picture); a click uncovers or hides one  -->
-                    <views:FaceOverlay Source="{Binding Preview}" Faces="{Binding Faces.Faces}" ToggleCommand="{Binding Faces.ToggleCommand}"
+                    <views:FaceOverlay x:Name="FaceSquares" Source="{Binding Preview}" Faces="{Binding Faces.Faces}" ToggleCommand="{Binding Faces.ToggleCommand}"
                                        IsVisible="{Binding ShowFaces}" />
                   </Panel>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" IsVisible="{Binding !HasPreview}">

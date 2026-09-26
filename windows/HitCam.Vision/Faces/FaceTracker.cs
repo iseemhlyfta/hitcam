@@ -39,6 +39,9 @@ public sealed record FaceTrackerOptions
 
     /// <summary>A seen face's fingerprint is refreshed this often (averaged, so recognition follows head turns).</summary>
     public TimeSpan Refresh { get; init; } = TimeSpan.FromSeconds(1);
+
+    /// <summary>An uncovered face that stopped matching (and got hidden) is checked again this soon.</summary>
+    public TimeSpan Recheck { get; init; } = TimeSpan.FromMilliseconds(200);
 }
 
 /// <summary>
@@ -145,12 +148,15 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             return;
         }
         face.FingerprintTime = now;
+        var lost = false;
+        var wasUncovered = face.Person is not null;
         // Someone else on this track (heads crossed, a stranger sat down where a held face was): a stranger again,
         // hidden until recognized. An uncovered person's fingerprint only learns from faces that are them.
         if (face.Fingerprint is { } own && FaceRecognizer.Similarity(own, fresh) < FaceRecognizer.SameFace)
         {
             face.Fingerprint = null;
             face.Person = null;
+            lost = true;
         }
         face.Fingerprint = face.Fingerprint is null ? fresh : Average(face.Fingerprint, fresh);
         if (face.Person is { } person)
@@ -161,6 +167,7 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
                 return;
             }
             face.Person = null;
+            lost = true;
         }
         var best = _uncovered.Select(p => (Person: p, Score: FaceRecognizer.Similarity(p.Fingerprint, fresh)))
             .Where(p => p.Score >= FaceRecognizer.SameFace)
@@ -168,6 +175,9 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             .FirstOrDefault();
         if (best.Person is not null)
             face.Person = best.Person;
+        // Hidden only because it did not match (a turned head, most likely): look again soon, not a refresh later.
+        else if (lost && wasUncovered)
+            face.FingerprintTime = now - _options.Refresh + _options.Recheck;
     }
 
     /// <summary>Running average of unit vectors, normalized again (older and newer weigh 3:1).</summary>
