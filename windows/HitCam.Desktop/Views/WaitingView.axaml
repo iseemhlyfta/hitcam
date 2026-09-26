@@ -69,6 +69,8 @@
                         </StackPanel>
                     </StackPanel>
                     <TextBlock Classes="muted" Text="{Binding StatusText}" IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <TextBlock MaxWidth="520" HorizontalAlignment="Left" TextWrapping="Wrap" FontWeight="SemiBold" Foreground="{StaticResource HcLive}"
+                               Text="{Binding IdentityProblem}" IsVisible="{Binding IdentityProblem, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <!--  Turned off from the streaming screen; a way back  -->
                     <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding !AllowUnencryptedPhones}">
                         <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.UnencryptedRefused}" />

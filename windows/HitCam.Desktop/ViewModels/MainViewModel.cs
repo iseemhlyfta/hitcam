@@ -48,6 +48,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _threadsWereOn;
     private readonly SegmentEngine _segment;
     private NetworkDiscovery? _discovery;
+    // What _discovery announces (port and addresses): unchanged addresses are not announced again.
+    private string? _announced;
     // Android over USB (adb reverse); not for a debug instance (--port), which must not take the user's phone.
     private AdbReverse? _usb;
     private string _usbText = "";
@@ -384,12 +386,16 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _settings = _settings with { AllowUnencryptedPhones = value };
             _settings.Save();
             _server.AllowPlaintext = value;
+            // The server drops a plain phone on its own when this goes off.
             this.RaisePropertyChanged();
-            // The phone on the screen now is one of them: out it goes.
-            if (!value && IsUnencrypted)
-                _server.Kick();
         }
     }
+
+    /// <summary>Refusing plain phones needs TLS to fall back on: without an identity only they can connect.</summary>
+    public bool CanRefuseUnencrypted => IsUnencrypted && _identity is not null;
+
+    /// <summary>No TLS identity this session: new phone apps cannot connect.</summary>
+    public string? IdentityProblem => _identity is null ? Loc.NoIdentity : null;
 
     public bool ExperimentsEnabled
     {
@@ -551,7 +557,15 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     public string DeviceSubtitle { get => _deviceSubtitle; private set => this.RaiseAndSetIfChanged(ref _deviceSubtitle, value); }
 
     /// <summary>The connected phone runs an old app without encryption (protocol v1).</summary>
-    public bool IsUnencrypted { get => _isUnencrypted; private set => this.RaiseAndSetIfChanged(ref _isUnencrypted, value); }
+    public bool IsUnencrypted
+    {
+        get => _isUnencrypted;
+        private set
+        {
+            this.RaiseAndSetIfChanged(ref _isUnencrypted, value);
+            this.RaisePropertyChanged(nameof(CanRefuseUnencrypted));
+        }
+    }
 
     public string LiveText { get => _liveText; private set => this.RaiseAndSetIfChanged(ref _liveText, value); }
 
@@ -650,13 +664,20 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     private void RefreshAddresses()
     {
+        // A network change posted just before shutdown must not announce the PC again.
+        if (Volatile.Read(ref _disposed) != 0)
+            return;
         var addresses = LanAddresses.Get();
         // Phones find this PC without typing the address, at its current addresses (announced again when they change);
         // not a debug instance (--port), which phones should not see.
-        _discovery?.Dispose();
-        _discovery = _server.IsRunning && Program.PortOverride is null
-            ? new NetworkDiscovery(Environment.MachineName, _settings.ServerId, _server.Port, addresses)
-            : null;
+        var announce = _server.IsRunning && Program.PortOverride is null;
+        var key = announce ? $"{_server.Port}|{string.Join(",", addresses)}" : null;
+        if (key != _announced)
+        {
+            _discovery?.Dispose();
+            _discovery = announce ? new NetworkDiscovery(Environment.MachineName, _settings.ServerId, _server.Port, addresses) : null;
+            _announced = key;
+        }
         if (addresses.Count == 0)
         {
             PrimaryAddress = Loc.NoNetwork;

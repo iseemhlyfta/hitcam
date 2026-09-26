@@ -159,7 +159,6 @@ public sealed class HitCamServer : IAsyncDisposable
     public Task<bool> RequestKeyframeAsync(CancellationToken cancellationToken = default) =>
         SendAsync(Message.Empty(MessageType.RequestKeyframe, Now()), cancellationToken);
 
-    /// <summary>Disconnects the current phone (or aborts a pairing in progress).</summary>
     /// <summary>
     /// Disconnects the phone (the PC's "Disconnect" button). A Bye goes first: without it the phone takes the closed
     /// connection for a network drop and reconnects two seconds later.
@@ -300,6 +299,12 @@ public sealed class HitCamServer : IAsyncDisposable
                 {
                     connection = null;
                     await SendAckAsync(stream, version, HelloStatus.Busy, token).ConfigureAwait(false);
+                    return;
+                }
+                // Plain phones may have been turned off while the claim waited for a stale session.
+                if (!encrypted && !AllowPlaintext && _options.Identity is not null)
+                {
+                    await SendAckAsync(stream, version, HelloStatus.VersionMismatch, token).ConfigureAwait(false);
                     return;
                 }
 

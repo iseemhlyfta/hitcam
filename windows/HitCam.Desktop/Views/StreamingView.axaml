@@ -23,7 +23,7 @@
                     <TextBlock FontSize="12" FontWeight="SemiBold" Foreground="{StaticResource HcLive}" Text="{Binding DeviceSubtitle}"
                                IsVisible="{Binding IsUnencrypted}" ToolTip.Tip="{x:Static svc:Loc.RefuseUnencryptedHint}" />
                 </StackPanel>
-                <Button Grid.Column="3" VerticalAlignment="Center" Classes="secondary" IsVisible="{Binding IsUnencrypted}"
+                <Button Grid.Column="3" VerticalAlignment="Center" Classes="secondary" IsVisible="{Binding CanRefuseUnencrypted}"
                         Content="{x:Static svc:Loc.RefuseUnencrypted}" ToolTip.Tip="{x:Static svc:Loc.RefuseUnencryptedHint}"
                         Click="OnRefuseUnencrypted" />
                 <Border Grid.Column="2" Height="30" Padding="12,0" VerticalAlignment="Center" Background="{DynamicResource HcOkSoft}" CornerRadius="15"

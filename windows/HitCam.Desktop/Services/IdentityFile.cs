@@ -17,7 +17,22 @@ public static class IdentityFile
         try
         {
             if (File.Exists(path))
-                return ServerIdentity.Load(Unprotect(File.ReadAllBytes(path)));
+            {
+                byte[] pkcs12;
+                try
+                {
+                    pkcs12 = Unprotect(File.ReadAllBytes(path));
+                }
+                catch (CryptographicException ex)
+                {
+                    // Damaged or another Windows user's: kept aside, not overwritten, in case it can be recovered.
+                    Trace.TraceError($"HitCam: identity {path} unreadable, making a new one (phones must pair again): {ex.Message}");
+                    TryMoveAside(path);
+                    return CreateAt(path);
+                }
+                // DPAPI checks integrity, so a failure here is the key store (for now), not the file: keep it.
+                return ServerIdentity.Load(pkcs12);
+            }
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
@@ -28,11 +43,14 @@ public static class IdentityFile
         }
         catch (CryptographicException ex)
         {
-            // Damaged or another Windows user's: kept aside, not overwritten, in case it can be recovered.
-            Trace.TraceError($"HitCam: identity {path} unreadable, making a new one (phones must pair again): {ex.Message}");
-            TryMoveAside(path);
+            Trace.TraceError($"HitCam: identity {path} could not be loaded now, only old phone apps can connect: {ex.Message}");
+            return null;
         }
+        return CreateAt(path);
+    }
 
+    private static ServerIdentity? CreateAt(string path)
+    {
         try
         {
             var identity = ServerIdentity.Create();

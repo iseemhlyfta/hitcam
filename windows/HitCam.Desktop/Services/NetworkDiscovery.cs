@@ -28,7 +28,7 @@ public sealed class NetworkDiscovery : IDisposable
             return;
         try
         {
-            _instance = DnsServiceConstructInstance(InstanceName, $"{Sanitize(Environment.MachineName)}.local", IntPtr.Zero, IntPtr.Zero,
+            _instance = DnsServiceConstructInstance(InstanceName, $"{Sanitize(System.Net.Dns.GetHostName())}.local", IntPtr.Zero, IntPtr.Zero,
                 (ushort)port, 0, 0, 5, ["id", "name", "v", "port", "addr"],
                 [serverId, serverName, ProtocolInfo.Version.ToString(), port.ToString(System.Globalization.CultureInfo.InvariantCulture),
                  string.Join(",", (addresses ?? []).Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork))]);

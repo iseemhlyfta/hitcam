@@ -47,6 +47,9 @@ public static class Loc
 
     // Streaming
     public static string DeviceSubtitle => Russian ? "Wi-Fi · сопряжён" : "Wi-Fi · paired";
+    public static string NoIdentity => Russian
+        ? "Ключ шифрования ПК не загрузился: подключаются только старые приложения без шифрования. Перезапустите HitCam"
+        : "The PC's encryption key did not load: only old phone apps without encryption can connect. Restart HitCam";
     public static string DeviceSubtitleUsb => Russian ? "USB · сопряжён" : "USB · paired";
     public static string DeviceSubtitleUnencrypted => Russian
         ? "Без шифрования · обновите HitCam на телефоне"

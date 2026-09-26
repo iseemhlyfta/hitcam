@@ -28,7 +28,7 @@ public sealed class AdbReverse : IDisposable
     private readonly string? _adb;
     private readonly int _pcPort;
     private readonly Timer _timer;
-    private readonly HashSet<string> _reversed = [];
+
     private int _busy;
     private UsbState? _state;
 
@@ -94,14 +94,15 @@ public sealed class AdbReverse : IDisposable
             if (Run("devices") is not { } output)
                 return;
             var (ready, unauthorized) = ParseDevices(output);
-            // Unplugged phones lose their reverse; plugged in again they need a new one.
-            _reversed.IntersectWith(ready);
-            foreach (var serial in ready.Where(s => !_reversed.Contains(s)))
+            // Every time, not once per phone: the rules live in the adb server, and a restarted server (Android Studio,
+            // "adb kill-server") has none while the phone is still listed. Setting an existing rule again is harmless.
+            var reversed = 0;
+            foreach (var serial in ready)
             {
                 if (Run("-s", serial, "reverse", $"tcp:{Core.Protocol.ProtocolInfo.DefaultPort}", $"tcp:{_pcPort}") is not null)
-                    _reversed.Add(serial);
+                    reversed++;
             }
-            Report(_reversed.Count > 0 ? UsbState.Ready : unauthorized.Count > 0 ? UsbState.Unauthorized : UsbState.NoPhone);
+            Report(reversed > 0 ? UsbState.Ready : unauthorized.Count > 0 ? UsbState.Unauthorized : UsbState.NoPhone);
         }
         catch (Exception ex)
         {
@@ -149,6 +150,9 @@ public sealed class AdbReverse : IDisposable
             }
             return null;
         }
+        // A starting adb server may keep the output pipe open after the command exited.
+        if (!output.Wait(CommandTimeout))
+            return null;
         return process.ExitCode == 0 ? output.Result : null;
     }
 

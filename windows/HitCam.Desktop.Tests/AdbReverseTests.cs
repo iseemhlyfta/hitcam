@@ -63,12 +63,13 @@ public sealed class AdbReverseTests : IDisposable
             };
             usb.Start();
             await ready.Task.WaitAsync(TimeSpan.FromSeconds(10), TestContext.Current.CancellationToken);
-            // Another round: the phone is still there, so no second reverse.
+            // Another round: the rule is set again (a restarted adb server forgets it while the phone stays listed).
             await Task.Delay(TimeSpan.FromSeconds(5), TestContext.Current.CancellationToken);
         }
-        var calls = File.ReadAllLines(log);
-        Assert.Single(calls, c => c.Trim() == "-s PHONE1 reverse tcp:47800 tcp:47899");
-        Assert.True(calls.Count(c => c.Trim() == "devices") >= 2);
+        var calls = File.ReadAllLines(log).Select(c => c.Trim()).ToList();
+        Assert.True(calls.Count(c => c == "devices") >= 2);
+        Assert.True(calls.Count(c => c == "-s PHONE1 reverse tcp:47800 tcp:47899") >= 2);
+        Assert.All(calls, c => Assert.True(c == "devices" || c == "-s PHONE1 reverse tcp:47800 tcp:47899", c));
     }
 
     [Fact]
