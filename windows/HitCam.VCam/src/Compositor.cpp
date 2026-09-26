@@ -8,16 +8,18 @@
 #include <cstring>
 
 // Compiled shaders (fxc at build time, from shaders/Composite.hlsl).
-#include "shaders/BlurChromaX.h"
-#include "shaders/BlurChromaY.h"
-#include "shaders/BlurLumaX.h"
-#include "shaders/BlurLumaY.h"
 #include "shaders/CompositeChroma.h"
 #include "shaders/CompositeLuma.h"
 #include "shaders/CropChroma.h"
 #include "shaders/CropLuma.h"
-#include "shaders/DownChroma.h"
-#include "shaders/DownLuma.h"
+#include "shaders/DownFirstChroma.h"
+#include "shaders/DownFirstLuma.h"
+#include "shaders/DualDown.h"
+#include "shaders/DualUp.h"
+#include "shaders/BoxX.h"
+#include "shaders/BoxY.h"
+#include "shaders/GuideCoefs.h"
+#include "shaders/GuideStats.h"
 
 namespace hitcam {
 namespace {
@@ -26,17 +28,27 @@ namespace {
 struct Params {
     uint32_t lumaSize[2];
     uint32_t chromaSize[2];
-    uint32_t smallSize[2];
-    uint32_t smallChromaSize[2];
+    uint32_t gridSize[2];
+    uint32_t padding0[2];
     float maskLow;
     float maskHigh;
-    float blurStep;
+    float guideEps;
     uint32_t mode;
     uint32_t maskValid;
-    uint32_t padding[3];
+    uint32_t padding1[3];
     float crop[4];
 };
-static_assert(sizeof(Params) % 16 == 0);
+static_assert(sizeof(Params) == 80);
+
+// Matches cbuffer Level in Composite.hlsl.
+struct Level {
+    float sourceTexel[2];
+    uint32_t targetSize[2];
+};
+static_assert(sizeof(Level) == 16);
+
+// Pyramid levels stop at this size: smaller ones add nothing but edge effects.
+constexpr uint32_t kMinLevelSide = 4;
 
 constexpr UINT kGroupWidth = 16, kGroupHeight = 8;
 constexpr unsigned long long kDeviceRetryMs = 3000;
@@ -275,12 +287,14 @@ bool Compositor::EnsureDevice() {
         ComPtr<ID3D11ComputeShader>* target;
     };
     const Shader shaders[] = {
-        {g_DownLuma, sizeof(g_DownLuma), &downLuma_},
-        {g_DownChroma, sizeof(g_DownChroma), &downChroma_},
-        {g_BlurLumaX, sizeof(g_BlurLumaX), &blurLumaX_},
-        {g_BlurLumaY, sizeof(g_BlurLumaY), &blurLumaY_},
-        {g_BlurChromaX, sizeof(g_BlurChromaX), &blurChromaX_},
-        {g_BlurChromaY, sizeof(g_BlurChromaY), &blurChromaY_},
+        {g_GuideStats, sizeof(g_GuideStats), &guideStats_},
+        {g_BoxX, sizeof(g_BoxX), &boxX_},
+        {g_BoxY, sizeof(g_BoxY), &boxY_},
+        {g_GuideCoefs, sizeof(g_GuideCoefs), &guideCoefs_},
+        {g_DownFirstLuma, sizeof(g_DownFirstLuma), &downFirstLuma_},
+        {g_DownFirstChroma, sizeof(g_DownFirstChroma), &downFirstChroma_},
+        {g_DualDown, sizeof(g_DualDown), &dualDown_},
+        {g_DualUp, sizeof(g_DualUp), &dualUp_},
         {g_CompositeLuma, sizeof(g_CompositeLuma), &compositeLuma_},
         {g_CompositeChroma, sizeof(g_CompositeChroma), &compositeChroma_},
         {g_CropLuma, sizeof(g_CropLuma), &cropLuma_},
@@ -302,6 +316,8 @@ bool Compositor::EnsureDevice() {
         desc.Usage = D3D11_USAGE_DEFAULT;
         desc.BindFlags = D3D11_BIND_CONSTANT_BUFFER;
         hr = device_->CreateBuffer(&desc, nullptr, &params_);
+        desc.ByteWidth = sizeof(Level);
+        if (SUCCEEDED(hr)) hr = device_->CreateBuffer(&desc, nullptr, &level_);
     }
     if (FAILED(hr)) {
         ReleaseDevice();
@@ -329,16 +345,32 @@ bool Compositor::EnsureFrames(uint32_t width, uint32_t height) {
     if (width == width_ && height == height_ && lumaIn_.texture) return true;
     ReleaseFrames();
     const uint32_t cw = width / 2, ch = height / 2;
-    const uint32_t sw = (width + 7) / 8, sh = (height + 7) / 8;
-    const uint32_t scw = (cw + 7) / 8, sch = (ch + 7) / 8;
     bool ok = CreatePlane(lumaIn_, width, height, DXGI_FORMAT_R8_UNORM, false)
               && CreatePlane(chromaIn_, cw, ch, DXGI_FORMAT_R8G8_UNORM, false)
               && CreatePlane(lumaOut_, width, height, DXGI_FORMAT_R8_UNORM, true)
               && CreatePlane(chromaOut_, cw, ch, DXGI_FORMAT_R8G8_UNORM, true);
-    for (int i = 0; i < 2 && ok; ++i) {
-        ok = CreatePlane(smallLuma_[i], sw, sh, DXGI_FORMAT_R16G16B16A16_FLOAT, true)
-             && CreatePlane(smallChroma_[i], scw, sch, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+    gridWidth_ = (width + kGridScale - 1) / kGridScale;
+    gridHeight_ = (height + kGridScale - 1) / kGridScale;
+    for (Plane& plane : grid_) ok = ok && CreatePlane(plane, gridWidth_, gridHeight_, DXGI_FORMAT_R32G32B32A32_FLOAT, true);
+    // The pyramid: halving from half size while the chroma level (the smaller one) stays usable.
+    levels_ = 0;
+    uint32_t lw = (width + 1) / 2, lh = (height + 1) / 2, sw = (cw + 1) / 2, sh = (ch + 1) / 2;
+    while (ok && levels_ < kLevels && std::min(sw, sh) >= kMinLevelSide) {
+        ok = CreatePlane(lumaDown_[levels_], lw, lh, DXGI_FORMAT_R16G16B16A16_FLOAT, true)
+             && CreatePlane(lumaUp_[levels_], lw, lh, DXGI_FORMAT_R16G16B16A16_FLOAT, true)
+             && CreatePlane(chromaDown_[levels_], sw, sh, DXGI_FORMAT_R16G16B16A16_FLOAT, true)
+             && CreatePlane(chromaUp_[levels_], sw, sh, DXGI_FORMAT_R16G16B16A16_FLOAT, true);
+        lumaLevel_[levels_][0] = lw;
+        lumaLevel_[levels_][1] = lh;
+        chromaLevel_[levels_][0] = sw;
+        chromaLevel_[levels_][1] = sh;
+        ++levels_;
+        lw = (lw + 1) / 2;
+        lh = (lh + 1) / 2;
+        sw = (sw + 1) / 2;
+        sh = (sh + 1) / 2;
     }
+    ok = ok && levels_ > 0;
     for (int i = 0; i < 2 && ok; ++i) {
         D3D11_TEXTURE2D_DESC desc{};
         desc.Width = i == 0 ? width : cw;
@@ -445,10 +477,8 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     params.lumaSize[1] = height;
     params.chromaSize[0] = cw;
     params.chromaSize[1] = ch;
-    params.smallSize[0] = (width + 7) / 8;
-    params.smallSize[1] = (height + 7) / 8;
-    params.smallChromaSize[0] = (cw + 7) / 8;
-    params.smallChromaSize[1] = (ch + 7) / 8;
+    params.gridSize[0] = gridWidth_;
+    params.gridSize[1] = gridHeight_;
     // The edge sits around 0.5 of the mask; more room (dilate, an older mask) moves it outwards.
     const float aging = maskAgeMs <= kMaskFreshMs ? 0.0f
                         : 0.2f * std::min(1.0f, static_cast<float>(maskAgeMs - kMaskFreshMs) / (kMaskStaleMs - kMaskFreshMs));
@@ -456,9 +486,11 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     const float soft = 0.04f + 0.4f * s.edge;
     params.maskLow = std::max(0.01f, centre - soft / 2);
     params.maskHigh = std::max(params.maskLow + 0.01f, centre + soft / 2);
-    // Taps a texel apart; the strength sets how many passes (see the loop below).
-    params.blurStep = 1.0f;
-    const int passes = static_cast<int>(std::lround(s.strength * 4));  // 0: the 1/8 downsample alone, a light blur
+    // The mask follows the picture where its luma varies more than this (std 0.03: a shoulder against a wall), and
+    // stays the coarse mask on flat areas and noise.
+    params.guideEps = 1e-3f;
+    // Pyramid depth from the strength: 2 levels below half size is a light blur, 5 a heavy one.
+    const int depth = std::min(levels_ - 1, 2 + static_cast<int>(std::lround(s.strength * 3)));
     params.mode = static_cast<uint32_t>(s.mode == 2 && inputs.image ? 2 : 1);
     params.maskValid = maskValid ? 1 : 0;
     context_->UpdateSubresource(params_.Get(), 0, nullptr, &params, 0, 0);
@@ -466,37 +498,70 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     context_->UpdateSubresource(lumaIn_.texture.Get(), 0, nullptr, nv12, width, 0);
     context_->UpdateSubresource(chromaIn_.texture.Get(), 0, nullptr, chroma, width, 0);
 
-    ID3D11Buffer* constants[] = {params_.Get()};
-    context_->CSSetConstantBuffers(0, 1, constants);
+    ID3D11Buffer* constants[] = {params_.Get(), level_.Get()};
+    context_->CSSetConstantBuffers(0, 2, constants);
     ID3D11SamplerState* samplers[] = {linearClamp_.Get()};
     context_->CSSetSamplers(0, 1, samplers);
-    ID3D11ShaderResourceView* noViews[4] = {};
+    ID3D11ShaderResourceView* noViews[6] = {};
     ID3D11UnorderedAccessView* noTargets[1] = {};
-    // Slots: t0 input, t1 blurred background, t2 mask, t3 replacement picture.
+    ID3D11ShaderResourceView* refined = nullptr;  // the guided filter's result, once computed
+    // Slots: t0 input, t1 blurred background, t2 mask, t3 replacement picture, t4 the frame's luma, t5 refined mask.
     auto dispatch = [&](ID3D11ComputeShader* shader, ID3D11ShaderResourceView* input, ID3D11ShaderResourceView* blurred,
                         ID3D11ShaderResourceView* image, ID3D11UnorderedAccessView* target, uint32_t w, uint32_t h) {
-        ID3D11ShaderResourceView* views[4] = {input, blurred, maskValid ? mask_.srv.Get() : nullptr, image};
+        ID3D11ShaderResourceView* views[6] = {input, blurred, maskValid ? mask_.srv.Get() : nullptr, image, lumaIn_.srv.Get(), refined};
         context_->CSSetShader(shader, nullptr, 0);
-        context_->CSSetShaderResources(0, 4, views);
+        context_->CSSetShaderResources(0, 6, views);
         context_->CSSetUnorderedAccessViews(0, 1, &target, nullptr);
         context_->Dispatch(Groups(w, kGroupWidth), Groups(h, kGroupHeight), 1);
-        context_->CSSetShaderResources(0, 4, noViews);
+        context_->CSSetShaderResources(0, 6, noViews);
         context_->CSSetUnorderedAccessViews(0, 1, noTargets, nullptr);
     };
-    const uint32_t sw = params.smallSize[0], sh = params.smallSize[1];
-    const uint32_t scw = params.smallChromaSize[0], sch = params.smallChromaSize[1];
-    dispatch(downLuma_.Get(), lumaIn_.srv.Get(), nullptr, nullptr, smallLuma_[0].uav.Get(), sw, sh);
-    dispatch(downChroma_.Get(), chromaIn_.srv.Get(), nullptr, nullptr, smallChroma_[0].uav.Get(), scw, sch);
-    for (int pass = 0; pass < passes; ++pass) {
-        dispatch(blurLumaX_.Get(), smallLuma_[0].srv.Get(), nullptr, nullptr, smallLuma_[1].uav.Get(), sw, sh);
-        dispatch(blurLumaY_.Get(), smallLuma_[1].srv.Get(), nullptr, nullptr, smallLuma_[0].uav.Get(), sw, sh);
-        dispatch(blurChromaX_.Get(), smallChroma_[0].srv.Get(), nullptr, nullptr, smallChroma_[1].uav.Get(), scw, sch);
-        dispatch(blurChromaY_.Get(), smallChroma_[1].srv.Get(), nullptr, nullptr, smallChroma_[0].uav.Get(), scw, sch);
+    if (maskValid) {
+        const uint32_t gw = gridWidth_, gh = gridHeight_;
+        dispatch(guideStats_.Get(), nullptr, nullptr, nullptr, grid_[0].uav.Get(), gw, gh);
+        dispatch(boxX_.Get(), grid_[0].srv.Get(), nullptr, nullptr, grid_[1].uav.Get(), gw, gh);
+        dispatch(boxY_.Get(), grid_[1].srv.Get(), nullptr, nullptr, grid_[0].uav.Get(), gw, gh);
+        dispatch(guideCoefs_.Get(), grid_[0].srv.Get(), nullptr, nullptr, grid_[1].uav.Get(), gw, gh);
+        dispatch(boxX_.Get(), grid_[1].srv.Get(), nullptr, nullptr, grid_[0].uav.Get(), gw, gh);
+        dispatch(boxY_.Get(), grid_[0].srv.Get(), nullptr, nullptr, grid_[1].uav.Get(), gw, gh);
+        refined = grid_[1].srv.Get();
     }
-    const bool replace = params.mode == 2;
-    dispatch(compositeLuma_.Get(), lumaIn_.srv.Get(), smallLuma_[0].srv.Get(), replace ? imageLuma_.srv.Get() : nullptr,
+    auto level = [&](const uint32_t (&source)[2], const uint32_t (&target)[2]) {
+        const Level value{{1.0f / source[0], 1.0f / source[1]}, {target[0], target[1]}};
+        context_->UpdateSubresource(level_.Get(), 0, nullptr, &value, 0, 0);
+    };
+    // A replaced background needs no blur (without a valid mask the shader blurs the whole frame even in mode 2).
+    const bool replace = params.mode == 2 && maskValid;
+    if (!replace) {
+        struct Chain {
+            ID3D11ComputeShader* first;
+            ID3D11ShaderResourceView* input;
+            Plane* down;
+            Plane* up;
+            uint32_t (*sizes)[2];
+        };
+        const Chain chains[] = {{downFirstLuma_.Get(), lumaIn_.srv.Get(), lumaDown_, lumaUp_, lumaLevel_},
+                                {downFirstChroma_.Get(), chromaIn_.srv.Get(), chromaDown_, chromaUp_, chromaLevel_}};
+        for (const Chain& c : chains) {
+            level(c.sizes[0], c.sizes[0]);
+            dispatch(c.first, c.input, nullptr, nullptr, c.down[0].uav.Get(), c.sizes[0][0], c.sizes[0][1]);
+            for (int i = 1; i <= depth; ++i) {
+                level(c.sizes[i - 1], c.sizes[i]);
+                dispatch(dualDown_.Get(), c.down[i - 1].srv.Get(), nullptr, nullptr, c.down[i].uav.Get(), c.sizes[i][0], c.sizes[i][1]);
+            }
+            // Back up to half size; with no depth the half-size level is the result.
+            for (int i = depth - 1; i >= 0; --i) {
+                const Plane& source = i == depth - 1 ? c.down[depth] : c.up[i + 1];
+                level(c.sizes[i + 1], c.sizes[i]);
+                dispatch(dualUp_.Get(), source.srv.Get(), nullptr, nullptr, c.up[i].uav.Get(), c.sizes[i][0], c.sizes[i][1]);
+            }
+        }
+    }
+    ID3D11ShaderResourceView* lumaBlurred = replace ? nullptr : (depth > 0 ? lumaUp_[0] : lumaDown_[0]).srv.Get();
+    ID3D11ShaderResourceView* chromaBlurred = replace ? nullptr : (depth > 0 ? chromaUp_[0] : chromaDown_[0]).srv.Get();
+    dispatch(compositeLuma_.Get(), lumaIn_.srv.Get(), lumaBlurred, replace ? imageLuma_.srv.Get() : nullptr,
              lumaOut_.uav.Get(), width, height);
-    dispatch(compositeChroma_.Get(), chromaIn_.srv.Get(), smallChroma_[0].srv.Get(), replace ? imageChroma_.srv.Get() : nullptr,
+    dispatch(compositeChroma_.Get(), chromaIn_.srv.Get(), chromaBlurred, replace ? imageChroma_.srv.Get() : nullptr,
              chromaOut_.uav.Get(), cw, ch);
     context_->CSSetShader(nullptr, nullptr, 0);
 
@@ -527,10 +592,10 @@ bool Compositor::ReadBack(uint8_t* nv12, uint32_t width, uint32_t height) {
 }
 
 void Compositor::ReleaseFrames() {
-    for (Plane* plane : {&lumaIn_, &chromaIn_, &lumaOut_, &chromaOut_, &smallLuma_[0], &smallLuma_[1], &smallChroma_[0], &smallChroma_[1],
-                         &imageLuma_, &imageChroma_}) {
-        *plane = {};
-    }
+    for (Plane* plane : {&lumaIn_, &chromaIn_, &lumaOut_, &chromaOut_, &imageLuma_, &imageChroma_, &grid_[0], &grid_[1]}) *plane = {};
+    gridWidth_ = gridHeight_ = 0;
+    for (int i = 0; i < kLevels; ++i) lumaDown_[i] = lumaUp_[i] = chromaDown_[i] = chromaUp_[i] = {};
+    levels_ = 0;
     lumaStaging_.Reset();
     chromaStaging_.Reset();
     width_ = height_ = 0;
@@ -547,12 +612,15 @@ void Compositor::ReleaseDevice() {
         context_->ClearState();
         context_->Flush();
     }
-    downLuma_.Reset();
-    downChroma_.Reset();
-    blurLumaX_.Reset();
-    blurLumaY_.Reset();
-    blurChromaX_.Reset();
-    blurChromaY_.Reset();
+    guideStats_.Reset();
+    boxX_.Reset();
+    boxY_.Reset();
+    guideCoefs_.Reset();
+    downFirstLuma_.Reset();
+    downFirstChroma_.Reset();
+    dualDown_.Reset();
+    dualUp_.Reset();
+    level_.Reset();
     compositeLuma_.Reset();
     compositeChroma_.Reset();
     cropLuma_.Reset();

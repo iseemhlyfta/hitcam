@@ -118,16 +118,26 @@ private:
 
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
-    ComPtr<ID3D11ComputeShader> downLuma_, downChroma_, blurLumaX_, blurLumaY_, blurChromaX_, blurChromaY_;
+    ComPtr<ID3D11ComputeShader> guideStats_, boxX_, boxY_, guideCoefs_;
+    ComPtr<ID3D11ComputeShader> downFirstLuma_, downFirstChroma_, dualDown_, dualUp_;
     ComPtr<ID3D11ComputeShader> compositeLuma_, compositeChroma_;
     ComPtr<ID3D11ComputeShader> cropLuma_, cropChroma_;
     ComPtr<ID3D11SamplerState> linearClamp_;
-    ComPtr<ID3D11Buffer> params_;
+    ComPtr<ID3D11Buffer> params_, level_;
     unsigned long long retryDeviceMs_ = 0;
 
     uint32_t width_ = 0, height_ = 0;
     Plane lumaIn_, chromaIn_, lumaOut_, chromaOut_;
-    Plane smallLuma_[2], smallChroma_[2];  // weighted background at 1/8 (ping-pong for the blur passes)
+    // Guided filter grid at 1/4 of the frame (ping-pong).
+    static constexpr uint32_t kGridScale = 4;
+    Plane grid_[2];
+    uint32_t gridWidth_ = 0, gridHeight_ = 0;
+    // Blur pyramid of the weighted background: down[0] at half size, each next level half the previous; up[i] is the
+    // way back at down[i]'s size, up[0] is what the composite reads.
+    static constexpr int kLevels = 6;
+    Plane lumaDown_[kLevels], lumaUp_[kLevels], chromaDown_[kLevels], chromaUp_[kLevels];
+    uint32_t lumaLevel_[kLevels][2] = {}, chromaLevel_[kLevels][2] = {};
+    int levels_ = 0;  // levels created (small frames get fewer)
     ComPtr<ID3D11Texture2D> lumaStaging_, chromaStaging_;
     Plane mask_;
     uint32_t maskWidth_ = 0, maskHeight_ = 0;
