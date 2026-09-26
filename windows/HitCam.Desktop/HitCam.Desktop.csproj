@@ -31,7 +31,18 @@
     <None Include="THIRD-PARTY-NOTICES.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="$(PkgSkiaSharp)\LICENSE.txt" Link="licenses\SkiaSharp-LICENSE.txt" Visible="false" Condition="'$(PkgSkiaSharp)' != ''"
           CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <!-- Of packages that come in only through Avalonia (no path property): copies of their license files. -->
+    <None Include="licenses\*.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
+  <!-- The .NET runtime is published with the app (self-contained): its license and notices go along. -->
+  <Target Name="PublishRuntimeNotices" AfterTargets="Publish" Condition="'$(SelfContained)' == 'true'">
+    <ItemGroup>
+      <_HitCamRuntimePack Include="@(ResolvedRuntimePack)" Condition="'%(ResolvedRuntimePack.FrameworkName)' == 'Microsoft.NETCore.App'" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_HitCamRuntimePack->'%(PackageDirectory)\LICENSE.TXT')" DestinationFiles="$(PublishDir)licenses\dotnet-LICENSE.txt" />
+    <Copy SourceFiles="@(_HitCamRuntimePack->'%(PackageDirectory)\THIRD-PARTY-NOTICES.TXT')"
+          DestinationFiles="$(PublishDir)licenses\dotnet-THIRD-PARTY-NOTICES.txt" />
+  </Target>
   <ItemGroup>
     <ProjectReference Include="..\HitCam.Core\HitCam.Core.csproj" />
     <!-- Object analysis. Its native ONNX Runtime and DirectML DLLs are published next to HitCam.exe, not bundled. -->

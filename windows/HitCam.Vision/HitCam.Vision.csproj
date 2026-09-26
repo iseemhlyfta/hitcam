@@ -26,6 +26,8 @@
           CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
     <None Include="$(PkgMicrosoft_AI_DirectML)\ThirdPartyNotices.txt" Link="licenses\DirectML-ThirdPartyNotices.txt" Visible="false"
           CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="$(PkgMicrosoft_AI_DirectML)\LICENSE-CODE.txt" Link="licenses\DirectML-LICENSE-CODE.txt" Visible="false"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
   <!-- ONNX Runtime and DirectML ship with the app: their license terms go along (see THIRD-PARTY-NOTICES.txt). -->
   <ItemGroup Condition="'$(PkgMicrosoft_ML_OnnxRuntime_DirectML)' != ''">

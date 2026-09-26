@@ -37,29 +37,34 @@ internal static class OnnxLoader
                 {
                     session?.Dispose();
                 }
+                catch
+                {
+                    // Anything else (e.g. a model with unexpected outputs in the warm-up) is not a reason to try the CPU.
+                    session?.Dispose();
+                    throw;
+                }
             }
         }
 
-        using var cpuOptions = new SessionOptions
-        {
-            GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-            // Small models: two threads are plenty and leave the rest to the decoder and the app.
-            IntraOpNumThreads = Math.Clamp(Environment.ProcessorCount / 4, 1, 2),
-        };
-        InferenceSession cpu;
         lock (OnnxGate.Lock)
-            cpu = new InferenceSession(path, cpuOptions);
-        try
         {
-            lock (OnnxGate.Lock)
+            using var cpuOptions = new SessionOptions
+            {
+                GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                // Small models: two threads are plenty and leave the rest to the decoder and the app.
+                IntraOpNumThreads = Math.Clamp(Environment.ProcessorCount / 4, 1, 2),
+            };
+            var cpu = new InferenceSession(path, cpuOptions);
+            try
+            {
                 warmUp(cpu);
-            return (cpu, Detector.Cpu);
-        }
-        catch
-        {
-            lock (OnnxGate.Lock)
+                return (cpu, Detector.Cpu);
+            }
+            catch
+            {
                 cpu.Dispose();
-            throw;
+                throw;
+            }
         }
     }
 }

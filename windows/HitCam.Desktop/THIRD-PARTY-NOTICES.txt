@@ -11,10 +11,20 @@ ONNX Runtime (onnxruntime.dll)              MIT                https://github.co
                                                                licenses\onnxruntime-ThirdPartyNotices.txt
 DirectML (DirectML.dll)                     Microsoft Software https://www.nuget.org/packages/Microsoft.AI.DirectML
                                             License Terms      licenses\DirectML-LICENSE.txt,
-                                                               licenses\DirectML-ThirdPartyNotices.txt
+                                                               licenses\DirectML-ThirdPartyNotices.txt,
+                                                               licenses\DirectML-LICENSE-CODE.txt
+.NET runtime (self-contained in HitCam.exe) MIT                https://github.com/dotnet/runtime
+                                                               licenses\dotnet-LICENSE.txt,
+                                                               licenses\dotnet-THIRD-PARTY-NOTICES.txt
 Avalonia                                    MIT                https://github.com/AvaloniaUI/Avalonia
+ANGLE (av_libglesv2.dll)                    BSD-3-Clause       https://chromium.googlesource.com/angle/angle
+                                                               licenses\ANGLE-LICENSE.txt
 SkiaSharp                                   MIT                https://github.com/mono/SkiaSharp
                                                                licenses\SkiaSharp-LICENSE.txt
+Skia (libSkiaSharp.dll)                     BSD-3-Clause       https://skia.org (https://skia.googlesource.com/skia/+/main/LICENSE)
+HarfBuzzSharp                               MIT                https://github.com/mono/SkiaSharp
+                                                               licenses\HarfBuzzSharp-LICENSE.txt
+HarfBuzz (libHarfBuzzSharp.dll)             Old MIT            https://github.com/harfbuzz/harfbuzz/blob/main/COPYING
 ReactiveUI                                  MIT                https://github.com/reactiveui/ReactiveUI
 QRCoder                                     MIT                https://github.com/codebude/QRCoder
 Softcam                                     MIT                https://github.com/tshino/softcam (text below)

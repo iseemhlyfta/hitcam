@@ -88,6 +88,8 @@ jobs:
           if gh release view "$TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
             gh release upload "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
               --repo "${{ github.repository }}" --clobber
+            # gh creates a release as a draft until its files are up: publish one a failed upload left behind.
+            gh release edit "$TAG" --repo "${{ github.repository }}" --draft=false
           else
             gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
               --repo "${{ github.repository }}" --title "HitCam $TAG" --notes-file notes.md --generate-notes
