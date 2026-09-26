@@ -16,7 +16,9 @@
     <Using Include="Xunit" />
   </ItemGroup>
   <ItemGroup>
-    <!-- View models only; the native camera DLL is not needed for these tests. -->
-    <ProjectReference Include="..\HitCam.Desktop\HitCam.Desktop.csproj" AdditionalProperties="SkipVirtualCamera=true" />
+    <!-- View models only; the native camera DLL is not needed (CI passes -p:SkipVirtualCamera=true). No
+         AdditionalProperties here: a second HitCam.Desktop build with other global properties races the first one
+         over the same obj folder in a parallel solution build (CS2012). -->
+    <ProjectReference Include="..\HitCam.Desktop\HitCam.Desktop.csproj" />
   </ItemGroup>
 </Project>

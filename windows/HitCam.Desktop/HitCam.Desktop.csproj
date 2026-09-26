@@ -57,7 +57,7 @@
     <VCamDShow32Dll>$(VCamDir)build32\Release\HitCamDShow32.dll</VCamDShow32Dll>
   </PropertyGroup>
   <ItemGroup>
-    <VCamSource Include="$(VCamDir)src\**;$(VCamDir)CMakeLists.txt;$(VCamDir)build.ps1;$(VCamDir)third_party\softcam\**" />
+    <VCamSource Include="$(VCamDir)src\**;$(VCamDir)CMakeLists.txt;$(VCamDir)build.ps1;$(VCamDir)third_party\softcam\**;$(VCamDir)third_party\nvvfx\**" />
   </ItemGroup>
   <Target Name="BuildVirtualCamera" BeforeTargets="BeforeBuild" Condition="'$(OS)' == 'Windows_NT' And '$(SkipVirtualCamera)' != 'true'"
           Inputs="@(VCamSource)" Outputs="$(VCamDll)">

@@ -28,7 +28,7 @@ jobs:
       - name: Test core
         run: dotnet test HitCam.Core.Tests -c Release
       - name: Test desktop
-        run: dotnet test HitCam.Desktop.Tests -c Release
+        run: dotnet test HitCam.Desktop.Tests -c Release -p:SkipVirtualCamera=true
       - name: Test vision
         run: dotnet test HitCam.Vision.Tests -c Release
       # Also builds the C++ virtual camera (HitCam.VCam) through build.ps1.
