@@ -19,9 +19,16 @@ public static class IdentityFile
             if (File.Exists(path))
                 return ServerIdentity.Load(Unprotect(File.ReadAllBytes(path)));
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or CryptographicException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
-            // Unreadable (another user's, damaged): kept aside, not overwritten, in case it can be recovered.
+            // Held by another program for now: a new identity would make every paired phone see a stranger. No TLS
+            // this session; the file is tried again at the next start.
+            Trace.TraceError($"HitCam: identity {path} not readable now, only old phone apps can connect: {ex.Message}");
+            return null;
+        }
+        catch (CryptographicException ex)
+        {
+            // Damaged or another Windows user's: kept aside, not overwritten, in case it can be recovered.
             Trace.TraceError($"HitCam: identity {path} unreadable, making a new one (phones must pair again): {ex.Message}");
             TryMoveAside(path);
         }

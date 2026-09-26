@@ -6,7 +6,10 @@ using System.Text.Json.Serialization;
 
 namespace HitCam.Core.Pairing;
 
-public sealed record PairedDevice(string DeviceId, string DeviceName, string TokenHash, DateTimeOffset PairedAt, DateTimeOffset LastSeen);
+/// <param name="Encrypted">Paired over TLS (protocol v2). A token issued over plain TCP may have been seen on the network, so
+/// it is not accepted over TLS.</param>
+public sealed record PairedDevice(string DeviceId, string DeviceName, string TokenHash, DateTimeOffset PairedAt, DateTimeOffset LastSeen,
+    bool Encrypted = false);
 
 /// <summary>Remembers paired phones. Only SHA-256 hashes of their tokens are kept.</summary>
 public interface IPairingStore
@@ -14,9 +17,10 @@ public interface IPairingStore
     IReadOnlyList<PairedDevice> Devices { get; }
 
     /// <summary>Creates a new token for the device, replacing any earlier one, and returns it in plain text.</summary>
-    string Pair(string deviceId, string deviceName);
+    string Pair(string deviceId, string deviceName, bool encrypted = false);
 
-    bool Verify(string deviceId, string? token);
+    /// <param name="encryptedOnly">Only a token issued over TLS counts.</param>
+    bool Verify(string deviceId, string? token, bool encryptedOnly = false);
 
     /// <summary>Records that the device connected. Best effort: never throws on storage errors.</summary>
     void Touch(string deviceId);
@@ -35,15 +39,15 @@ public class InMemoryPairingStore(TimeProvider? timeProvider = null) : IPairingS
         get { lock (_gate) return Array.AsReadOnly(_items); }
     }
 
-    public string Pair(string deviceId, string deviceName)
+    public string Pair(string deviceId, string deviceName, bool encrypted = false)
     {
         var token = Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(32));
         var now = _time.GetUtcNow();
-        Update(items => [.. items.Where(d => d.DeviceId != deviceId), new PairedDevice(deviceId, deviceName, Hash(token), now, now)]);
+        Update(items => [.. items.Where(d => d.DeviceId != deviceId), new PairedDevice(deviceId, deviceName, Hash(token), now, now, encrypted)]);
         return token;
     }
 
-    public bool Verify(string deviceId, string? token)
+    public bool Verify(string deviceId, string? token, bool encryptedOnly = false)
     {
         if (string.IsNullOrEmpty(token))
             return false;
@@ -51,7 +55,7 @@ public class InMemoryPairingStore(TimeProvider? timeProvider = null) : IPairingS
         PairedDevice? device;
         lock (_gate)
             device = Array.Find(_items, d => d.DeviceId == deviceId);
-        if (device is null)
+        if (device is null || (encryptedOnly && !device.Encrypted))
             return false;
 
         return CryptographicOperations.FixedTimeEquals(

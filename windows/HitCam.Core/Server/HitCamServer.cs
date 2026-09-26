@@ -97,7 +97,13 @@ public sealed class HitCamServer : IAsyncDisposable
     public bool AllowPlaintext
     {
         get => Volatile.Read(ref _allowPlaintext);
-        set => Volatile.Write(ref _allowPlaintext, value);
+        set
+        {
+            Volatile.Write(ref _allowPlaintext, value);
+            // Off: a plain phone on now (streaming or still pairing) goes too.
+            if (!value && Volatile.Read(ref _owner) is { Encrypted: false } owner)
+                _ = SayByeAndCloseAsync(owner, "unencrypted phones turned off");
+        }
     }
 
     public ConnectedDevice? CurrentDevice => Volatile.Read(ref _owner)?.Device;
@@ -287,8 +293,9 @@ public sealed class HitCamServer : IAsyncDisposable
                     return;
                 }
 
-                var paired = _pairingStore.Verify(hello.DeviceId, hello.Token);
-                connection = new Connection(hello.DeviceId, stream, connectionCts) { Pairing = !paired };
+                // Over TLS only a token issued over TLS: one from plain TCP may have been seen on the network.
+                var paired = _pairingStore.Verify(hello.DeviceId, hello.Token, encryptedOnly: encrypted);
+                connection = new Connection(hello.DeviceId, stream, connectionCts) { Pairing = !paired, Encrypted = encrypted };
                 if (!await ClaimAsync(connection, paired, token).ConfigureAwait(false))
                 {
                     connection = null;
@@ -571,7 +578,7 @@ public sealed class HitCamServer : IAsyncDisposable
             }
             if (!TryFinishPairing(connection))
                 return false;
-            var token = _pairingStore.Pair(hello.DeviceId, hello.DeviceName);
+            var token = _pairingStore.Pair(hello.DeviceId, hello.DeviceName, encrypted: true);
             await SendPairResultAsync(stream, new PairResult(true, token, _pins.AttemptsLeft), timeout.Token).ConfigureAwait(false);
             paired = true;
             return true;
@@ -764,6 +771,8 @@ public sealed class HitCamServer : IAsyncDisposable
         public MessageStream Stream { get; } = stream;
         public ClockSync Clock { get; } = new();
         public CancellationToken Token { get; } = cts.Token;
+        /// <summary>Over TLS (protocol v2).</summary>
+        public bool Encrypted { get; init; }
         /// <summary>Still waiting for the PIN; a paired phone may evict it. Changed under the server lock.</summary>
         public bool Pairing { get; set; }
         /// <summary>Set once the handshake has completed.</summary>

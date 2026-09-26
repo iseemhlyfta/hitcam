@@ -89,6 +89,10 @@ final class StreamSession: ObservableObject {
     // The last PIN did not match: the next pairing window says so. Attempts as the PC last reported them.
     private var pinRejected = false
     private var attemptsLeft = 5
+    // PairConfirm went out on this connection: only then may a PairResult be believed.
+    private var pinConfirmed = false
+    // New connections after a mismatch that found the PC still busy closing the previous one.
+    private var busyRetries = 0
 
     // Owned by `queue`: the session's copy of the camera state and the matching encoder size.
     private var state: CameraState
@@ -137,6 +141,9 @@ final class StreamSession: ObservableObject {
             self.userStopped = false
             self.address = address
             self.claimedServerId = nil
+            self.pinRejected = false
+            self.attemptsLeft = 5
+            self.busyRetries = 0
             self.openConnection(reconnecting: false)
         }
     }
@@ -184,6 +191,7 @@ final class StreamSession: ObservableObject {
         pinCommit = nil
         typedPin = nil
         pinNonce = nil
+        pinConfirmed = false
         // The certificate to insist on: from the QR code, or the one an earlier pairing was made behind.
         let expected = (address.fingerprint ?? storedPairings().first?.fingerprint).flatMap { Data(hex: $0, size: 32) }
         let connection = FramedConnection(address: address, expected: expected, queue: queue) { [weak self] event in
@@ -277,6 +285,8 @@ final class StreamSession: ObservableObject {
             if address?.name == nil { address?.name = ack.serverName }
             switch ack.status {
             case HelloStatus.accepted:
+                // A PC accepts only a token it issued; without one, "accepted" is not from a PC we paired with.
+                guard sentToken != nil else { return fail(L10n.protocolError) }
                 startStreaming(serverName: ack.serverName)
             case HelloStatus.pairingRequired:
                 forgetRejectedToken()
@@ -286,7 +296,15 @@ final class StreamSession: ObservableObject {
                 pinRejected = false
                 if let address { setPhase(.pairing(address, attemptsLeft: attemptsLeft, wrongPin: wrong)) }
             case HelloStatus.busy:
-                fail(L10n.busy)
+                if pinRejected, busyRetries < 5 {
+                    // The PC is still closing the connection whose PIN did not match: try again shortly.
+                    busyRetries += 1
+                    connectionId = nil
+                    teardown()
+                    scheduleReconnect()
+                } else {
+                    fail(L10n.busy)
+                }
             case HelloStatus.pairingLocked:
                 fail(L10n.pairingLocked)
             default:
@@ -306,7 +324,10 @@ final class StreamSession: ObservableObject {
                 return retryPairing()
             }
             connection?.send(.pairConfirm, json: PairNonce(nonce: nonce.hex))
+            pinConfirmed = true
         case .pairResult:
+            // Only after the PC proved the PIN it showed and we opened ours: a result before that is not from the PC.
+            guard pinConfirmed else { return fail(L10n.protocolError) }
             guard case .pairing = currentPhase,
                   let result = try? decoder.decode(PairResult.self, from: payload), var address else { return }
             if result.ok, let token = result.token {

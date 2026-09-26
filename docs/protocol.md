@@ -128,6 +128,10 @@ phone                                   pc
   4. phone → PC: `PairConfirm{nonce: hex(s)}`. The PC checks `d` with its own fingerprint and PIN, then answers
      `PairResult` as in v1 and closes on a wrong one.
 
+  A phone believes `PairResult` only after it sent `PairConfirm`, and `HelloAck{status:"accepted"}` only if it sent a
+  token: an unpinned connection could otherwise be waved through by whoever answers it. The PC accepts over TLS only
+  tokens it issued over TLS.
+
   A middleman must commit to one side before it can learn the PIN from the other, so it passes with probability
   1 in 10⁶ per attempt, and attempts are limited as above. Once `r` is sent the PIN is used up: the pairing window
   ends whatever happens, and a phone that leaves after `PairReveal` without `PairConfirm` counts as a wrong PIN.

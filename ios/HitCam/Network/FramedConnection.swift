@@ -49,6 +49,8 @@ final class FramedConnection {
         let check = CertificateCheck()
         let tls = NWProtocolTLS.Options()
         sec_protocol_options_set_min_tls_protocol_version(tls.securityProtocolOptions, .TLSv12)
+        // A resumed session skips the verify block, and with it the fingerprint check: always a full handshake.
+        sec_protocol_options_set_tls_resumption_enabled(tls.securityProtocolOptions, false)
         sec_protocol_options_set_verify_block(tls.securityProtocolOptions, { _, trust, complete in
             let chain = SecTrustCopyCertificateChain(sec_trust_copy_ref(trust).takeRetainedValue()) as? [SecCertificate]
             guard let leaf = chain?.first else { return complete(false) }

@@ -126,6 +126,30 @@ public sealed class TlsServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task A_token_issued_over_plain_tcp_is_not_accepted_over_tls()
+    {
+        // It crossed the network in the clear: someone may have seen it.
+        var plainToken = _store.Pair("phone-1", "iPhone");
+        var phone = await ConnectTlsAsync();
+        Assert.Equal(HelloStatus.PairingRequired, (await phone.HelloAsync(plainToken)).Status);
+
+        var tlsToken = _store.Pair("phone-1", "iPhone", encrypted: true);
+        var again = await ConnectTlsAsync();
+        Assert.Equal(HelloStatus.Accepted, (await again.HelloAsync(tlsToken)).Status);
+    }
+
+    [Fact]
+    public async Task Turning_plain_phones_off_drops_one_that_is_still_pairing()
+    {
+        var old = await ConnectPlainAsync(_server);
+        Assert.Equal(HelloStatus.PairingRequired, (await old.HelloAsync(null)).Status);
+        await PinAsync();
+
+        _server.AllowPlaintext = false;
+        Assert.True(await old.ClosedWithinAsync(TimeSpan.FromSeconds(2)));
+    }
+
+    [Fact]
     public void An_identity_survives_export_and_load()
     {
         using var loaded = ServerIdentity.Load(Identity.Export());

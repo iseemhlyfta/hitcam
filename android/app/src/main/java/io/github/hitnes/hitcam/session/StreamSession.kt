@@ -113,6 +113,10 @@ class StreamSession(
     // The last PIN did not match: the next pairing window says so. Attempts as the PC last reported them.
     private var pinRejected = false
     private var attemptsLeft = 5
+    // PairConfirm went out on this connection: only then may a PairResult be believed.
+    private var pinConfirmed = false
+    // New connections after a mismatch that found the PC still busy closing the previous one.
+    private var busyRetries = 0
     private var serverName = ""
     private var state: CameraState
     private var outputSize: OutputSize
@@ -145,6 +149,9 @@ class StreamSession(
     fun connect(address: ServerAddress) = queue.execute {
         userStopped = false
         this.address = address
+        pinRejected = false
+        attemptsLeft = 5
+        busyRetries = 0
         openConnection(reconnecting = false)
     }
 
@@ -209,6 +216,7 @@ class StreamSession(
         pinCommit = null
         typedPin = null
         pinNonce = null
+        pinConfirmed = false
         // The certificate to insist on: from the QR code, or the one an earlier pairing was made behind.
         val expected = (address.fingerprint ?: storedPairings().firstOrNull()?.fingerprint)?.hexBytes(32)
         val connection = FramedConnection(address.host, address.port, queue, security, expected) { event ->
@@ -244,7 +252,8 @@ class StreamSession(
                     }
                     phase is Phase.Reconnecting -> scheduleReconnect()
                     phase is Phase.Failed -> Unit // Keep the more specific message from the handshake.
-                    event.error is javax.net.ssl.SSLException -> fail(SessionError.SecureFailed)
+                    // A handshake the PC broke off; a reset while connecting is a plain connection failure.
+                    event.error is javax.net.ssl.SSLHandshakeException -> fail(SessionError.SecureFailed)
                     else -> fail(event.error?.let { SessionError.ConnectionFailed(it.message ?: it.javaClass.simpleName) } ?: SessionError.ConnectionClosed)
                 }
             }
@@ -323,7 +332,8 @@ class StreamSession(
                 claimedServerId = ack.serverId
                 address = address?.let { it.copy(name = it.name ?: ack.serverName) }
                 when (ack.status) {
-                    HelloStatus.ACCEPTED -> startStreaming(ack.serverName)
+                    // A PC accepts only a token it issued; without one, "accepted" is not from a PC we paired with.
+                    HelloStatus.ACCEPTED -> if (sentToken == null) fail(SessionError.ProtocolError) else startStreaming(ack.serverName)
                     HelloStatus.PAIRING_REQUIRED -> {
                         forgetRejectedToken()
                         pinCommit = ack.pinCommit?.hexBytes(32) ?: return fail(SessionError.ProtocolError)
@@ -331,7 +341,15 @@ class StreamSession(
                         pinRejected = false
                         address?.let { setPhase(Phase.Pairing(it, attemptsLeft, wrongPin = wrong)) }
                     }
-                    HelloStatus.BUSY -> fail(SessionError.Busy)
+                    HelloStatus.BUSY -> if (pinRejected && busyRetries < 5) {
+                        // The PC is still closing the connection whose PIN did not match: try again shortly.
+                        busyRetries++
+                        connectionId++
+                        teardown()
+                        scheduleReconnect()
+                    } else {
+                        fail(SessionError.Busy)
+                    }
                     HelloStatus.PAIRING_LOCKED -> fail(SessionError.PairingLocked)
                     else -> fail(SessionError.VersionMismatch)
                 }
@@ -351,10 +369,13 @@ class StreamSession(
                     return retryPairing()
                 }
                 connection?.send(MessageType.PairConfirm, PairNonce.serializer(), PairNonce(nonce.toHex()))
+                pinConfirmed = true
                 expectReply()
             }
             MessageType.PairResult -> {
                 if (_phase.value !is Phase.Pairing) return
+                // Only after the PC proved the PIN it showed and we opened ours: a result before that is not from the PC.
+                if (!pinConfirmed) return fail(SessionError.ProtocolError)
                 cancelReplyDeadline()
                 val result = decode<PairResult>(payload) ?: return
                 val address = address ?: return

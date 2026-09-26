@@ -156,23 +156,54 @@ class StreamSessionTest {
 
     @Test
     fun aServerIdClaimedByATypedAddressIsNotTrusted() {
-        // The real PC "pc-1" is paired; someone else at a typed address claims to be it.
+        // The real PC "pc-1" is paired; someone else at a typed address claims to be it and waves the phone through.
         environment.tokens["pc-1"] = stored("secret")
         session.connect(address)
         val pc = FakePc(server.accept())
         assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
         pc.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "Impostor", "pc-1"))
-        pc.expect(MessageType.StreamConfig)
-        waitFor { session.phase.value is Phase.Streaming }
+        // A PC accepts only a token it issued: "accepted" without one is not a PC we paired with. No video.
+        waitFor { session.phase.value == Phase.Failed(SessionError.ProtocolError) }
+        assertEquals(0, video.starts)
+        assertTrue(environment.remembered.isEmpty())
         pc.close()
+    }
 
-        waitFor { session.phase.value is Phase.Reconnecting }
-        val again = FakePc(server.accept())
-        assertNull(again.expectJson<Hello>(MessageType.Hello).token)
-        again.close()
-        assertTrue(environment.remembered.isNotEmpty())
-        assertTrue(environment.remembered.none { it.serverId == "pc-1" })
-        assertEquals("Impostor", environment.remembered.last().name)
+    @Test
+    fun aPairResultWithoutTheCommitmentExchangeIsRejected() {
+        // Anyone answering an unpinned connection could say "paired" straight away; only the PC that proved its PIN may.
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        pc.expect(MessageType.Hello)
+        pc.offerPairing("123456")
+        waitFor { session.phase.value is Phase.Pairing }
+        pc.sendJson(MessageType.PairResult, PairResult(ok = true, token = "rogue", attemptsLeft = 5))
+        waitFor { session.phase.value == Phase.Failed(SessionError.ProtocolError) }
+        assertTrue(environment.tokens.isEmpty())
+        assertEquals(0, video.starts)
+        pc.close()
+    }
+
+    @Test
+    fun aPcStillClosingTheLastPairingIsTriedAgain() {
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        pc.expect(MessageType.Hello)
+        val reveal = pc.offerPairing("222222")
+        waitFor { session.phase.value is Phase.Pairing }
+        session.submitPin("111111")
+        pc.revealAfterCommit(reveal)
+        pc.expectClosed()
+
+        val busy = FakePc(server.accept())
+        busy.expect(MessageType.Hello)
+        busy.sendJson(MessageType.HelloAck, HelloAck(2, "busy", "Test PC", "pc"))
+        val next = FakePc(server.accept())
+        next.expect(MessageType.Hello)
+        next.offerPairing("333333")
+        waitFor { (session.phase.value as? Phase.Pairing)?.wrongPin == true }
+        busy.close()
+        next.close()
     }
 
     @Test
@@ -348,6 +379,7 @@ class StreamSessionTest {
     }
 
     private fun streamingPc(): FakePc {
+        environment.tokens[hostKey] = stored("secret")
         session.connect(address)
         val pc = FakePc(server.accept())
         pc.expect(MessageType.Hello)
