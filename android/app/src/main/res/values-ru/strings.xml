@@ -4,6 +4,8 @@
     <string name="address_placeholder">IP-адрес ПК, например 192.168.1.5</string>
     <string name="connect">Подключиться</string>
     <string name="scan_qr">Сканировать QR-код</string>
+    <string name="connect_usb">По USB</string>
+    <string name="connect_usb_hint">Без Wi-Fi: подключите телефон к ПК кабелем, включите на телефоне отладку по USB, а на ПК нужен adb (Android SDK Platform-Tools)</string>
     <string name="scan_prompt">Наведите камеру на QR-код в HitCam на ПК</string>
     <string name="recent">Недавние</string>
     <string name="found">В этой сети</string>

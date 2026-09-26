@@ -48,6 +48,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _threadsWereOn;
     private readonly SegmentEngine _segment;
     private NetworkDiscovery? _discovery;
+    // Android over USB (adb reverse); not for a debug instance (--port), which must not take the user's phone.
+    private AdbReverse? _usb;
+    private string _usbText = "";
     // Auto-framing: faces from the face thread, the controller stepped on the framing timer.
     private readonly Timer _framingTimer;
     private volatile IReadOnlyList<System.Drawing.RectangleF> _framingFaces = [];
@@ -254,7 +257,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             DeviceName = d.DeviceName;
             // The address stays off the screen: it would show in screen shares and streams.
-            DeviceSubtitle = d.Encrypted ? Loc.DeviceSubtitle : Loc.DeviceSubtitleUnencrypted;
+            // Over adb reverse the phone arrives from this PC's own loopback.
+            DeviceSubtitle = !d.Encrypted ? Loc.DeviceSubtitleUnencrypted
+                : System.Net.IPAddress.IsLoopback(d.RemoteEndPoint.Address) ? Loc.DeviceSubtitleUsb
+                : Loc.DeviceSubtitle;
             IsUnencrypted = !d.Encrypted;
             // Frames decoded before this connection belong to the previous one.
             _lastPreviewFrame = _pipeline.PreviewInfo().Frame;
@@ -514,6 +520,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public bool HasOtherAddresses => OtherAddresses.Length > 0;
 
+    /// <summary>Android over USB: what to do, or that it is ready.</summary>
+    public string UsbText { get => _usbText; private set => this.RaiseAndSetIfChanged(ref _usbText, value); }
+
     // Pairing
 
     public string? Pin
@@ -615,6 +624,13 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         catch (SocketException ex)
         {
             StatusText = Loc.ServerFailed(ex.Message);
+        }
+
+        if (_server.IsRunning && Program.PortOverride is null && _usb is null)
+        {
+            _usb = new AdbReverse(_server.Port);
+            _usb.StateChanged += state => Dispatcher.UIThread.Post(() => UsbText = Loc.Usb(state));
+            _usb.Start();
         }
 
         RefreshAddresses();
@@ -1093,6 +1109,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         await _server.DisposeAsync().ConfigureAwait(false);
         _identity?.Dispose();
         _discovery?.Dispose();
+        _usb?.Dispose();
         await _faceGuardTimer.DisposeAsync().ConfigureAwait(false);
         await _framingTimer.DisposeAsync().ConfigureAwait(false);
         // Analysis reads the decoder's preview: it goes first.

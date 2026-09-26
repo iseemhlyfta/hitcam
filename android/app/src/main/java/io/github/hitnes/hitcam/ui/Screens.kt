@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.Usb
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
@@ -239,6 +240,24 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
                 Spacer(Modifier.size(8.dp))
                 Text(stringResource(R.string.scan_qr))
             }
+            // Over the cable: the PC runs `adb reverse`, so it is at this phone's own loopback address.
+            TextButton(
+                onClick = {
+                    val usb = ServerAddress("127.0.0.1", ProtocolInfo.DEFAULT_PORT)
+                    start(recent.firstOrNull { it.host == usb.host && it.port == usb.port } ?: usb)
+                },
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Filled.Usb, contentDescription = null)
+                Spacer(Modifier.size(8.dp))
+                Text(stringResource(R.string.connect_usb))
+            }
+            Text(
+                stringResource(R.string.connect_usb_hint),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.fillMaxWidth(),
+            )
 
             val message = inputError ?: error?.let { errorText(it) } ?: if (cameraDenied) stringResource(R.string.camera_denied) else null
             if (message != null) {

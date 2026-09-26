@@ -12,6 +12,21 @@ public static class Loc
     public static string WaitingHint => Russian
         ? "Откройте HitCam на телефоне в той же Wi-Fi сети и отсканируйте QR-код. Или введите адрес вручную:"
         : "Open HitCam on your phone on the same Wi-Fi network and scan the QR code. Or enter the address manually:";
+    public static string Usb(UsbState state) => state switch
+    {
+        UsbState.Ready => Russian
+            ? "Android по USB готов: в HitCam на телефоне нажмите «По USB»"
+            : "Android over USB is ready: tap “Over USB” in HitCam on the phone",
+        UsbState.Unauthorized => Russian
+            ? "Android по USB: разрешите отладку по USB на экране телефона"
+            : "Android over USB: allow USB debugging on the phone's screen",
+        UsbState.NoPhone => Russian
+            ? "Android по USB: подключите телефон кабелем, включив на нём отладку по USB"
+            : "Android over USB: plug the phone in with USB debugging turned on",
+        _ => Russian
+            ? "Android по USB: установите adb (Android SDK Platform-Tools) и включите на телефоне отладку по USB"
+            : "Android over USB: install adb (Android SDK Platform-Tools) and turn on USB debugging on the phone",
+    };
     public static string OtherAddresses(string list) => Russian ? $"Другие адреса этого ПК: {list}" : $"Other addresses of this PC: {list}";
     public static string NoNetwork => Russian ? "Нет подключения к локальной сети" : "No local network connection";
     public static string CopyAddress => Russian ? "Скопировать адрес" : "Copy address";
@@ -32,6 +47,7 @@ public static class Loc
 
     // Streaming
     public static string DeviceSubtitle => Russian ? "Wi-Fi · сопряжён" : "Wi-Fi · paired";
+    public static string DeviceSubtitleUsb => Russian ? "USB · сопряжён" : "USB · paired";
     public static string DeviceSubtitleUnencrypted => Russian
         ? "Без шифрования · обновите HitCam на телефоне"
         : "Not encrypted · update HitCam on the phone";

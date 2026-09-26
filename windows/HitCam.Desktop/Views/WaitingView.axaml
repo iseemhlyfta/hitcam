@@ -45,6 +45,9 @@
                         </Button>
                     </StackPanel>
                     <TextBlock Classes="muted" Text="{Binding OtherAddresses}" IsVisible="{Binding HasOtherAddresses}" />
+                    <!--  Android over USB (adb reverse)  -->
+                    <TextBlock MaxWidth="520" HorizontalAlignment="Left" Classes="muted" TextWrapping="Wrap" Text="{Binding UsbText}"
+                               IsVisible="{Binding UsbText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
                     <StackPanel Margin="0,6,0,0" Orientation="Horizontal" Spacing="24">
                         <StackPanel Orientation="Horizontal" Spacing="8">
                             <Border Width="22" Height="22" Classes="softAccent" CornerRadius="11">

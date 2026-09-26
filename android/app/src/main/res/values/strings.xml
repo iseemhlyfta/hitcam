@@ -4,6 +4,8 @@
     <string name="address_placeholder">PC IP address, e.g. 192.168.1.5</string>
     <string name="connect">Connect</string>
     <string name="scan_qr">Scan QR code</string>
+    <string name="connect_usb">Over USB</string>
+    <string name="connect_usb_hint">No Wi-Fi needed: plug the phone into the PC, turn on USB debugging on the phone; the PC needs adb (Android SDK Platform-Tools)</string>
     <string name="scan_prompt">Point the camera at the QR code in HitCam on the PC</string>
     <string name="recent">Recent</string>
     <string name="found">On this network</string>
