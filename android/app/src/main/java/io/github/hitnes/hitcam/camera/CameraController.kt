@@ -86,7 +86,9 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
         ops.execute {
             try {
                 state = initial
-                noiseReductionChoice = initial.noiseReduction
+                // Only the first start: after a pause the stored state carries the mode this lens fell back to,
+                // not what the user chose.
+                if (noiseReductionChoice == null) noiseReductionChoice = initial.noiseReduction
                 configureSession()
                 completion(Result.success(snapshot()))
             } catch (e: Exception) {
@@ -109,7 +111,7 @@ class CameraController(private val manager: CameraManager, private val gl: GlPip
                 next.height != before.height || next.fps != before.fps
             state = next
             // Validated against the current lens, so it also holds when a failed format change restores that lens.
-            if (next.noiseReduction != before.noiseReduction) noiseReductionChoice = next.noiseReduction
+            noiseReductionChoice = CameraRules.noiseReductionChoice(noiseReductionChoice, control, next)
             var failed = false
             if (needsReconfigure && device != null) {
                 try {

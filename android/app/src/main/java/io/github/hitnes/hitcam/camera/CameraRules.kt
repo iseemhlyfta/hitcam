@@ -50,14 +50,22 @@ object CameraRules {
         noiseReductionOrder.filter { it in supported }.takeIf { it.size > 1 }
 
     /**
-     * The chosen mode if the camera offers it, otherwise the default: the best one offered ("high", then "fast", then "off").
-     * Used when a lens or format is (re)configured, so a choice survives switching to a camera that supports it.
+     * The chosen mode if the camera offers it, otherwise the default: "fast" (what the recording template used before
+     * the choice existed; "high" may lower the frame rate), else "off". Used when a lens or format is (re)configured,
+     * so a choice survives switching to a camera that supports it.
      */
     fun noiseReduction(chosen: String?, modes: List<String>?): String? {
         if (modes.isNullOrEmpty()) return null
         if (chosen != null && chosen in modes) return chosen
-        return noiseReductionOrder.lastOrNull { it in modes } ?: modes.first()
+        return listOf("fast", "off").firstOrNull { it in modes } ?: modes.first()
     }
+
+    /**
+     * The noise reduction the user chose, after [control] turned [before] into [next]: an explicit request the camera
+     * took, even if it did not change the mode (the lens had fallen back to it), otherwise the previous choice.
+     */
+    fun noiseReductionChoice(previous: String?, control: Control, next: CameraState): String? =
+        control.noiseReduction?.takeIf { it == next.noiseReduction } ?: previous
 
     /** Whether a stored state can be used to start the camera. */
     fun isValid(state: CameraState, cameraIds: List<String>, presets: List<VideoPreset> = this.presets): Boolean =

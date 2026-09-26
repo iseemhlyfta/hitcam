@@ -155,10 +155,10 @@ Added in app 0.3 (optional, absent from older apps: hide the control then): `noi
 HIGH_QUALITY); removing noise before H.264 compression gives a cleaner stream than filtering on the PC.
 `noiseReductionModes` lists the modes the active camera supports, in that order, and is recomputed for every lens
 and format; both fields are absent when the camera offers no choice. A `Control.noiseReduction` not in
-`noiseReductionModes` is ignored. The phone's default is "high" if supported, else "fast", else "off". Switching
-lens or format keeps the chosen mode if the new camera supports it, otherwise the default applies. "high" may lower
-the frame rate on some phones at 60 fps; it stays selectable. The iPhone never sends these fields: iOS gives no
-control over video noise reduction.
+`noiseReductionModes` is ignored. The phone's default is "fast" (what the recording template used before 0.3), else
+"off". Switching lens or format keeps the chosen mode if the new camera supports it, otherwise the default applies.
+"high" may lower the frame rate on some phones at 60 fps, so it is only used when chosen. The iPhone never sends these
+fields: iOS gives no control over video noise reduction.
 
 `Hello.model` is a free-form device model string for display and diagnostics only, e.g. `"iPhone15,2"` or
 `"Xiaomi 23049PCD8G"`; the PC must not parse it. `whiteBalanceTint` units are device-specific: the value is on a

@@ -73,18 +73,30 @@ class CameraRulesTest {
     }
 
     @Test
-    fun noiseReductionDefaultsToTheBestModeAndSurvivesLensChanges() {
+    fun noiseReductionDefaultsToFastAndSurvivesLensChanges() {
         val all = listOf("off", "fast", "high")
         val noHigh = listOf("off", "fast")
-        assertEquals("high", CameraRules.noiseReduction(null, all))
+        // "fast", as the recording template had it: "high" may cost frames at 60 fps.
+        assertEquals("fast", CameraRules.noiseReduction(null, all))
         assertEquals("fast", CameraRules.noiseReduction(null, noHigh))
+        assertEquals("off", CameraRules.noiseReduction(null, listOf("off", "high")))
         assertEquals("off", CameraRules.noiseReduction(null, listOf("off")))
         assertNull(CameraRules.noiseReduction("high", null))
         // A choice the new camera supports is kept, otherwise the new camera's default is used.
         assertEquals("off", CameraRules.noiseReduction("off", noHigh))
         assertEquals("fast", CameraRules.noiseReduction("high", noHigh))
-        assertEquals("fast", CameraRules.noiseReduction("fast", all))
-        assertEquals("high", CameraRules.noiseReduction("bogus", all))
+        assertEquals("high", CameraRules.noiseReduction("high", all))
+        assertEquals("fast", CameraRules.noiseReduction("bogus", all))
+    }
+
+    @Test
+    fun anExplicitNoiseReductionRequestIsRememberedEvenWhenTheModeStaysTheSame() {
+        // "high" chosen, then a lens without it fell back to "fast": asking for "fast" there is a new choice.
+        val fellBack = base.copy(noiseReduction = "fast", noiseReductionModes = listOf("off", "fast"))
+        assertEquals("fast", CameraRules.noiseReductionChoice("high", Control(noiseReduction = "fast"), fellBack))
+        // Not offered (the camera kept "fast"), or not asked for at all: the choice stays.
+        assertEquals("high", CameraRules.noiseReductionChoice("high", Control(noiseReduction = "high"), fellBack))
+        assertEquals("high", CameraRules.noiseReductionChoice("high", Control(zoom = 2.0), fellBack))
     }
 
     @Test
