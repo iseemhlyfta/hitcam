@@ -128,7 +128,30 @@ public sealed class HitCamServer : IAsyncDisposable
         SendAsync(Message.Empty(MessageType.RequestKeyframe, Now()), cancellationToken);
 
     /// <summary>Disconnects the current phone (or aborts a pairing in progress).</summary>
-    public void Kick() => Volatile.Read(ref _owner)?.Cancel("disconnected on PC");
+    /// <summary>
+    /// Disconnects the phone (the PC's "Disconnect" button). A Bye goes first: without it the phone takes the closed
+    /// connection for a network drop and reconnects two seconds later.
+    /// </summary>
+    public void Kick()
+    {
+        if (Volatile.Read(ref _owner) is { } owner)
+            _ = SayByeAndCloseAsync(owner, "disconnected on PC");
+    }
+
+    private static async Task SayByeAndCloseAsync(Connection owner, string reason)
+    {
+        try
+        {
+            // Briefly: a stalled connection must not keep the phone on the screen.
+            using var timeout = new CancellationTokenSource(TimeSpan.FromMilliseconds(300));
+            await owner.Stream.WriteAsync(Message.Json(MessageType.Bye, new Bye(reason), ProtocolJson.Default.Bye), timeout.Token)
+                .ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is IOException or ObjectDisposedException or SocketException or OperationCanceledException)
+        {
+        }
+        owner.Cancel(reason);
+    }
 
     private async Task<bool> SendAsync(Message message, CancellationToken cancellationToken)
     {

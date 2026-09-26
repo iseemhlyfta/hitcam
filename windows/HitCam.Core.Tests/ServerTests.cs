@@ -328,6 +328,21 @@ public sealed class ServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Disconnecting_on_the_pc_says_bye_so_the_phone_does_not_reconnect()
+    {
+        var connected = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        _server.Connected += _ => connected.TrySetResult();
+        var phone = await ConnectPairedAsync();
+        await connected.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
+
+        _server.Kick();
+
+        var bye = (await phone.ReadUntilAsync(MessageType.Bye)).ReadJson(ProtocolJson.Default.Bye);
+        Assert.Equal("disconnected on PC", bye.Reason);
+        Assert.True(await phone.ClosedWithinAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
     public async Task A_port_in_use_leaves_the_server_stopped_and_disposable()
     {
         var port = _server.Port;
