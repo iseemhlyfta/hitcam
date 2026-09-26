@@ -15,8 +15,8 @@ android {
         applicationId = "io.github.hitnes.hitcam"
         minSdk = 26
         targetSdk = 36
-        versionCode = 203
-        versionName = "0.2.3"
+        versionCode = 300
+        versionName = "0.3.0"
     }
 
     signingConfigs {
