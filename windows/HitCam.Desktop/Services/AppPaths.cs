@@ -163,13 +163,16 @@ public sealed partial record AppSettings
     private static partial Regex ServerIdPattern();
 }
 
-/// <summary>Expanded sections of the experiments tab ("sections" in settings.json).</summary>
+/// <summary>Expanded feature sections (experiments tab, picture enhancement; "sections" in settings.json).</summary>
 public sealed record ExperimentSections
 {
     public bool Artifact { get; set; }
     public bool Vision { get; set; }
     public bool Hands { get; set; }
     public bool Faces { get; set; }
+
+    /// <summary>"Picture enhancement" on the camera tab.</summary>
+    public bool Enhance { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

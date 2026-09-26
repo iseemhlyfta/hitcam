@@ -107,6 +107,23 @@ public static class Loc
         : "An NVIDIA neural network removes compression blocks and halos. Runs on the RTX GPU";
     public static string ArtifactReductionGentle => Russian ? "Мягко" : "Gentle";
     public static string ArtifactReductionStrong => Russian ? "Сильно" : "Strong";
+    public static string Enhance => Russian ? "Улучшение картинки" : "Picture enhancement";
+    public static string EnhanceHint => Russian
+        ? "Свежая картинка «как с камеры»: чёткие контуры без шума на коже и стенах, объём и живые цвета. Меньше 1 мс на кадр, на любой видеокарте. Лучше всего вместе с шумодавом NVIDIA (вкладка «Эксперименты»)"
+        : "A fresh “real camera” look: crisp edges without noise on skin and walls, depth and lively colour. Under 1 ms per frame on any GPU. Best together with NVIDIA noise removal (Experiments tab)";
+    public static string EnhanceStrength => Russian ? "Сила" : "Strength";
+    public static string EnhanceDetail => Russian ? "Чёткость контуров" : "Edge detail";
+    public static string EnhanceDetailHint => Russian
+        ? "Адаптивная резкость: подчёркивает контуры и фактуру, не трогая ровные места, где сидят шум и блоки сжатия"
+        : "Adaptive sharpening: brings out edges and texture, leaving flat areas (where noise and compression blocks sit) alone";
+    public static string EnhanceClarity => Russian ? "Объём" : "Clarity";
+    public static string EnhanceClarityHint => Russian
+        ? "Локальный контраст в средних тонах: картинка перестаёт быть плоской, чёрное и белое не пережигаются"
+        : "Local contrast in the midtones: the picture stops looking flat, blacks and whites are not clipped";
+    public static string EnhanceVibrance => Russian ? "Сочность" : "Vibrance";
+    public static string EnhanceVibranceHint => Russian
+        ? "Поднимает блёклые цвета сильнее ярких и почти не трогает тон кожи"
+        : "Raises muted colours more than vivid ones and barely touches skin tones";
     public static string ColorAndSharpness => Russian ? "Цвет и резкость" : "Colour and sharpness";
     public static string Brightness => Russian ? "Яркость" : "Brightness";
     public static string Contrast => Russian ? "Контраст" : "Contrast";

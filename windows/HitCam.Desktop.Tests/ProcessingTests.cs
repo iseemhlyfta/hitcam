@@ -18,12 +18,32 @@ public sealed class ProcessingTests
     [Fact]
     public void The_struct_matches_the_native_layout()
     {
-        Assert.Equal(32, Marshal.SizeOf<HitCamProcessing>());
+        Assert.Equal(44, Marshal.SizeOf<HitCamProcessing>());
         Assert.Equal(0, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.TemporalStrength)));
         Assert.Equal(4, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.ArtifactReduction)));
         Assert.Equal(8, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.Brightness)));
         Assert.Equal(20, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.Sharpness)));
         Assert.Equal(28, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.Highlights)));
+        Assert.Equal(32, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.Detail)));
+        Assert.Equal(40, (int)Marshal.OffsetOf<HitCamProcessing>(nameof(HitCamProcessing.Vibrance)));
+    }
+
+    [Fact]
+    public void Enhancement_is_off_by_default_and_scales_its_parts_by_the_strength()
+    {
+        var settings = AppSettings.Parse("""{"serverId":"a"}"""u8)!.Processing;
+        Assert.False(settings.Enhance);
+        Assert.Equal((0f, 0f, 0f), (settings.ToNative().Detail, settings.ToNative().Clarity, settings.ToNative().Vibrance));
+
+        var native = (settings with { Enhance = true, EnhanceStrength = 50, EnhanceDetail = 100, EnhanceClarity = 40, EnhanceVibrance = 0 }).ToNative();
+        Assert.Equal((0.5f, 0.2f, 0f), (native.Detail, native.Clarity, native.Vibrance));
+        Assert.Equal(0f, (settings with { Enhance = true, Enabled = false }).ToNative().Detail);
+
+        var processing = Create();
+        processing.IsEnhanceOn = true;
+        Assert.Equal(ProcessingSettings.DefaultEnhanceStrength / 100f, _applied[^1].Detail, 3);
+        processing.EnhanceClarity = 250;
+        Assert.Equal("100%", processing.EnhanceClarityText);
     }
 
     [Fact]

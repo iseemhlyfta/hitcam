@@ -290,6 +290,49 @@
                                 </StackPanel>
                             </StackPanel>
 
+                            <!--  Picture enhancement: adaptive sharpening, clarity, vibrance (one GPU pass, any GPU)  -->
+                            <views:FeatureSection Title="{x:Static svc:Loc.Enhance}" Hint="{x:Static svc:Loc.EnhanceHint}"
+                                                  IsOn="{Binding Processing.IsEnhanceOn}" IsExpanded="{Binding EnhanceSectionExpanded}"
+                                                  IsEnabled="{Binding Processing.IsEnabled}">
+                                <StackPanel Spacing="10" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel">
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding EnhanceStrengthText}" />
+                                            <TextBlock Classes="strong" Text="{x:Static svc:Loc.EnhanceStrength}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding EnhanceStrength}" AutomationProperties.Name="{x:Static svc:Loc.EnhanceStrength}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding EnhanceDetailText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.EnhanceDetail}" ToolTip.Tip="{x:Static svc:Loc.EnhanceDetailHint}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding EnhanceDetail}" ToolTip.Tip="{x:Static svc:Loc.EnhanceDetailHint}"
+                                                AutomationProperties.Name="{x:Static svc:Loc.EnhanceDetail}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding EnhanceClarityText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.EnhanceClarity}" ToolTip.Tip="{x:Static svc:Loc.EnhanceClarityHint}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding EnhanceClarity}" ToolTip.Tip="{x:Static svc:Loc.EnhanceClarityHint}"
+                                                AutomationProperties.Name="{x:Static svc:Loc.EnhanceClarity}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding EnhanceVibranceText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.EnhanceVibrance}" ToolTip.Tip="{x:Static svc:Loc.EnhanceVibranceHint}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding EnhanceVibrance}" ToolTip.Tip="{x:Static svc:Loc.EnhanceVibranceHint}"
+                                                AutomationProperties.Name="{x:Static svc:Loc.EnhanceVibrance}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </views:FeatureSection>
+
                             <!--  Colour and sharpness  -->
                             <StackPanel Spacing="10" DataContext="{Binding Processing}" x:DataType="vm:ProcessingViewModel" IsEnabled="{Binding IsEnabled}">
                                 <DockPanel>

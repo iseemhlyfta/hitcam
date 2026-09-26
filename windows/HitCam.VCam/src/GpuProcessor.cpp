@@ -11,6 +11,9 @@
 // Compiled shaders (fxc at build time, from shaders/Process.hlsl).
 #include "shaders/AdjustChroma.h"
 #include "shaders/AdjustLuma.h"
+#include "shaders/ClarityBlurX.h"
+#include "shaders/ClarityBlurY.h"
+#include "shaders/ClarityDown.h"
 #include "shaders/TemporalChroma.h"
 #include "shaders/TemporalLuma.h"
 
@@ -27,7 +30,11 @@ struct Params {
     float sharpness;
     float sharpenThreshold;
     float saturation;
-    float padding[2];
+    float detail;
+    float clarity;
+    float vibrance;
+    float padding;
+    uint32_t smallSize[2];
 };
 static_assert(sizeof(Params) % 16 == 0);
 
@@ -60,6 +67,9 @@ HitCamProcessing ClampProcessing(const HitCamProcessing& s) {
     result.sharpness = Clamp(s.sharpness, 0, 1);
     result.shadows = Clamp(s.shadows, -1, 1);
     result.highlights = Clamp(s.highlights, -1, 1);
+    result.detail = Clamp(s.detail, 0, 1);
+    result.clarity = Clamp(s.clarity, 0, 1);
+    result.vibrance = Clamp(s.vibrance, 0, 1);
     return result;
 }
 
@@ -150,6 +160,16 @@ bool GpuProcessor::EnsureDevice() {
     if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_TemporalChroma, sizeof(g_TemporalChroma), nullptr, &temporalChroma_);
     if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_AdjustLuma, sizeof(g_AdjustLuma), nullptr, &adjustLuma_);
     if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_AdjustChroma, sizeof(g_AdjustChroma), nullptr, &adjustChroma_);
+    if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_ClarityDown, sizeof(g_ClarityDown), nullptr, &clarityDown_);
+    if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_ClarityBlurX, sizeof(g_ClarityBlurX), nullptr, &clarityBlurX_);
+    if (SUCCEEDED(hr)) hr = device_->CreateComputeShader(g_ClarityBlurY, sizeof(g_ClarityBlurY), nullptr, &clarityBlurY_);
+    if (SUCCEEDED(hr)) {
+        D3D11_SAMPLER_DESC desc{};
+        desc.Filter = D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+        desc.AddressU = desc.AddressV = desc.AddressW = D3D11_TEXTURE_ADDRESS_CLAMP;
+        desc.MaxLOD = D3D11_FLOAT32_MAX;
+        hr = device_->CreateSamplerState(&desc, &linearClamp_);
+    }
     if (SUCCEEDED(hr)) {
         D3D11_BUFFER_DESC desc{};
         desc.ByteWidth = sizeof(Params);
@@ -203,6 +223,8 @@ bool GpuProcessor::EnsureFrames(uint32_t width, uint32_t height) {
               && CreatePlane(weight_, width, height, DXGI_FORMAT_R8_UNORM, true)
               && CreatePlane(lumaOut_, width, height, DXGI_FORMAT_R8_UNORM, true)
               && CreatePlane(chromaOut_, cw, ch, DXGI_FORMAT_R8G8_UNORM, true);
+    const uint32_t sw = (width + 7) / 8, sh = (height + 7) / 8;
+    for (int i = 0; i < 2 && ok; ++i) ok = CreatePlane(clarity_[i], sw, sh, DXGI_FORMAT_R16_FLOAT, true);
     for (int i = 0; i < 2 && ok; ++i) {
         ok = CreatePlane(lumaHistory_[i], width, height, DXGI_FORMAT_R8_UNORM, true)
              && CreatePlane(chromaHistory_[i], cw, ch, DXGI_FORMAT_R8G8_UNORM, true);
@@ -225,12 +247,14 @@ bool GpuProcessor::EnsureFrames(uint32_t width, uint32_t height) {
     }
     width_ = width;
     height_ = height;
+    smallWidth_ = sw;
+    smallHeight_ = sh;
     return true;
 }
 
 void GpuProcessor::ReleaseFrames() {
     for (Plane* plane : {&lumaIn_, &chromaIn_, &lumaHistory_[0], &lumaHistory_[1], &chromaHistory_[0], &chromaHistory_[1],
-                         &weight_, &lumaOut_, &chromaOut_}) {
+                         &weight_, &lumaOut_, &chromaOut_, &clarity_[0], &clarity_[1]}) {
         *plane = {};
     }
     lumaStaging_.Reset();
@@ -251,6 +275,10 @@ void GpuProcessor::ReleaseDevice() {
     temporalChroma_.Reset();
     adjustLuma_.Reset();
     adjustChroma_.Reset();
+    clarityDown_.Reset();
+    clarityBlurX_.Reset();
+    clarityBlurY_.Reset();
+    linearClamp_.Reset();
     params_.Reset();
     toneCurveView_.Reset();
     toneCurve_.Reset();
@@ -300,8 +328,9 @@ bool GpuProcessor::Process(uint8_t* nv12, uint32_t width, uint32_t height, const
 
 bool GpuProcessor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const HitCamProcessing& s) {
     const bool temporal = s.temporalStrength > 0;
-    const bool adjustLuma = HasToneCurve(s) || s.sharpness > 0;
-    const bool adjustChroma = s.saturation != 0;
+    const bool clarity = s.clarity > 0;
+    const bool adjustLuma = HasToneCurve(s) || s.sharpness > 0 || s.detail > 0 || clarity;
+    const bool adjustChroma = s.saturation != 0 || s.vibrance > 0;
     const bool lumaChanges = temporal || adjustLuma;
     const bool chromaChanges = temporal || adjustChroma;
     const uint32_t cw = width / 2, ch = height / 2;
@@ -316,6 +345,12 @@ bool GpuProcessor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Hit
     // Up to 2x the fine detail; detail smaller than ~1.5 levels is noise.
     params.sharpness = 2.0f * s.sharpness;
     params.sharpenThreshold = 1.5f / 255.0f;
+    // Enhancement: the UI's 0..1 at full strength gives the look of the tuned prototype at ~0.5.
+    params.detail = s.detail;
+    params.clarity = 0.7f * s.clarity;
+    params.vibrance = 0.7f * s.vibrance;
+    params.smallSize[0] = smallWidth_;
+    params.smallSize[1] = smallHeight_;
     if (temporal) {
         const bool cut = DetectCut(nv12, width, height);
         const double sigma = std::min(EstimateNoise(nv12, width, height), 10.0);
@@ -376,8 +411,15 @@ bool GpuProcessor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Hit
         luma = &lumaHistory_[next];
         chromaPlane = &chromaHistory_[next];
     }
+    if (clarity) {
+        dispatch(clarityDown_.Get(), {luma->srv.Get()}, {clarity_[0].uav.Get()}, smallWidth_, smallHeight_);
+        dispatch(clarityBlurX_.Get(), {clarity_[0].srv.Get()}, {clarity_[1].uav.Get()}, smallWidth_, smallHeight_);
+        dispatch(clarityBlurY_.Get(), {clarity_[1].srv.Get()}, {clarity_[0].uav.Get()}, smallWidth_, smallHeight_);
+    }
     if (adjustLuma) {
-        dispatch(adjustLuma_.Get(), {luma->srv.Get(), toneCurveView_.Get()}, {lumaOut_.uav.Get()}, width, height);
+        ID3D11SamplerState* samplers[] = {linearClamp_.Get()};
+        context_->CSSetSamplers(0, 1, samplers);
+        dispatch(adjustLuma_.Get(), {luma->srv.Get(), toneCurveView_.Get(), clarity_[0].srv.Get()}, {lumaOut_.uav.Get()}, width, height);
         luma = &lumaOut_;
     }
     if (adjustChroma) {

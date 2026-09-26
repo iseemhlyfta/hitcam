@@ -35,6 +35,21 @@ public sealed record ProcessingSettings
     /// <summary>0 (off) to 100.</summary>
     public int Sharpness { get; set; }
 
+    public const int DefaultEnhanceStrength = 70;
+
+    /// <summary>
+    /// Picture enhancement, a "fresh" camera look: adaptive sharpening (edges only, flat areas left alone), clarity
+    /// (local contrast) and vibrance (muted colours, skin spared). Off by default.
+    /// </summary>
+    public bool Enhance { get; set; }
+
+    /// <summary>Overall amount, 0..100; each part below is 0..100 of it.</summary>
+    public int EnhanceStrength { get; set; } = DefaultEnhanceStrength;
+
+    public int EnhanceDetail { get; set; } = 100;
+    public int EnhanceClarity { get; set; } = 100;
+    public int EnhanceVibrance { get; set; } = 100;
+
     /// <summary>Colour and sharpness are untouched (the "Reset" button's target).</summary>
     public bool IsColorNeutral =>
         Brightness == 0 && Contrast == 0 && Saturation == 0 && Shadows == 0 && Highlights == 0 && Sharpness == 0;
@@ -59,12 +74,17 @@ public sealed record ProcessingSettings
         Sharpness = Math.Clamp(Sharpness, 0, 100) / 100f,
         Shadows = Signed(Shadows),
         Highlights = Signed(Highlights),
+        Detail = EnhancePart(EnhanceDetail),
+        Clarity = EnhancePart(EnhanceClarity),
+        Vibrance = EnhancePart(EnhanceVibrance),
     };
+
+    private float EnhancePart(int part) => Enhance ? Math.Clamp(EnhanceStrength, 0, 100) * Math.Clamp(part, 0, 100) / 10000f : 0;
 
     private static float Signed(int value) => Math.Clamp(value, -100, 100) / 100f;
 }
 
-/// <summary>Matches <c>HitCamProcessing</c> in HitCamVCam.dll (packed to 4 bytes, 32 bytes in all).</summary>
+/// <summary>Matches <c>HitCamProcessing</c> in HitCamVCam.dll (packed to 4 bytes, 44 bytes in all).</summary>
 [StructLayout(LayoutKind.Sequential, Pack = 4)]
 public struct HitCamProcessing
 {
@@ -84,6 +104,12 @@ public struct HitCamProcessing
     public float Shadows;
     /// <summary>-1..1.</summary>
     public float Highlights;
+    /// <summary>0..1: adaptive sharpening.</summary>
+    public float Detail;
+    /// <summary>0..1: local contrast.</summary>
+    public float Clarity;
+    /// <summary>0..1: vibrance.</summary>
+    public float Vibrance;
 }
 
 /// <summary>

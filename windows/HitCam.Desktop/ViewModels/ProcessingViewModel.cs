@@ -129,6 +129,20 @@ public sealed class ProcessingViewModel : ReactiveObject
     public string HighlightsText => Signed(_settings.Highlights);
     public string SharpnessText => $"{_settings.Sharpness}";
 
+    // Picture enhancement
+
+    public bool IsEnhanceOn { get => _settings.Enhance; set => Update(_settings with { Enhance = value }); }
+
+    public double EnhanceStrength { get => _settings.EnhanceStrength; set => Update(_settings with { EnhanceStrength = Round(value, 0, 100) }); }
+    public double EnhanceDetail { get => _settings.EnhanceDetail; set => Update(_settings with { EnhanceDetail = Round(value, 0, 100) }); }
+    public double EnhanceClarity { get => _settings.EnhanceClarity; set => Update(_settings with { EnhanceClarity = Round(value, 0, 100) }); }
+    public double EnhanceVibrance { get => _settings.EnhanceVibrance; set => Update(_settings with { EnhanceVibrance = Round(value, 0, 100) }); }
+
+    public string EnhanceStrengthText => $"{_settings.EnhanceStrength}%";
+    public string EnhanceDetailText => $"{_settings.EnhanceDetail}%";
+    public string EnhanceClarityText => $"{_settings.EnhanceClarity}%";
+    public string EnhanceVibranceText => $"{_settings.EnhanceVibrance}%";
+
     /// <summary>Some colour or sharpness slider is away from neutral; enables "Reset".</summary>
     public bool IsColorAdjusted => !_settings.IsColorNeutral;
 
@@ -221,6 +235,8 @@ public sealed class ProcessingViewModel : ReactiveObject
         nameof(Saturation), nameof(SaturationText), nameof(Shadows), nameof(ShadowsText),
         nameof(Highlights), nameof(HighlightsText), nameof(Sharpness), nameof(SharpnessText),
         nameof(IsColorAdjusted), nameof(Settings), nameof(IsEnabled),
+        nameof(IsEnhanceOn), nameof(EnhanceStrength), nameof(EnhanceStrengthText), nameof(EnhanceDetail), nameof(EnhanceDetailText),
+        nameof(EnhanceClarity), nameof(EnhanceClarityText), nameof(EnhanceVibrance), nameof(EnhanceVibranceText),
     ];
 
     private static int Round(double value, int min, int max) =>

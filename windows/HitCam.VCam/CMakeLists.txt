@@ -53,7 +53,7 @@ if(NOT FXC)
 endif()
 set(SHADER_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/Process.hlsl)
 set(SHADER_HEADERS)
-foreach(entry TemporalLuma TemporalChroma AdjustLuma AdjustChroma)
+foreach(entry TemporalLuma TemporalChroma ClarityDown ClarityBlurX ClarityBlurY AdjustLuma AdjustChroma)
     set(header ${CMAKE_CURRENT_BINARY_DIR}/shaders/${entry}.h)
     add_custom_command(OUTPUT ${header}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders

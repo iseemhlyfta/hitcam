@@ -11,7 +11,7 @@
 
 namespace hitcam {
 
-// Temporal noise reduction and colour / sharpness adjustments of NV12 frames with Direct3D 11 compute shaders, on
+// Temporal noise reduction, colour / sharpness adjustments and enhancement (clarity, adaptive sharpening, vibrance) of NV12 frames with Direct3D 11 compute shaders, on
 // any GPU (WARP, the software rasterizer, if there is no hardware device). Decoder thread only.
 //
 // Temporal noise reduction mixes each pixel with the previous output where the picture does not move: the
@@ -63,6 +63,8 @@ private:
     ComPtr<ID3D11Device> device_;
     ComPtr<ID3D11DeviceContext> context_;
     ComPtr<ID3D11ComputeShader> temporalLuma_, temporalChroma_, adjustLuma_, adjustChroma_;
+    ComPtr<ID3D11ComputeShader> clarityDown_, clarityBlurX_, clarityBlurY_;
+    ComPtr<ID3D11SamplerState> linearClamp_;
     ComPtr<ID3D11Buffer> params_;
     ComPtr<ID3D11Buffer> toneCurve_;
     ComPtr<ID3D11ShaderResourceView> toneCurveView_;
@@ -70,6 +72,8 @@ private:
 
     uint32_t width_ = 0, height_ = 0;
     Plane lumaIn_, chromaIn_, lumaHistory_[2], chromaHistory_[2], weight_, lumaOut_, chromaOut_;
+    Plane clarity_[2];  // the clarity base at 1/8 size (ping-pong for the two blur passes)
+    uint32_t smallWidth_ = 0, smallHeight_ = 0;
     ComPtr<ID3D11Texture2D> lumaStaging_, chromaStaging_;
     int history_ = 0;  // which of the two history planes holds the previous output
     bool historyValid_ = false;

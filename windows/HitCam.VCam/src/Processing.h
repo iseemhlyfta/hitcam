@@ -13,9 +13,13 @@ struct HitCamProcessing {
     float sharpness;            // 0..1, 0 = off
     float shadows;              // -1..1, 0 neutral (+ lifts dark areas)
     float highlights;           // -1..1, 0 neutral (- recovers bright areas)
+    // Picture enhancement ("fresh" look), each 0..1, 0 = off:
+    float detail;               // adaptive sharpening: crisp edges, flat areas (compression blocks, skin) left alone
+    float clarity;              // local contrast in the midtones (large radius)
+    float vibrance;             // raises muted colours more than saturated ones, spares skin tones
 };
 #pragma pack(pop)
-static_assert(sizeof(HitCamProcessing) == 32, "shared with the C# app");
+static_assert(sizeof(HitCamProcessing) == 44, "shared with the C# app");
 
 namespace hitcam {
 
@@ -29,7 +33,8 @@ inline bool HasToneCurve(const HitCamProcessing& s) {
 
 // Anything for the Direct3D 11 stage (everything but the NVIDIA artifact reduction).
 inline bool NeedsGpu(const HitCamProcessing& s) {
-    return s.temporalStrength > 0 || HasToneCurve(s) || s.saturation != 0 || s.sharpness > 0;
+    return s.temporalStrength > 0 || HasToneCurve(s) || s.saturation != 0 || s.sharpness > 0 || s.detail > 0 || s.clarity > 0 ||
+           s.vibrance > 0;
 }
 
 }  // namespace hitcam

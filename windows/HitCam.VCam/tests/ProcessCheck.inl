@@ -278,6 +278,105 @@ void CheckAdjustments() {
     }
 }
 
+// Picture enhancement: adaptive sharpening, clarity, vibrance.
+void CheckEnhancement() {
+    const uint32_t width = 640, height = 360;
+    auto run = [&](const HitCamProcessing& settings, Frame frame) {
+        Bridge bridge;
+        bridge.Set(settings);
+        bridge.Process(frame);
+        return frame;
+    };
+    const int row = height / 2;
+    {
+        // A soft edge 60 -> 180 around x = 320 over flat areas with faint noise (+-1: what compression leaves).
+        Frame edge(width, height, 60);
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 0; x < width; ++x) {
+                const double t = std::clamp((static_cast<int>(x) - 317) / 6.0, 0.0, 1.0);
+                edge.Y(x, y) = static_cast<uint8_t>(std::lround(60 + 120 * t * t * (3 - 2 * t)));
+            }
+        }
+        Noise noise;
+        noise.Add(edge, 1, 0);
+        HitCamProcessing s = Neutral();
+        s.detail = 1;
+        Frame out = run(s, edge);
+        auto steepest = [&](Frame& f) {
+            int best = 0;
+            for (uint32_t x = 300; x < 340; ++x) best = std::max(best, f.Y(x + 1, row) - f.Y(x, row));
+            return best;
+        };
+        int changedFlat = 0;
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 20; x < 200; ++x) changedFlat += out.Y(x, y) != edge.Y(x, y);
+        }
+        char what[180];
+        std::snprintf(what, sizeof(what), "detail 1: steepest step %d -> %d; flat area with faint noise: %d of %u pixels changed",
+                      steepest(edge), steepest(out), changedFlat, 180 * height);
+        Check(steepest(out) > steepest(edge) && changedFlat < static_cast<int>(180 * height / 100), what);
+    }
+    {
+        // A soft 30 px bar (120 on 90), about the size clarity works at: it stands out more; far areas stay.
+        Frame bar(width, height, 90);
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 300; x < 340; ++x) {
+                const double t = std::clamp(std::min(x - 300.0, 339.0 - x) / 5.0, 0.0, 1.0);
+                bar.Y(x, y) = static_cast<uint8_t>(std::lround(90 + 30 * t));
+            }
+        }
+        HitCamProcessing s = Neutral();
+        s.clarity = 1;
+        Frame out = run(s, bar);
+        const int before = bar.Y(320, row) - bar.Y(280, row), after = out.Y(320, row) - out.Y(280, row);
+        const bool farKept = std::abs(out.Y(20, row) - 90) <= 1 && std::abs(out.Y(620, row) - 90) <= 1;
+        char what[180];
+        std::snprintf(what, sizeof(what), "clarity 1: bar against its surroundings %d -> %d, far areas %d / %d (90)", before, after,
+                      out.Y(20, row), out.Y(620, row));
+        Check(after > before + 4 && farKept, what);
+
+        // A hard, high-contrast edge (dark head against a bright wall): no halo on either side.
+        Frame edge(width, height, 50);
+        for (uint32_t y = 0; y < height; ++y) {
+            for (uint32_t x = 320; x < width; ++x) edge.Y(x, y) = 200;
+        }
+        Frame edged = run(s, edge);
+        int halo = 0;
+        for (uint32_t x = 290; x < 350; ++x) {
+            if (x < 318 || x > 322) halo = std::max(halo, std::abs(edged.Y(x, row) - edge.Y(x, row)));
+        }
+        std::snprintf(what, sizeof(what), "clarity 1 next to a hard 50/200 edge: largest change %d of 150 (halo limit 4, invisible)", halo);
+        Check(halo <= 4, what);
+    }
+    {
+        // Three colour patches: muted blue-ish, strongly saturated, skin (U below, V above neutral).
+        Frame patches(width, height);
+        auto fill = [&](uint32_t x0, uint32_t x1, int u, int v) {
+            for (uint32_t y = 0; y < height / 2; ++y) {
+                for (uint32_t x = x0; x < x1; ++x) {
+                    patches.UV(x, y, 0) = static_cast<uint8_t>(u);
+                    patches.UV(x, y, 1) = static_cast<uint8_t>(v);
+                }
+            }
+        };
+        fill(0, 100, 128 + 12, 128 - 6);    // muted
+        fill(100, 200, 128 + 70, 128 - 30); // saturated
+        fill(200, 320, 128 - 12, 128 + 12); // skin
+        HitCamProcessing s = Neutral();
+        s.vibrance = 1;
+        Frame out = run(s, patches);
+        auto gain = [&](uint32_t x) {
+            const double before = std::hypot(patches.UV(x, 10, 0) - 128.0, patches.UV(x, 10, 1) - 128.0);
+            return std::hypot(out.UV(x, 10, 0) - 128.0, out.UV(x, 10, 1) - 128.0) / before;
+        };
+        const bool lumaKept = std::equal(out.data.begin(), out.data.begin() + width * height, patches.data.begin());
+        char what[180];
+        std::snprintf(what, sizeof(what), "vibrance 1: chroma gain muted %.2f, saturated %.2f, skin %.2f; luma untouched", gain(50),
+                      gain(150), gain(260));
+        Check(gain(50) > 1.3 && gain(150) < gain(50) && gain(260) < gain(50) && gain(260) > 1.0 && lumaKept, what);
+    }
+}
+
 // Average of HitCam_BridgeProcessingStats' GPU time over frames 11..70 of a 1080p sequence with everything on.
 double MeasureGpu(bool* ok) {
     Bridge bridge;
@@ -289,6 +388,9 @@ double MeasureGpu(bool* ok) {
     s.sharpness = 0.5f;
     s.shadows = 0.3f;
     s.highlights = -0.3f;
+    s.detail = 0.6f;
+    s.clarity = 0.5f;
+    s.vibrance = 0.5f;
     bridge.Set(s);
     const Frame source = Picture(1920, 1080);
     double total = 0;
@@ -504,6 +606,7 @@ int Run() {
     CheckTemporal();
     CheckNoGhosting();
     CheckAdjustments();
+    CheckEnhancement();
     CheckSpeed();
     CheckDecodedPath();
     CheckArtifactReduction();

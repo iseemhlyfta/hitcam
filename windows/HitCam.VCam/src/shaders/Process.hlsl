@@ -13,7 +13,11 @@ cbuffer Params : register(b0) {
     float sharpness;        // 0..~2: amount of the unsharp mask
     float sharpenThreshold; // detail below this (0..1 units) is noise and not amplified
     float saturation;       // chroma scale around 128, 1 = neutral
-    float2 padding;
+    float detail;           // 0..1: adaptive (CAS-style) sharpening
+    float clarity;          // 0..~0.7: local contrast amount
+    float vibrance;         // 0..~0.7: vibrance amount
+    float padding;
+    uint2 smallSize;        // size of the clarity base (1/8 of the luma, rounded up)
 };
 
 // Motion measure of a pixel: the 3x3 mean difference (robust to noise), and the pixel's own difference (a third of
@@ -78,10 +82,58 @@ void TemporalChroma(uint3 id : SV_DispatchThreadID) {
     chromaOut[p] = lerp(chromaIn[p], chromaHistory[p], w);
 }
 
-// ---- Luma adjustments: unsharp mask (noise-gated, halo-limited), then the tone curve (256-entry table, output 0..1).
+// ---- Clarity base: the luma's low frequencies. 8x8 means, then a separable Gaussian (sigma ~2.3 there, ~18 px of a
+// 1080p frame); AdjustLuma samples it bilinearly. At 1/64 of the pixels this costs next to nothing.
+Texture2D<float> clarityLuma : register(t0);
+RWTexture2D<float> clarityDown : register(u0);
+
+[numthreads(16, 8, 1)]
+void ClarityDown(uint3 id : SV_DispatchThreadID) {
+    if (any(id.xy >= smallSize)) return;
+    const int2 last = int2(lumaSize) - 1;
+    const int2 origin = int2(id.xy) * 8;
+    float sum = 0;
+    [unroll] for (int dy = 0; dy < 8; ++dy) {
+        [unroll] for (int dx = 0; dx < 8; ++dx) sum += clarityLuma[min(origin + int2(dx, dy), last)];
+    }
+    clarityDown[id.xy] = sum / 64.0;
+}
+
+Texture2D<float> claritySource : register(t0);
+RWTexture2D<float> clarityBlurred : register(u0);
+static const float kGauss[5] = {0.1823, 0.1659, 0.1249, 0.0779, 0.0401};  // sigma 2.3, taps -4..4, sums to 1
+
+float BlurAlong(int2 p, int2 step) {
+    const int2 last = int2(smallSize) - 1;
+    float sum = claritySource[p] * kGauss[0];
+    [unroll] for (int i = 1; i <= 4; ++i) {
+        sum += (claritySource[clamp(p + step * i, int2(0, 0), last)] + claritySource[clamp(p - step * i, int2(0, 0), last)]) * kGauss[i];
+    }
+    return sum;
+}
+
+[numthreads(16, 8, 1)]
+void ClarityBlurX(uint3 id : SV_DispatchThreadID) {
+    if (any(id.xy >= smallSize)) return;
+    clarityBlurred[id.xy] = BlurAlong(int2(id.xy), int2(1, 0));
+}
+
+[numthreads(16, 8, 1)]
+void ClarityBlurY(uint3 id : SV_DispatchThreadID) {
+    if (any(id.xy >= smallSize)) return;
+    clarityBlurred[id.xy] = BlurAlong(int2(id.xy), int2(0, 1));
+}
+
+// ---- Luma adjustments: unsharp mask (noise-gated, halo-limited), clarity and adaptive sharpening (enhancement), then
+// the tone curve (256-entry table, output 0..1).
 Texture2D<float> lumaSource : register(t0);
 Buffer<float> toneCurve : register(t1);
+Texture2D<float> clarityBase : register(t2);
+SamplerState linearClamp : register(s0);
 RWTexture2D<float> lumaAdjusted : register(u0);
+
+// Video-range luma (16..235) as 0..1.
+float Level(float v) { return saturate((v * 255.0 - 16.0) / 219.0); }
 
 [numthreads(16, 8, 1)]
 void AdjustLuma(uint3 id : SV_DispatchThreadID) {
@@ -109,12 +161,46 @@ void AdjustLuma(uint3 id : SV_DispatchThreadID) {
         const float margin = 3.0 / 255.0;
         y = clamp(y + sharpness * gated, low - margin, high + margin);
     }
+    const float original = lumaSource[p];
+    if (clarity > 0) {
+        // Local contrast: the difference to the low frequencies, mostly in the midtones (never pushes black or white).
+        // Only moderate differences (texture, shape) are raised; big ones (a head against a bright wall) fade out, so
+        // strong edges get no halos.
+        const float base = clarityBase.SampleLevel(linearClamp, (float2(p) + 0.5) / float2(lumaSize), 0);
+        const float level = 2.0 * Level(original) - 1.0;
+        const float difference = original - base;
+        const float relative = difference / (20.0 / 255.0);
+        y += clamp(clarity * difference * exp(-relative * relative) * (1.0 - level * level), -0.05, 0.05);
+    }
+    if (detail > 0) {
+        // CAS: sharpening shrinks where local contrast is already high (no halos), and a range gate leaves flat areas
+        // (compression blocks, skin, walls) alone.
+        const float n = lumaSource[clamp(p + int2(0, -1), int2(0, 0), last)];
+        const float s = lumaSource[clamp(p + int2(0, 1), int2(0, 0), last)];
+        const float w = lumaSource[clamp(p + int2(-1, 0), int2(0, 0), last)];
+        const float e = lumaSource[clamp(p + int2(1, 0), int2(0, 0), last)];
+        float low = min(original, min(min(n, s), min(w, e)));
+        float high = max(original, max(max(n, s), max(w, e)));
+        [unroll] for (int cy = -1; cy <= 1; cy += 2) {
+            [unroll] for (int cx = -1; cx <= 1; cx += 2) {
+                const float v = lumaSource[clamp(p + int2(cx, cy), int2(0, 0), last)];
+                low = min(low, v);
+                high = max(high, v);
+            }
+        }
+        const float lowLevel = Level(low), highLevel = Level(high);
+        const float amplitude = sqrt(saturate(min(lowLevel, 1.0 - highLevel) / max(highLevel, 1e-4)));
+        const float weight = amplitude * (-1.0 / (8.0 - 3.0 * detail));
+        const float sharpened = (original + weight * (n + s + w + e)) / (1.0 + 4.0 * weight);
+        const float gate = saturate((highLevel - lowLevel - 0.012) / 0.03);
+        y += (sharpened - original) * gate;
+    }
     const float x = saturate(y) * 255.0;
     const uint i = min(uint(x), 254u);
     lumaAdjusted[p] = saturate(lerp(toneCurve[i], toneCurve[i + 1], x - i));
 }
 
-// ---- Chroma adjustments: saturation around neutral (128), kept in the video range.
+// ---- Chroma adjustments: saturation around neutral (128) and vibrance, kept in the video range.
 Texture2D<float2> chromaSource : register(t0);
 RWTexture2D<float2> chromaAdjusted : register(u0);
 
@@ -122,6 +208,14 @@ RWTexture2D<float2> chromaAdjusted : register(u0);
 void AdjustChroma(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= chromaSize)) return;
     const int2 p = int2(id.xy);
-    const float2 c = chromaSource[p] * 255.0 - 128.0;
-    chromaAdjusted[p] = clamp(c * saturation + 128.0, 16.0, 240.0) / 255.0;
+    float2 c = (chromaSource[p] * 255.0 - 128.0) * saturation;
+    if (vibrance > 0) {
+        // Muted colours gain the most, saturated ones little; skin (hue ~135 degrees in U/V) is spared.
+        const float2 uv = c / 224.0;
+        const float gain = vibrance * saturate(1.0 - length(uv) / 0.25);
+        const float hue = degrees(atan2(uv.y, uv.x));
+        const float skin = exp(-((hue - 135.0) / 25.0) * ((hue - 135.0) / 25.0));
+        c *= 1.0 + gain * (1.0 - 0.6 * skin);
+    }
+    chromaAdjusted[p] = clamp(c + 128.0, 16.0, 240.0) / 255.0;
 }

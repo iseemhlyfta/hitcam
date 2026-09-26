@@ -316,6 +316,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public bool FacesSectionExpanded { get => _settings.Sections.Faces; set => SetSections(_settings.Sections with { Faces = value }); }
 
+    public bool EnhanceSectionExpanded { get => _settings.Sections.Enhance; set => SetSections(_settings.Sections with { Enhance = value }); }
+
     private void SetSections(ExperimentSections sections)
     {
         if (sections == _settings.Sections)
@@ -326,6 +328,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         this.RaisePropertyChanged(nameof(VisionSectionExpanded));
         this.RaisePropertyChanged(nameof(HandsSectionExpanded));
         this.RaisePropertyChanged(nameof(FacesSectionExpanded));
+        this.RaisePropertyChanged(nameof(EnhanceSectionExpanded));
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
