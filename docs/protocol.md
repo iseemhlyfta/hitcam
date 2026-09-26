@@ -1,7 +1,26 @@
-# HitCam protocol v1
+# HitCam protocol v2
 
 Transport: one TCP connection per session. The PC listens (default port **47800**), the phone (iPhone or Android) connects.
 All multi-byte integers are **little-endian**. No external servers are ever involved.
+
+## Encryption (v2, app 0.3.1)
+
+Protocol v2 runs inside **TLS 1.2 or 1.3**. The PC has a self-signed ECDSA P-256 certificate, made on first start and
+kept (`%APPDATA%\HitCam\identity.bin`, encrypted for the Windows user). No certificate authority is involved: a phone
+pins the certificate's **fingerprint**, the SHA-256 of its DER bytes (64 lowercase hex characters):
+
+* the QR code carries it as `&fp=`: a phone that scanned it accepts only that certificate;
+* otherwise the phone accepts any certificate for the first pairing and binds the PIN to the fingerprint it saw (see
+  *Pairing* below); after pairing it accepts only that certificate at that PC's address or id;
+* a phone sends its token only behind the certificate the token was issued behind. A certificate that differs from the
+  pinned one ends the connection before anything is sent ("the PC's key is not the saved one").
+
+The PC tells TLS from v1 by the first byte: a TLS ClientHello starts with 0x16, a v1 `Hello` header with 0x01. v2 is
+accepted only over TLS and v1 only in plain TCP, so neither can be downgraded into the other.
+
+**v1 (apps up to 0.3.0)** is plain TCP with the PIN sent as typed. The PC still accepts it by default and shows a warning
+while such a phone is connected; the user can refuse it (then v1 phones get `versionMismatch`). Tokens a phone stored
+over v1 have no fingerprint and are not sent over v2: that PC is paired once more, with its PIN.
 
 ## Framing
 
@@ -34,6 +53,8 @@ The PC checks `length` against a per-state limit before reading the payload:
 | 0x02 | HelloAck        | pc → phone | JSON `HelloAck`                           |
 | 0x03 | PairRequest     | phone → pc | JSON `PairRequest`                        |
 | 0x04 | PairResult      | pc → phone | JSON `PairResult`                         |
+| 0x05 | PairReveal      | pc → phone | JSON `{ "nonce": "hex" }` (v2)             |
+| 0x06 | PairConfirm     | phone → pc | JSON `{ "nonce": "hex" }` (v2)             |
 | 0x10 | StreamConfig    | phone → pc | JSON `StreamConfig`                       |
 | 0x11 | VideoFrame      | phone → pc | H.264/HEVC Annex-B bytes; flag bit0 = keyframe |
 | 0x12 | RequestKeyframe | pc → phone | empty                                     |
@@ -53,7 +74,7 @@ the connection. Arrays are bounded: `cameras` ≤ 16, `presets` ≤ 16, `presets
 
 ## Discovery
 
-Since app 0.4 the PC announces itself on the local network by DNS-SD (mDNS, "Bonjour") as `_hitcam._tcp`, instance name
+Since app 0.3.1 the PC announces itself on the local network by DNS-SD (mDNS, "Bonjour") as `_hitcam._tcp`, instance name
 the PC's name, SRV port the server port. TXT: `id` (server id), `name`, `v` (protocol version), `port`, `addr` (the
 PC's IPv4 addresses, comma-separated, so an iPhone browsing with Network.framework gets an address without connecting).
 The announcement is refreshed when the PC's addresses change; a debug instance (`--port`) does not announce.
@@ -95,6 +116,21 @@ phone                                   pc
   256-bit `token` (hex) that the phone stores and presents in future `Hello`s. The PC stores only a
   SHA-256 hash of the token. A successful `PairResult` means the session is accepted (no second `HelloAck`).
   While locked out the PC answers `HelloAck{status:"pairingLocked"}` and closes.
+* Pairing in v2: the PIN never crosses the network. Hashing a 6-digit PIN would not hide it (a middleman tries all
+  million PINs in milliseconds), so both sides commit before either opens. With `fp` the certificate fingerprint
+  (32 bytes), `PIN` 6 ASCII digits, nonces of 32 random bytes and `H(label, fp, PIN, nonce)` = SHA-256 of the ASCII
+  label, a 0 byte, `fp`, `PIN`, `nonce`:
+  1. PC → phone: `HelloAck{status:"pairingRequired", pinCommit: hex(c)}`, `c = H("hitcam-pc-v2", fp of the PC, PIN, r)`.
+  2. phone → PC, once the user typed the PIN: `PairRequest{commit: hex(d)}`, `d = H("hitcam-phone-v2", fp seen, PIN, s)`.
+  3. PC → phone: `PairReveal{nonce: hex(r)}`. The phone checks `c` with the fingerprint it sees and the PIN typed.
+     If it does not match (a typo, or a middleman's certificate), the phone closes without opening `s` and connects
+     again for a new PIN.
+  4. phone → PC: `PairConfirm{nonce: hex(s)}`. The PC checks `d` with its own fingerprint and PIN, then answers
+     `PairResult` as in v1 and closes on a wrong one.
+
+  A middleman must commit to one side before it can learn the PIN from the other, so it passes with probability
+  1 in 10⁶ per attempt, and attempts are limited as above. Once `r` is sent the PIN is used up: the pairing window
+  ends whatever happens, and a phone that leaves after `PairReveal` without `PairConfirm` counts as a wrong PIN.
 * Clock sync: every `Ping` is answered with a `Pong` whose payload echoes the ping's header timestamp and whose
   own header timestamp is the replier's clock. The PC uses this to estimate capture-to-receive latency.
 * Liveness: either side closes the connection if nothing was received for **5 s**.
@@ -114,14 +150,15 @@ phone                                   pc
 
 ```jsonc
 // Hello
-{ "protocolVersion": 1, "deviceId": "uuid", "deviceName": "iPhone Hitnes", "model": "iPhone15,2",
+{ "protocolVersion": 2, "deviceId": "uuid", "deviceName": "iPhone Hitnes", "model": "iPhone15,2",
   "appVersion": "0.1.0", "token": "hex or null" }
 
 // HelloAck
-{ "protocolVersion": 1, "status": "accepted", "serverName": "DESKTOP-01", "serverId": "uuid" }
+{ "protocolVersion": 2, "status": "pairingRequired", "serverName": "DESKTOP-01", "serverId": "uuid", "pinCommit": "hex" }
 
-// PairRequest / PairResult
-{ "pin": "123456" }
+// PairRequest (v2; v1 sends { "pin": "123456" }), PairReveal / PairConfirm, PairResult
+{ "commit": "hex" }
+{ "nonce": "hex" }
 { "ok": true, "token": "hex", "attemptsLeft": 4 }
 
 // StreamConfig
