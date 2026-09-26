@@ -72,8 +72,10 @@ public sealed class BackgroundViewModel : ReactiveObject
         get => Modes.First(m => m.Mode == _settings.Mode);
         set
         {
-            if (value is not null)
-                Update(_settings with { Mode = value.Mode });
+            if (value is null)
+                return;
+            ErrorText = "";
+            Update(_settings with { Mode = value.Mode });
         }
     }
 
@@ -171,9 +173,11 @@ public sealed class BackgroundViewModel : ReactiveObject
         {
             case VisionState.Loading:
                 StatsText = Loc.VisionLoading;
+                ErrorText = "";
                 break;
             case VisionState.Running:
                 StatsText = Loc.BackgroundStarting(status.Provider ?? "");
+                ErrorText = "";
                 break;
             case VisionState.Failed:
                 StatsText = "";

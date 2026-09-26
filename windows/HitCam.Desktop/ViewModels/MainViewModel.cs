@@ -71,6 +71,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private readonly WriteableBitmap?[] _previewBuffers = new WriteableBitmap?[2];
     private int _nextPreviewBuffer;
     private ulong _lastPreviewFrame;
+    // The same for the preview with the background (its own frame counter).
+    private ulong _lastShownFrame;
 
     private string _statusText = "";
     private string? _pin;
@@ -245,6 +247,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             DeviceSubtitle = Loc.DeviceSubtitle;
             // Frames decoded before this connection belong to the previous one.
             _lastPreviewFrame = _pipeline.PreviewInfo().Frame;
+            _lastShownFrame = _pipeline.PreviewInfo(shown: true).Frame;
             IsConnected = true;
             _previewTimer!.Start();
             _vision.ResetTracks();
@@ -293,6 +296,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _hands.ResetTracks();
             _faces.ResetTracks();
             Interlocked.Exchange(ref _framingReset, 1);
+            // The old mask belongs to the old picture: the room is blurred until a mask of the new one comes.
+            _pipeline.SetSegmentMask([], 0, 0);
             _segment.Reset();
             // Results for the old picture would land in the wrong place (a hidden face shown beside its mosaic).
             _faceGuard.Reset();
@@ -813,22 +818,15 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         var active = enabled && IsConnected;
         Background.IsActive = active;
         var path = settings.Mode == BackgroundMode.Replace ? settings.ImagePath : null;
-        if (path != _backgroundImagePath)
+        // The same file saved again (or picked again after fixing it) is read again.
+        var stamp = path is null ? null : $"{path}|{(File.Exists(path) ? File.GetLastWriteTimeUtc(path).Ticks : 0)}";
+        if (stamp != _backgroundImagePath)
         {
-            _backgroundImagePath = path;
+            _backgroundImagePath = stamp;
             if (path is null)
-            {
                 _pipeline.SetBackgroundImage(null, 0, 0);
-            }
-            else if (BackgroundImage.Load(path) is { } image)
-            {
-                _pipeline.SetBackgroundImage(image.Pixels, image.Width, image.Height);
-            }
             else
-            {
-                _pipeline.SetBackgroundImage(null, 0, 0);
-                Background.ShowImageFailed();
-            }
+                _ = LoadBackgroundImageAsync(path, stamp!);
         }
         _pipeline.SetBackground((active ? settings : settings with { Enabled = false }).ToNative());
         _segment.Paused = !active;
@@ -838,6 +836,26 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _segment.Stop();
         if (active)
             Background.ShowStatus(_segment.Status);
+    }
+
+    /// <summary>
+    /// Reads the background picture off the UI thread (a big photo takes a while) and hands it to the camera, unless
+    /// another one was chosen meanwhile. Until then the room is blurred.
+    /// </summary>
+    private async Task LoadBackgroundImageAsync(string path, string stamp)
+    {
+        var image = await Task.Run(() => BackgroundImage.Load(path));
+        if (stamp != _backgroundImagePath)
+            return;
+        if (image is { } picture)
+        {
+            _pipeline.SetBackgroundImage(picture.Pixels, picture.Width, picture.Height);
+        }
+        else
+        {
+            _pipeline.SetBackgroundImage(null, 0, 0);
+            Background.ShowImageFailed();
+        }
     }
 
     /// <summary>
@@ -905,7 +923,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         var (width, height, frame) = _pipeline.PreviewInfo(shown);
         if (shown && width == 0)
             (width, height, frame) = _pipeline.PreviewInfo(shown = false);
-        if (width == 0 || frame == _lastPreviewFrame)
+        if (width == 0 || frame == (shown ? _lastShownFrame : _lastPreviewFrame))
             return;
 
         var bitmap = _previewBuffers[_nextPreviewBuffer];
@@ -924,7 +942,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             HideFaces(buffer.Address, buffer.RowBytes, width, height);
         }
 
-        _lastPreviewFrame = frame;
+        if (shown)
+            _lastShownFrame = frame;
+        else
+            _lastPreviewFrame = frame;
         _nextPreviewBuffer ^= 1;
         Preview = bitmap;
     }

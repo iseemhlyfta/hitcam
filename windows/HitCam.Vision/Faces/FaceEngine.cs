@@ -317,7 +317,7 @@ public sealed class FaceEngine : IDisposable
             return;
         _disposed = true;
         _wake.Set();
-        if (_thread.Join(TimeSpan.FromSeconds(5)))
-            _wake.Dispose();
+        // The wake event is not disposed: a late Start, Stop or Paused from the UI while the app closes must not throw.
+        _thread.Join(TimeSpan.FromSeconds(5));
     }
 }

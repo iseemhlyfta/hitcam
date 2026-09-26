@@ -291,8 +291,8 @@ public sealed class VisionEngine : IDisposable
         _disposed = true;
         _wake.Set();
         // A model may be loading (a second or two); the thread is a background one either way.
-        if (_thread.Join(TimeSpan.FromSeconds(5)))
-            _wake.Dispose();
+        // The wake event is not disposed: a late Start, Stop or Paused from the UI while the app closes must not throw.
+        _thread.Join(TimeSpan.FromSeconds(5));
     }
 
     private sealed record Request(ModelInfo? Model, int Version);

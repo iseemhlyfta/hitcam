@@ -90,6 +90,49 @@ public sealed class BackgroundTests
     }
 
     [Fact]
+    public void A_phone_photo_is_turned_upright_by_its_exif_orientation()
+    {
+        // 40x20: red on the left, blue on the right; EXIF orientation 6 (the phone was held upright, "rotate 90° CW").
+        byte[] jpeg;
+        using (var bitmap = new SkiaSharp.SKBitmap(40, 20))
+        {
+            using (var canvas = new SkiaSharp.SKCanvas(bitmap))
+            {
+                canvas.Clear(new SkiaSharp.SKColor(0, 0, 255));
+                canvas.DrawRect(0, 0, 20, 20, new SkiaSharp.SKPaint { Color = new SkiaSharp.SKColor(255, 0, 0) });
+            }
+            using var data = bitmap.Encode(SkiaSharp.SKEncodedImageFormat.Jpeg, 95);
+            jpeg = data.ToArray();
+        }
+        // APP1 "Exif": little-endian TIFF with one IFD entry, Orientation (0x0112) = 6.
+        byte[] exif =
+        [
+            0xFF, 0xE1, 0x00, 0x22, (byte)'E', (byte)'x', (byte)'i', (byte)'f', 0, 0,
+            (byte)'I', (byte)'I', 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x01, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        var path = Path.Combine(Path.GetTempPath(), $"HitCam.Tests.{Guid.NewGuid():N}.jpg");
+        File.WriteAllBytes(path, [.. jpeg[..2], .. exif, .. jpeg[2..]]);
+        try
+        {
+            var image = BackgroundImage.Load(path);
+
+            Assert.NotNull(image);
+            Assert.Equal((20, 40), (image.Value.Width, image.Value.Height));
+            // Turned clockwise: what was on the left is at the top now.
+            var top = image.Value.Pixels.AsSpan((5 * 20 + 10) * 4, 4).ToArray();
+            var bottom = image.Value.Pixels.AsSpan((35 * 20 + 10) * 4, 4).ToArray();
+            Assert.True(top[2] > 200 && top[0] < 60, $"top {string.Join(",", top)}");        // red (BGRA)
+            Assert.True(bottom[0] > 200 && bottom[2] < 60, $"bottom {string.Join(",", bottom)}");  // blue
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
     public void A_picture_that_is_not_one_is_refused()
     {
         var path = Path.Combine(Path.GetTempPath(), $"HitCam.Tests.{Guid.NewGuid():N}.png");
