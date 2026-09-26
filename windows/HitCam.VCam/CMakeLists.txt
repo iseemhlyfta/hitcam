@@ -62,6 +62,17 @@ foreach(entry TemporalLuma TemporalChroma ClarityDown ClarityBlurX ClarityBlurY 
         COMMENT "fxc ${entry}")
     list(APPEND SHADER_HEADERS ${header})
 endforeach()
+# Background blur and replacement (Compositor.cpp).
+set(COMPOSITE_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/shaders/Composite.hlsl)
+foreach(entry DownLuma DownChroma BlurLumaX BlurLumaY BlurChromaX BlurChromaY CompositeLuma CompositeChroma)
+    set(header ${CMAKE_CURRENT_BINARY_DIR}/shaders/${entry}.h)
+    add_custom_command(OUTPUT ${header}
+        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_CURRENT_BINARY_DIR}/shaders
+        COMMAND "${FXC}" /nologo /T cs_5_0 /E ${entry} /O3 /WX /Vn g_${entry} /Fh ${header} ${COMPOSITE_SOURCE}
+        DEPENDS ${COMPOSITE_SOURCE}
+        COMMENT "fxc ${entry}")
+    list(APPEND SHADER_HEADERS ${header})
+endforeach()
 
 # ---- HitCamVCam.dll: decoder bridge for HitCam.exe + Media Foundation camera (Windows 11) ----
 add_library(HitCamVCam SHARED
@@ -71,6 +82,7 @@ add_library(HitCamVCam SHARED
     src/DShowOutput.cpp
     src/ArtifactReducer.cpp
     src/GpuProcessor.cpp
+    src/Compositor.cpp
     src/Overlay.cpp
     src/ShotEffect.cpp
     src/CrashLog.cpp

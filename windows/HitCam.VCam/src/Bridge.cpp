@@ -20,6 +20,7 @@
 #include "DShowOutput.h"
 #include "ArtifactReducer.h"
 #include "ErrorGuard.h"
+#include "Compositor.h"
 #include "GpuProcessor.h"
 #include "Overlay.h"
 #include "ShotEffect.h"
@@ -180,6 +181,11 @@ struct FrameSink {
     HandScene hands;
     // Hidden faces (mosaic, blur, fill) in the camera's frames (not the preview).
     FaceEffect faces;
+    // Background blur or replacement, in the camera's frames and in `shown`; `preview` stays the real picture, since
+    // the analysis reads it (it must see the room, not the effect).
+    Compositor compositor;
+    PreviewBuffer shown;
+    std::atomic<double> compositeMs{-1};
     // HitCamVCamTest only: frames go to the preview alone, not to a camera; `testOutput` (if set) receives what
     // the camera would get.
     using TestOutput = void(__stdcall*)(void* context, const uint8_t* luma, const uint8_t* chroma, uint32_t pitch, uint32_t width, uint32_t height);
@@ -253,21 +259,31 @@ struct FrameSink {
                 pitch = width;
             }
         }
-        // The preview first: the app draws its own overlay on it.
+        // The preview first: the app draws its own overlay on it, and the analysis reads it.
         preview.Update(luma, chroma, pitch, width, height);
+
+        // Never into the decoder's buffer: into the packed copy (already the processed frame, if any).
+        auto own = [&] {
+            if (luma == packed.data()) return;
+            Pack(luma, chroma, pitch, width, height);
+            luma = packed.data();
+            chroma = packed.data() + static_cast<size_t>(width) * height;
+            pitch = width;
+        };
+        // The background next, so faces, boxes and hands are drawn over it; the app then shows `shown`.
+        if (compositor.Active()) {
+            own();
+            compositeMs = compositor.Composite(packed.data(), width, height) ? compositor.LastMilliseconds() : -1.0;
+            shown.Update(luma, chroma, pitch, width, height);
+        } else {
+            compositor.ReleaseIfOff();
+            compositeMs = -1;
+        }
         if (previewOnly && !testOutput) return;
 
         // Windows 10: the DirectShow camera takes the frame (any size); the Media Foundation section is not used then.
         const bool toDShow = !previewOnly && dshow::IsActive();
         if (fits || toDShow) {
-            // Never into the decoder's buffer: into the packed copy (already the processed frame, if any).
-            auto own = [&] {
-                if (luma == packed.data()) return;
-                Pack(luma, chroma, pitch, width, height);
-                luma = packed.data();
-                chroma = packed.data() + static_cast<size_t>(width) * height;
-                pitch = width;
-            };
             // Faces first: boxes, hands and shots are drawn over the hidden faces.
             if (const auto regions = faces.Current()) {
                 own();
@@ -623,6 +639,43 @@ __declspec(dllexport) void __stdcall HitCam_BridgeSetHandScene(void* handle, con
 // everything; count 0 clears. Regions not refreshed for over a second are dropped.
 __declspec(dllexport) void __stdcall HitCam_BridgeSetFaceRegions(void* handle, const HitCamFaceRegion* regions, int32_t count) {
     if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.faces.Set(regions, count); });
+}
+
+// Background blur or replacement (see Compositor.h); null or mode 0 turns it off. Any thread.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetBackground(void* handle, const HitCamBackground* settings) {
+    if (!handle) return;
+    hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.compositor.SetBackground(settings ? *settings : HitCamBackground{}); });
+}
+
+// The person mask for the background, `width` x `height` bytes (255 = person) over the whole frame; null clears it.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetSegmentMask(void* handle, const uint8_t* mask, uint32_t width, uint32_t height) {
+    if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.compositor.SetMask(mask, width, height); });
+}
+
+// The replacement picture, BGRA rows of `stride` bytes; null clears it.
+__declspec(dllexport) void __stdcall HitCam_BridgeSetBackgroundImage(void* handle, const uint8_t* bgra, uint32_t width, uint32_t height, uint32_t stride) {
+    if (handle) hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.compositor.SetImage(bgra, width, height, stride); });
+}
+
+// Milliseconds the background took on the last frame; -1 if off or it did not run.
+__declspec(dllexport) double __stdcall HitCam_BridgeCompositeMs(void* handle) {
+    double ms = -1;
+    if (handle) hitcam::Quietly([&] { ms = static_cast<hitcam::Bridge*>(handle)->sink.compositeMs.load(); });
+    return ms;
+}
+
+// The preview with the background applied (what the camera shows), while the background is on; like PreviewInfo.
+__declspec(dllexport) void __stdcall HitCam_BridgeDisplayPreviewInfo(void* handle, uint32_t* width, uint32_t* height, uint64_t* frame) {
+    if (!handle || !width || !height || !frame) return;
+    hitcam::Quietly([&] { static_cast<hitcam::Bridge*>(handle)->sink.shown.Info(width, height, frame); });
+}
+
+__declspec(dllexport) BOOL __stdcall HitCam_BridgeCopyDisplayPreview(void* handle, uint8_t* destination, uint32_t stride, uint32_t width, uint32_t height) {
+    BOOL copied = FALSE;
+    if (handle && destination) {
+        hitcam::Quietly([&] { copied = static_cast<hitcam::Bridge*>(handle)->sink.shown.Copy(destination, stride, width, height); });
+    }
+    return copied;
 }
 
 // For HitCamVCamTest: applies face regions to one packed NV12 frame.
