@@ -375,6 +375,23 @@ void CheckEnhancement() {
                       gain(150), gain(260));
         Check(gain(50) > 1.3 && gain(150) < gain(50) && gain(260) < gain(50) && gain(260) > 1.0 && lumaKept, what);
     }
+    {
+        // Neutral chroma (U=V=128) has no hue: atan2(0, 0) must not turn it into NaN (which the clamp makes green).
+        auto neutral = [&](float saturation) {
+            HitCamProcessing s = Neutral();
+            s.saturation = saturation;
+            s.vibrance = 1;
+            Frame out = run(s, Frame(width, height, 100, 128));
+            int worst = 0;
+            for (uint32_t i = 0; i < width * height / 2; ++i) worst = (std::max)(worst, std::abs(out.Chroma()[i] - 128));
+            return worst;
+        };
+        const int gray = neutral(0), grayscale = neutral(-1);
+        char what[160];
+        std::snprintf(what, sizeof(what), "vibrance 1 on neutral chroma: largest shift %d (gray frame), %d (saturation -1)", gray,
+                      grayscale);
+        Check(gray == 0 && grayscale == 0, what);
+    }
 }
 
 // Average of HitCam_BridgeProcessingStats' GPU time over frames 11..70 of a 1080p sequence with everything on.

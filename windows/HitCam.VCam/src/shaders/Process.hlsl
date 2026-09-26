@@ -209,7 +209,8 @@ void AdjustChroma(uint3 id : SV_DispatchThreadID) {
     if (any(id.xy >= chromaSize)) return;
     const int2 p = int2(id.xy);
     float2 c = (chromaSource[p] * 255.0 - 128.0) * saturation;
-    if (vibrance > 0) {
+    // No chroma, no hue: atan2(0, 0) is NaN on the GPU, and the clamp below turns NaN into green.
+    if (vibrance > 0 && dot(c, c) > 1e-6) {
         // Muted colours gain the most, saturated ones little; skin (hue ~135 degrees in U/V) is spared.
         const float2 uv = c / 224.0;
         const float gain = vibrance * saturate(1.0 - length(uv) / 0.25);
