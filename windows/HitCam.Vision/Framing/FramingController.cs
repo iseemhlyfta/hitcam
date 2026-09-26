@@ -7,11 +7,14 @@ public sealed record FramingOptions
     /// <summary>The picture is never magnified more than this (a 1080p source gets soft beyond 2×).</summary>
     public float MaxZoom { get; init; } = 2f;
 
-    /// <summary>The crop is this many face heights tall ("head and shoulders").</summary>
-    public float FaceHeights { get; init; } = 3.5f;
+    /// <summary>
+    /// The crop is this many face boxes tall: head and upper shoulders. Face boxes already have room around the face
+    /// (FaceTracker), so a face at a desk (a third of the frame) still gets zoomed in.
+    /// </summary>
+    public float FaceHeights { get; init; } = 2.2f;
 
     /// <summary>The face centre sits this far down the crop (0 top, 1 bottom): room above the head.</summary>
-    public float FaceLine { get; init; } = 0.38f;
+    public float FaceLine { get; init; } = 0.4f;
 
     /// <summary>The target moves only when its centre moved this much (share of the crop) ...</summary>
     public float DeadZoneCentre { get; init; } = 0.06f;
@@ -98,7 +101,7 @@ public sealed class FramingController(FramingOptions? options = null)
         var bottom = faces.Max(f => f.Bottom);
         var faceHeight = faces.Max(f => f.Height);
         // Tall enough for head and shoulders of the largest face, wide and tall enough for all of them.
-        var size = Math.Max(faceHeight * _options.FaceHeights, Math.Max((right - left) * 1.4f, bottom - top + faceHeight * 2.5f));
+        var size = Math.Max((right - left) * 1.4f, bottom - top + faceHeight * (_options.FaceHeights - 1));
         size = Math.Clamp(size, 1 / _options.MaxZoom, 1);
         var faceCentreY = (top + bottom) / 2;
         return Clamp(new Vector3((left + right) / 2, faceCentreY + (0.5f - _options.FaceLine) * size, size));

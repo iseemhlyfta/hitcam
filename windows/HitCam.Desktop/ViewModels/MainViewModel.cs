@@ -49,7 +49,6 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private volatile IReadOnlyList<System.Drawing.RectangleF> _framingFaces = [];
     private volatile FramingController? _framingController;
     private int _framingReset;
-    private int _framingTicks;
     private System.Drawing.RectangleF? _framingCrop;
     // The picture sent to the DLL for the background, so it is read and sent only when the choice changes.
     private string? _backgroundImagePath;
@@ -806,12 +805,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             controller.Reset();
         var crop = controller.Update(_framingFaces, TimeSpan.FromTicks(Stopwatch.GetTimestamp() * TimeSpan.TicksPerSecond / Stopwatch.Frequency));
         _pipeline.SetFraming(HitCamFraming.From(crop));
-        // The preview frame, a few times a second: enough to see what the camera shows.
-        if (Interlocked.Increment(ref _framingTicks) % 3 == 0)
-        {
-            System.Drawing.RectangleF? shown = crop == FramingController.Full ? null : crop;
-            Dispatcher.UIThread.Post(() => FramingCrop = _framingController is null ? null : shown);
-        }
+        // The preview zooms with the camera, every step so it moves as smoothly.
+        System.Drawing.RectangleF? shown = crop == FramingController.Full ? null : crop;
+        Dispatcher.UIThread.Post(() => FramingCrop = _framingController is null ? null : shown);
     }
 
     /// <summary>

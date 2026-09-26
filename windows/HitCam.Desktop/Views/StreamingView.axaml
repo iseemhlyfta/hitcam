@@ -37,6 +37,8 @@
                 <Panel>
                   <!--  The picture and what is drawn on it; a shot kicks all of it  -->
                   <Panel x:Name="PreviewContent">
+                  <!--  Auto-framing: all of it zoomed to what the camera shows  -->
+                  <views:FramedPanel Source="{Binding Preview}" Crop="{Binding FramingCrop}">
                     <Image Source="{Binding Preview}" Stretch="Uniform" RenderOptions.BitmapInterpolationMode="MediumQuality" />
                     <!--  Detected objects, mapped through the same letterboxing as the image  -->
                     <views:DetectionOverlay Source="{Binding Preview}" Tracks="{Binding Vision.Tracks}" ShowLabels="{Binding Vision.ShowLabels}" IsVisible="{Binding ShowDetections}" />
@@ -49,10 +51,9 @@
                     <!--  Finger-gun shots: flash here, kick on the whole panel  -->
                     <views:ShotOverlay Source="{Binding Preview}" Shots="{Binding Hands.Shots}" ShakeTarget="{Binding #PreviewContent}" IsVisible="{Binding ShowHands}" />
                     <!--  Squares around faces (the effect is already in the picture); a click uncovers or hides one  -->
-                    <!--  Auto-framing: what the camera shows, the rest dimmed  -->
-                    <views:FramingOverlay Source="{Binding Preview}" Crop="{Binding FramingCrop}" />
                     <views:FaceOverlay x:Name="FaceSquares" Source="{Binding Preview}" Faces="{Binding Faces.Faces}" ToggleCommand="{Binding Faces.ToggleCommand}"
                                        IsVisible="{Binding ShowFaces}" />
+                  </views:FramedPanel>
                   </Panel>
                     <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="10" IsVisible="{Binding !HasPreview}">
                         <Path Classes="icon" Width="40" Height="40" StrokeThickness="1.4" Stroke="{StaticResource HcVideoMuted}" Data="{StaticResource IconVideo}" />

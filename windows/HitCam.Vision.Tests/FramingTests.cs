@@ -7,8 +7,11 @@ public sealed class FramingControllerTests
 {
     private static TimeSpan At(double seconds) => TimeSpan.FromSeconds(seconds);
 
-    // A face 0.16 of the frame tall, a little left of centre and high up.
-    private static readonly RectangleF Face = new(0.35f, 0.25f, 0.09f, 0.16f);
+    // A face box 0.25 of the frame tall, a little left of centre and high up.
+    private static readonly RectangleF Face = new(0.35f, 0.2f, 0.14f, 0.25f);
+
+    // Head and upper shoulders: the crop is 2.2 face boxes tall.
+    private const float Framed = 0.25f * 2.2f;
 
     /// <summary>Runs the controller at 30 fps from <paramref name="from"/> to <paramref name="to"/> seconds; the crops.</summary>
     private static List<RectangleF> Run(FramingController controller, Func<double, IReadOnlyList<RectangleF>> faces, double from, double to)
@@ -31,11 +34,20 @@ public sealed class FramingControllerTests
     {
         var crop = Run(new FramingController(), _ => [Face], 0, 4)[^1];
 
-        // 3.5 face heights tall, the same share of the width, the face centre 38% down.
-        Assert.Equal(0.56f, crop.Height, 0.01f);
+        // 2.2 face heights tall, the same share of the width, the face centre 40% down.
+        Assert.Equal(Framed, crop.Height, 0.01f);
         Assert.Equal(crop.Width, crop.Height, 1e-5f);
         Assert.Equal(Face.X + Face.Width / 2, crop.X + crop.Width / 2, 0.01f);
-        Assert.Equal(0.38f, (Face.Y + Face.Height / 2 - crop.Y) / crop.Height, 0.02f);
+        Assert.Equal(0.40f, (Face.Y + Face.Height / 2 - crop.Y) / crop.Height, 0.02f);
+    }
+
+    [Fact]
+    public void A_face_close_to_the_camera_is_still_framed()
+    {
+        // At a desk in front of the phone the face box is a third of the frame: the picture still zooms in.
+        var close = new RectangleF(0.4f, 0.2f, 0.19f, 0.34f);
+        var crop = Run(new FramingController(), _ => [close], 0, 4)[^1];
+        Assert.Equal(0.34f * 2.2f, crop.Height, 0.01f);
     }
 
     [Fact]
@@ -44,7 +56,7 @@ public sealed class FramingControllerTests
         var sizes = Run(new FramingController(), _ => [Face], 0, 4).Select(c => c.Height).ToList();
         for (var i = 1; i < sizes.Count; i++)
             Assert.True(sizes[i] <= sizes[i - 1] + 1e-6f, $"grew at frame {i}: {sizes[i - 1]} -> {sizes[i]}");
-        Assert.True(sizes[^1] >= 0.56f - 0.01f);
+        Assert.True(sizes[^1] >= Framed - 0.01f);
     }
 
     [Fact]
@@ -103,7 +115,7 @@ public sealed class FramingControllerTests
         Run(controller, _ => [Face], 0, 4);
 
         var brief = Run(controller, _ => [], 4, 5)[^1];      // turned away for a second: stays
-        Assert.True(brief.Height < 0.7f);
+        Assert.Equal(Framed, brief.Height, 0.01f);
         var gone = Run(controller, _ => [], 5, 9)[^1];
         Assert.Equal(1f, gone.Height, 1e-3f);
     }

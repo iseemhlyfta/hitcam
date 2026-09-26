@@ -136,7 +136,7 @@ public static class Loc
 
     public static string Framing => Russian ? "Автокадрирование" : "Auto-framing";
     public static string FramingHint => Russian
-        ? "Кадр плавно следует за вами, как Center Stage: приближает голову и плечи, при нескольких людях берёт всех. В превью рамкой показано, что видно в камере"
+        ? "Кадр плавно следует за вами, как Center Stage: приближает голову и плечи, при нескольких людях берёт всех. Превью показывает то же, что камера"
         : "The picture follows you smoothly, like Center Stage: head and shoulders, everyone when there are several people. The preview shows the camera's part in a frame";
     public static string FramingMaxZoom => Russian ? "Максимальное приближение" : "Closest zoom";
     public static string FramingMaxZoomHint => Russian
