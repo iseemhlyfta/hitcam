@@ -14,6 +14,7 @@ using HitCam.Desktop.Services;
 using HitCam.Vision;
 using HitCam.Vision.Faces;
 using HitCam.Vision.Hands;
+using HitCam.Vision.Segmentation;
 using ReactiveUI;
 using ReactiveUI.Avalonia;
 
@@ -40,6 +41,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private volatile HandSettings? _handsToCamera;
     private bool _handSceneSent;
     private bool _threadsWereOn;
+    private readonly SegmentEngine _segment;
+    // The picture sent to the DLL for the background, so it is read and sent only when the choice changes.
+    private string? _backgroundImagePath;
     private readonly FaceEngine _faces;
     // The settings the camera regions are built with while face hiding runs; null: nothing for the camera.
     private volatile FaceSettings? _facesToCamera;
@@ -151,6 +155,26 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             this.RaisePropertyChanged(nameof(ShowHandPoints));
         });
 
+        // Background: the person mask on its own thread from the real preview; the DLL blurs or replaces the rest.
+        _segment = new SegmentEngine(_pipeline.CopyPreviewTo);
+        Background = new BackgroundViewModel(
+            _settings.Background,
+            () => SegmentModelFiles.Find() is not null,
+            _ => ApplyBackground(),
+            settings =>
+            {
+                _settings = _settings with { Background = settings };
+                _settings.Save();
+            },
+            AvaloniaScheduler.Instance);
+        _segment.StatusChanged += s => Dispatcher.UIThread.Post(() => Background.ShowStatus(s));
+        _segment.ResultReady += r =>
+        {
+            _pipeline.SetSegmentMask(r.Mask, r.Width, r.Height);
+            var composite = _pipeline.CompositeMilliseconds();
+            Dispatcher.UIThread.Post(() => Background.ShowResult(r, composite));
+        };
+
         // Face hiding: its own thread and frames too; clicks in the preview go to the engine.
         _faces = new FaceEngine(_pipeline.CopyPreviewTo);
         Faces = new FacesViewModel(
@@ -203,10 +227,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _previewTimer!.Start();
             _vision.ResetTracks();
             _hands.ResetTracks();
+            _segment.Reset();
             _faces.ResetTracks();
             ApplyVision();
             ApplyHands();
             ApplyFaces();
+            ApplyBackground();
         });
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
@@ -219,6 +245,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             StreamText = ReceivedText = LatencyText = PhoneText = "—";
             LiveText = "";
             Processing.ClearStats();
+            ApplyBackground();
             ApplyVision();
             ApplyHands();
             ApplyFaces();
@@ -241,6 +268,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _vision.ResetTracks();
             _hands.ResetTracks();
             _faces.ResetTracks();
+            _segment.Reset();
             // Results for the old picture would land in the wrong place (a hidden face shown beside its mosaic).
             _faceGuard.Reset();
             Vision.ClearResults();
@@ -345,6 +373,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         this.RaisePropertyChanged(nameof(HandsSectionExpanded));
         this.RaisePropertyChanged(nameof(FacesSectionExpanded));
         this.RaisePropertyChanged(nameof(EnhanceSectionExpanded));
+        this.RaisePropertyChanged(nameof(BackgroundSectionExpanded));
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
@@ -367,6 +396,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     /// <summary>Face hiding: settings panel, stats and the faces for the preview overlay.</summary>
     public FacesViewModel Faces { get; }
+
+    /// <summary>Background blur or replacement: settings section and stats.</summary>
+    public BackgroundViewModel Background { get; }
+
+    public bool BackgroundSectionExpanded { get => _settings.Sections.Background; set => SetSections(_settings.Sections with { Background = value }); }
 
     /// <summary>Squares around faces are drawn over the preview: hiding runs and there is a picture.</summary>
     public bool ShowFaces => Faces.IsActive && HasPreview;
@@ -691,6 +725,44 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     }
 
     /// <summary>
+    /// The background runs while it is on, the model is there and a phone is connected (the model stays loaded between
+    /// connections). It is a camera feature, not an experiment: the experiments switch leaves it alone.
+    /// </summary>
+    private void ApplyBackground()
+    {
+        var settings = Background.Settings;
+        var enabled = settings.Enabled && Background.HasModel;
+        var active = enabled && IsConnected;
+        Background.IsActive = active;
+        var path = settings.Mode == BackgroundMode.Replace ? settings.ImagePath : null;
+        if (path != _backgroundImagePath)
+        {
+            _backgroundImagePath = path;
+            if (path is null)
+            {
+                _pipeline.SetBackgroundImage(null, 0, 0);
+            }
+            else if (BackgroundImage.Load(path) is { } image)
+            {
+                _pipeline.SetBackgroundImage(image.Pixels, image.Width, image.Height);
+            }
+            else
+            {
+                _pipeline.SetBackgroundImage(null, 0, 0);
+                Background.ShowImageFailed();
+            }
+        }
+        _pipeline.SetBackground((active ? settings : settings with { Enabled = false }).ToNative());
+        _segment.Paused = !active;
+        if (enabled)
+            _segment.Start();
+        else
+            _segment.Stop();
+        if (active)
+            Background.ShowStatus(_segment.Status);
+    }
+
+    /// <summary>
     /// Pool thread, every 200 ms while faces are hidden in the camera: the whole picture until the first result (when
     /// someone must stay hidden), the last regions again when results are late (the DLL would drop them after a second
     /// and show the faces).
@@ -747,7 +819,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     private void UpdatePreview()
     {
-        var (width, height, frame) = _pipeline.PreviewInfo();
+        // With the background on, the picture the camera shows; the analysis keeps reading the real one.
+        var shown = Background.IsActive;
+        var (width, height, frame) = _pipeline.PreviewInfo(shown);
+        if (shown && width == 0)
+            (width, height, frame) = _pipeline.PreviewInfo(shown = false);
         if (width == 0 || frame == _lastPreviewFrame)
             return;
 
@@ -762,7 +838,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
         using (var buffer = bitmap.Lock())
         {
-            if (!_pipeline.CopyPreview(buffer.Address, buffer.RowBytes, width, height))
+            if (!_pipeline.CopyPreview(buffer.Address, buffer.RowBytes, width, height, shown))
                 return;
             HideFaces(buffer.Address, buffer.RowBytes, width, height);
         }
@@ -862,6 +938,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         Vision.SaveNow();
         Hands.SaveNow();
         Faces.SaveNow();
+        Background.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -880,6 +957,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _vision.Dispose();
         _hands.Dispose();
         _faces.Dispose();
+        _segment.Dispose();
         _cameraOverlay.Clear();
         _pipeline.Dispose();
         _cameraOverlay.Dispose();

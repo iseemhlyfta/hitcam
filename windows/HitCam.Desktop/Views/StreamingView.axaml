@@ -290,6 +290,51 @@
                                 </StackPanel>
                             </StackPanel>
 
+                            <!--  Background: blur or a picture behind the person (segmentation on this PC, compositing on the GPU)  -->
+                            <views:FeatureSection Title="{x:Static svc:Loc.Background}" Hint="{x:Static svc:Loc.BackgroundHint}"
+                                                  IsOn="{Binding Background.IsOn}" IsExpanded="{Binding BackgroundSectionExpanded}">
+                                <StackPanel Spacing="10" DataContext="{Binding Background}" x:DataType="vm:BackgroundViewModel">
+                                    <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModel}">
+                                        <SelectableTextBlock FontSize="12" Text="{Binding NoModelText}" TextWrapping="Wrap" />
+                                    </Border>
+                                    <ListBox Classes="segmented" ItemsSource="{Binding Modes}" SelectedItem="{Binding SelectedMode}"
+                                             AutomationProperties.Name="{x:Static svc:Loc.Background}">
+                                        <ListBox.ItemTemplate>
+                                            <DataTemplate x:DataType="vm:BackgroundModeOption">
+                                                <TextBlock HorizontalAlignment="Center" Text="{Binding Label}" />
+                                            </DataTemplate>
+                                        </ListBox.ItemTemplate>
+                                    </ListBox>
+                                    <DockPanel IsVisible="{Binding IsReplace}">
+                                        <Button DockPanel.Dock="Right" Classes="secondary" Height="28" Padding="10,0" FontSize="12"
+                                                Content="{x:Static svc:Loc.BackgroundChooseImage}" Click="OnChooseBackgroundImage" />
+                                        <TextBlock VerticalAlignment="Center" Classes="muted" Text="{Binding ImageText}" TextTrimming="CharacterEllipsis" />
+                                    </DockPanel>
+                                    <StackPanel IsVisible="{Binding ShowsStrength}">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding StrengthText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.BackgroundStrength}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding Strength}" AutomationProperties.Name="{x:Static svc:Loc.BackgroundStrength}" />
+                                    </StackPanel>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding EdgeText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.BackgroundEdge}" ToolTip.Tip="{x:Static svc:Loc.BackgroundEdgeHint}" />
+                                        </DockPanel>
+                                        <Slider Minimum="0" Maximum="100" SmallChange="1" LargeChange="10" TickFrequency="1" IsSnapToTickEnabled="True"
+                                                Value="{Binding Edge}" ToolTip.Tip="{x:Static svc:Loc.BackgroundEdgeHint}"
+                                                AutomationProperties.Name="{x:Static svc:Loc.BackgroundEdge}" />
+                                    </StackPanel>
+                                    <CheckBox Content="{x:Static svc:Loc.BackgroundBlurWhileUnknown}" IsChecked="{Binding BlurWhileUnknown}"
+                                              ToolTip.Tip="{x:Static svc:Loc.BackgroundBlurWhileUnknownHint}" />
+                                    <TextBlock Classes="muted" FontWeight="SemiBold" Text="{Binding StatsText}" TextWrapping="Wrap" IsVisible="{Binding HasStats}" />
+                                    <TextBlock Classes="muted" Foreground="{StaticResource HcLive}" Text="{Binding ErrorText}" TextWrapping="Wrap"
+                                               IsVisible="{Binding HasError}" />
+                                </StackPanel>
+                            </views:FeatureSection>
+
                             <!--  Picture enhancement: adaptive sharpening, clarity, vibrance (one GPU pass, any GPU)  -->
                             <views:FeatureSection Title="{x:Static svc:Loc.Enhance}" Hint="{x:Static svc:Loc.EnhanceHint}"
                                                   IsOn="{Binding Processing.IsEnhanceOn}" IsExpanded="{Binding EnhanceSectionExpanded}"

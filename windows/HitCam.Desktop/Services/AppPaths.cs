@@ -79,6 +79,15 @@ public sealed partial record AppSettings
 
     private FaceSettings _faces = new();
 
+    /// <summary>Background blur or replacement; off by default.</summary>
+    public BackgroundSettings Background
+    {
+        get => _background;
+        set => _background = value ?? new BackgroundSettings();
+    }
+
+    private BackgroundSettings _background = new();
+
     /// <summary>Which features on the experiments tab are expanded; all collapsed by default.</summary>
     public ExperimentSections Sections
     {
@@ -201,6 +210,9 @@ public sealed record ExperimentSections
 
     /// <summary>"Picture enhancement" on the camera tab.</summary>
     public bool Enhance { get; set; }
+
+    /// <summary>"Background" on the camera tab.</summary>
+    public bool Background { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]

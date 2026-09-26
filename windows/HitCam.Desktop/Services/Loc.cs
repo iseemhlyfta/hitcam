@@ -107,6 +107,33 @@ public static class Loc
         : "An NVIDIA neural network removes compression blocks and halos. Runs on the RTX GPU";
     public static string ArtifactReductionGentle => Russian ? "Мягко" : "Gentle";
     public static string ArtifactReductionStrong => Russian ? "Сильно" : "Strong";
+    public static string Background => Russian ? "Фон" : "Background";
+    public static string BackgroundHint => Russian
+        ? "Размывает или заменяет всё, что за вами: комнату, людей позади, беспорядок. Человек находится нейросетью на этом ПК, около 3 мс"
+        : "Blurs or replaces everything behind you: the room, people behind you, the mess. A neural network on this PC finds you, about 3 ms";
+    public static string BackgroundBlur => Russian ? "Размытие" : "Blur";
+    public static string BackgroundReplace => Russian ? "Картинка" : "Picture";
+    public static string BackgroundStrength => Russian ? "Сила размытия" : "Blur strength";
+    public static string BackgroundEdge => Russian ? "Мягкость края" : "Edge softness";
+    public static string BackgroundEdgeHint => Russian
+        ? "Как плавно человек переходит в фон: мягче — незаметнее края, жёстче — меньше фона у волос и плеч"
+        : "How smoothly you blend into the background: softer hides the edge, harder leaves less background around hair and shoulders";
+    public static string BackgroundChooseImage => Russian ? "Выбрать…" : "Choose…";
+    public static string BackgroundNoImage => Russian ? "Картинка не выбрана — пока размытие" : "No picture chosen: blurred meanwhile";
+    public static string BackgroundImageFailed => Russian ? "Не удалось открыть картинку" : "Could not open the picture";
+    public static string BackgroundImageFilter => Russian ? "Картинки" : "Pictures";
+    public static string BackgroundBlurWhileUnknown => Russian ? "Размывать всё, пока человек не найден" : "Blur everything until you are found";
+    public static string BackgroundBlurWhileUnknownHint => Russian
+        ? "Пока нейросеть загружается или не успевает, размыт весь кадр — комната не мелькнёт. Выключено — кадр в это время как есть"
+        : "While the network loads or falls behind, the whole picture is blurred, so the room never shows. Off: the picture as is meanwhile";
+    public static string BackgroundNoModels(string folder) => Russian
+        ? $"Модель фона не найдена. Переустановите HitCam или положите её в папку {folder} (windows\\get-models.ps1)"
+        : $"Background model not found. Reinstall HitCam or put it into {folder} (windows\\get-models.ps1)";
+    public static string BackgroundStarting(string provider) => Russian ? $"Фон: запуск · {provider}" : $"Background: starting · {provider}";
+    public static string BackgroundStats(double fps, double milliseconds, string provider, double compositeMilliseconds) => Russian
+        ? $"Маска {fps:0} раз/с · {milliseconds:0} мс · {provider}{(compositeMilliseconds >= 0 ? $" · наложение {compositeMilliseconds:0.0} мс" : "")}"
+        : $"Mask {fps:0}/s · {milliseconds:0} ms · {provider}{(compositeMilliseconds >= 0 ? $" · compositing {compositeMilliseconds:0.0} ms" : "")}";
+
     public static string Enhance => Russian ? "Улучшение картинки" : "Picture enhancement";
     public static string EnhanceHint => Russian
         ? "Свежая картинка «как с камеры»: чёткие контуры без шума на коже и стенах, объём и живые цвета. Меньше 1 мс на кадр, на любой видеокарте. Лучше всего вместе с шумодавом NVIDIA (вкладка «Эксперименты»)"

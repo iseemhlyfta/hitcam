@@ -25,6 +25,9 @@ public sealed class VideoPipeline : IDisposable
     private volatile bool _shotUnsupported;
     private volatile bool _sceneUnsupported;
     private volatile bool _facesUnsupported;
+    private volatile bool _backgroundUnsupported;
+    private HitCamBackground _background;
+    private (byte[] Pixels, int Width, int Height)? _backgroundImage;
     private readonly bool _previewOnly;
 
     /// <param name="previewOnly">
@@ -99,25 +102,112 @@ public sealed class VideoPipeline : IDisposable
         }
     }
 
-    /// <summary>Size and sequence number of the newest decoded frame's preview; (0, 0, 0) before the first.</summary>
-    public (int Width, int Height, ulong Frame) PreviewInfo()
+    /// <summary>
+    /// Size and sequence number of the newest decoded frame's preview; (0, 0, 0) before the first. <paramref name="shown"/>:
+    /// the one with the background effect (what the camera shows) instead of the real picture the analysis reads.
+    /// </summary>
+    public (int Width, int Height, ulong Frame) PreviewInfo(bool shown = false)
     {
         lock (_bridgeLock)
         {
-            if (_bridge == IntPtr.Zero)
+            if (_bridge == IntPtr.Zero || (shown && _backgroundUnsupported))
                 return (0, 0, 0);
-            NativeMethods.HitCam_BridgePreviewInfo(_bridge, out var width, out var height, out var frame);
+            uint width, height;
+            ulong frame;
+            if (shown)
+                NativeMethods.HitCam_BridgeDisplayPreviewInfo(_bridge, out width, out height, out frame);
+            else
+                NativeMethods.HitCam_BridgePreviewInfo(_bridge, out width, out height, out frame);
             return ((int)width, (int)height, frame);
         }
     }
 
     /// <summary>Copies the preview as BGRA into <paramref name="destination"/>; false if its size changed meanwhile.</summary>
-    public bool CopyPreview(IntPtr destination, int stride, int width, int height)
+    public bool CopyPreview(IntPtr destination, int stride, int width, int height, bool shown = false)
     {
         lock (_bridgeLock)
         {
-            return _bridge != IntPtr.Zero
-                   && NativeMethods.HitCam_BridgeCopyPreview(_bridge, destination, (uint)stride, (uint)width, (uint)height);
+            if (_bridge == IntPtr.Zero || (shown && _backgroundUnsupported))
+                return false;
+            return shown
+                ? NativeMethods.HitCam_BridgeCopyDisplayPreview(_bridge, destination, (uint)stride, (uint)width, (uint)height)
+                : NativeMethods.HitCam_BridgeCopyPreview(_bridge, destination, (uint)stride, (uint)width, (uint)height);
+        }
+    }
+
+    /// <summary>Background blur or replacement (default: off). Kept across decoder restarts; any thread.</summary>
+    public void SetBackground(in HitCamBackground settings)
+    {
+        lock (_bridgeLock)
+        {
+            _background = settings;
+            if (_bridge != IntPtr.Zero)
+                ApplyBackground(_bridge, image: false);
+        }
+    }
+
+    /// <summary>The picture behind the person (BGRA, packed rows); null clears it. Kept across decoder restarts.</summary>
+    public void SetBackgroundImage(byte[]? bgra, int width, int height)
+    {
+        lock (_bridgeLock)
+        {
+            _backgroundImage = bgra is not null && width > 0 && height > 0 && bgra.Length >= width * height * 4 ? (bgra, width, height) : null;
+            if (_bridge != IntPtr.Zero)
+                ApplyBackground(_bridge);
+        }
+    }
+
+    /// <summary>The person mask for the background (255 = person), over the whole frame. Any thread.</summary>
+    public unsafe void SetSegmentMask(ReadOnlySpan<byte> mask, int width, int height)
+    {
+        if (_backgroundUnsupported || mask.Length < width * height)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                fixed (byte* pointer = mask)
+                    NativeMethods.HitCam_BridgeSetSegmentMask(_bridge, pointer, (uint)width, (uint)height);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _backgroundUnsupported = true;
+            }
+        }
+    }
+
+    /// <summary>Milliseconds the background took on the last frame; negative while off.</summary>
+    public double CompositeMilliseconds()
+    {
+        lock (_bridgeLock)
+            return _bridge == IntPtr.Zero || _backgroundUnsupported ? -1 : NativeMethods.HitCam_BridgeCompositeMs(_bridge);
+    }
+
+    // Under _bridgeLock. The picture only when it changed or the decoder is new: the DLL converts it for every frame size.
+    private unsafe void ApplyBackground(IntPtr bridge, bool image = true)
+    {
+        if (_backgroundUnsupported)
+            return;
+        try
+        {
+            NativeMethods.HitCam_BridgeSetBackground(bridge, in _background);
+            if (!image)
+                return;
+            if (_backgroundImage is { } picture)
+            {
+                fixed (byte* pixels = picture.Pixels)
+                    NativeMethods.HitCam_BridgeSetBackgroundImage(bridge, pixels, (uint)picture.Width, (uint)picture.Height, (uint)picture.Width * 4);
+            }
+            else
+            {
+                NativeMethods.HitCam_BridgeSetBackgroundImage(bridge, null, 0, 0, 0);
+            }
+        }
+        catch (EntryPointNotFoundException)
+        {
+            _backgroundUnsupported = true;
         }
     }
 
@@ -285,6 +375,7 @@ public sealed class VideoPipeline : IDisposable
         {
             _bridge = bridge;
             NativeMethods.HitCam_BridgeSetProcessing(bridge, in _processing);
+            ApplyBackground(bridge);
         }
         try
         {

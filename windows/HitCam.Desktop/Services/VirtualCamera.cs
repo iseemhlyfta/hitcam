@@ -70,6 +70,25 @@ internal static class NativeMethods
     [DllImport(Library)]
     public static extern unsafe void HitCam_BridgeSetFaceRegions(IntPtr handle, HitCamFaceRegion* regions, int count);
 
+    [DllImport(Library)]
+    public static extern void HitCam_BridgeSetBackground(IntPtr handle, in HitCamBackground settings);
+
+    [DllImport(Library)]
+    public static extern unsafe void HitCam_BridgeSetSegmentMask(IntPtr handle, byte* mask, uint width, uint height);
+
+    [DllImport(Library)]
+    public static extern unsafe void HitCam_BridgeSetBackgroundImage(IntPtr handle, byte* bgra, uint width, uint height, uint stride);
+
+    [DllImport(Library)]
+    public static extern double HitCam_BridgeCompositeMs(IntPtr handle);
+
+    [DllImport(Library)]
+    public static extern void HitCam_BridgeDisplayPreviewInfo(IntPtr handle, out uint width, out uint height, out ulong frame);
+
+    [DllImport(Library)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool HitCam_BridgeCopyDisplayPreview(IntPtr handle, IntPtr destination, uint stride, uint width, uint height);
+
     /// <summary>Plays a finger-gun shot in the camera picture for about 0.2 s from now; the DLL copies it.</summary>
     [DllImport(Library)]
     public static extern void HitCam_BridgeShot(IntPtr handle, in HitCamShot shot);
