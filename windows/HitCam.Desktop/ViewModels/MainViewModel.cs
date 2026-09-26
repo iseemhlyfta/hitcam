@@ -44,6 +44,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     // The settings the camera regions are built with while face hiding runs; null: nothing for the camera.
     private volatile FaceSettings? _facesToCamera;
     private bool _faceRegionsSent;
+    private bool _facesWereActive;
+    // Faces stay hidden in the camera while analysis cannot keep up (see FaceGuard); ticks on a pool thread.
+    private readonly FaceGuard _faceGuard = new();
+    private readonly Timer _faceGuardTimer;
     private readonly CameraOverlay _cameraOverlay;
     // The phone's stream size as width << 32 | height (0 before the first config); read by the analysis thread.
     private long _streamSize;
@@ -161,7 +165,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _faces.Toggle,
             _faces.ForgetPeople,
             AvaloniaScheduler.Instance);
-        _faces.StatusChanged += s => Dispatcher.UIThread.Post(() => Faces.ShowStatus(s));
+        _faces.StatusChanged += s =>
+        {
+            // Loading or failed: nothing says where the faces are, so the camera covers everything.
+            if (s.State != VisionState.Running)
+                _faceGuard.Reset();
+            Dispatcher.UIThread.Post(() => Faces.ShowStatus(s));
+        };
+        _faceGuardTimer = new Timer(_ => GuardFaces(), null, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(200));
         _faces.ResultReady += r =>
         {
             SendFaceRegions(r);
@@ -230,7 +241,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _vision.ResetTracks();
             _hands.ResetTracks();
             _faces.ResetTracks();
-            LiveText = $"LIVE · {Math.Min(c.Width, c.Height)}p · {c.Fps} fps";
+            // Results for the old picture would land in the wrong place (a hidden face shown beside its mosaic).
+            _faceGuard.Reset();
+            Vision.ClearResults();
+            Hands.ClearResults();
+            Faces.ClearResults();
+            LiveText =$"LIVE · {Math.Min(c.Width, c.Height)}p · {c.Fps} fps";
         });
         _server.StatusReceived += s => Dispatcher.UIThread.Post(() =>
             PhoneText = $"{s.Battery:P0}{(s.Charging ? $" · {Loc.Charging}" : "")}");
@@ -665,24 +681,52 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     {
         var settings = _facesToCamera;
         var regions = settings is null ? [] : FaceStyle.CameraRegions(result.Faces, settings);
+        // First the guard, so its timer does not cover the whole picture right over a fresh result.
+        if (settings is not null)
+            _faceGuard.Sent(regions);
         if (regions.Length == 0 && !_faceRegionsSent)
             return;
         _pipeline.SetFaceRegions(regions);
         _faceRegionsSent = regions.Length > 0;
     }
 
-    /// <summary>Face hiding runs while it is on, the models are there and a phone is connected; otherwise they are unloaded.</summary>
+    /// <summary>
+    /// Pool thread, every 200 ms while faces are hidden in the camera: the whole picture until the first result, the
+    /// last regions again when results are late (the DLL would drop them after a second and show the faces).
+    /// </summary>
+    private void GuardFaces()
+    {
+        if (_facesToCamera is not { CameraEffect: true } settings)
+            return;
+        if (_faceGuard.Due(settings) is { } regions)
+        {
+            _pipeline.SetFaceRegions(regions);
+            _faceRegionsSent = true;
+        }
+    }
+
+    /// <summary>
+    /// Face hiding shows while it is on, the models are there and a phone is connected. The models stay loaded between
+    /// connections, so faces are found again at once when the phone comes back.
+    /// </summary>
     private void ApplyFaces()
     {
-        var active = ExperimentsEnabled && Faces.IsEnabled && Faces.HasModels && IsConnected;
+        var enabled = ExperimentsEnabled && Faces.IsEnabled && Faces.HasModels;
+        var active = enabled && IsConnected;
+        // Just turned on (or connected): nothing is known about the picture yet.
+        if (active && !_facesWereActive)
+            _faceGuard.Reset();
+        _facesWereActive = active;
         Faces.IsActive = active;
         _facesToCamera = active ? Faces.Settings : null;
         if (!active)
             _pipeline.SetFaceRegions([]);
-        if (active)
+        if (enabled)
             _faces.Start();
         else
             _faces.Stop();
+        if (active)
+            Faces.ShowStatus(_faces.Status);
     }
 
     /// <summary>
@@ -730,10 +774,17 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     /// </summary>
     private unsafe void HideFaces(IntPtr pixels, int stride, int width, int height)
     {
-        if (!Faces.IsActive || Faces.Faces.Count == 0)
+        if (!Faces.IsActive)
             return;
         var settings = Faces.Settings;
         var picture = new Span<byte>((void*)pixels, stride * height);
+        if (_faceGuard.CoversAll)
+        {
+            // Faces not found yet (models loading, a new stream, a failure): the whole preview, like the camera.
+            FaceEffects.Apply(picture, width, height, stride, new System.Drawing.RectangleF(0, 0, 1, 1), settings.Effect,
+                settings.Strength / 100f, HandSettings.ParseColor(settings.FillColor));
+            return;
+        }
         foreach (var face in Faces.Faces)
         {
             if (face.Hidden)
@@ -820,6 +871,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
         await _server.DisposeAsync().ConfigureAwait(false);
+        await _faceGuardTimer.DisposeAsync().ConfigureAwait(false);
         // Analysis reads the decoder's preview: it goes first.
         _vision.Dispose();
         _hands.Dispose();
