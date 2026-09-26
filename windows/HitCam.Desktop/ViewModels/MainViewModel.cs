@@ -43,6 +43,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _handSceneSent;
     private bool _threadsWereOn;
     private readonly SegmentEngine _segment;
+    private NetworkDiscovery? _discovery;
     // Auto-framing: faces from the face thread, the controller stepped on the framing timer.
     private readonly Timer _framingTimer;
     private volatile IReadOnlyList<System.Drawing.RectangleF> _framingFaces = [];
@@ -578,6 +579,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         try
         {
             _server.Start();
+            // Phones find this PC without typing the address; not a debug instance (--port), which phones should not see.
+            if (Program.PortOverride is null)
+                _discovery = new NetworkDiscovery(Environment.MachineName, _settings.ServerId, _server.Port);
         }
         catch (SocketException ex)
         {
@@ -1055,6 +1059,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
         await _server.DisposeAsync().ConfigureAwait(false);
+        _discovery?.Dispose();
         await _faceGuardTimer.DisposeAsync().ConfigureAwait(false);
         await _framingTimer.DisposeAsync().ConfigureAwait(false);
         // Analysis reads the decoder's preview: it goes first.
