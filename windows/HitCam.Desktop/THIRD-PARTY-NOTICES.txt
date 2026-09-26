@@ -37,6 +37,8 @@ MediaPipe Hands, ONNX from OpenCV Zoo       Apache 2.0         https://github.co
   (models\hands\*.onnx)                                        (models/handpose_estimation_mediapipe, palm_detection_mediapipe)
 YuNet face detector, OpenCV Zoo             MIT                https://github.com/opencv/opencv_zoo
   (models\faces\face_detection_yunet_2023mar.onnx)             (models/face_detection_yunet)
+MediaPipe Selfie Segmentation (Google),     Apache 2.0         https://huggingface.co/onnx-community/mediapipe_selfie_segmentation
+  ONNX by onnx-community                                       (models\segment\selfie_segmentation.onnx)
 SFace face recognizer, OpenCV Zoo           Apache 2.0         https://github.com/opencv/opencv_zoo
   (models\faces\face_recognition_sface_2021dec.onnx)           (models/face_recognition_sface)
 
@@ -99,7 +101,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
 OTHER DEALINGS IN THE SOFTWARE.
 
 --------------------------------------------------------------------------------------------------------------------
-Apache License 2.0 (RF-DETR weights, MediaPipe Hands, SFace)
+Apache License 2.0 (RF-DETR weights, MediaPipe Hands, MediaPipe Selfie Segmentation, SFace)
 --------------------------------------------------------------------------------------------------------------------
 
 Apache License

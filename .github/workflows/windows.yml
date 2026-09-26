@@ -53,8 +53,9 @@ jobs:
           python -m pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --quiet -r requirements-export.txt
           python export_default.py --cpu --out ../out/HitCam/models
-      # Hand and face models (OpenCV Zoo: MediaPipe Hands, YuNet, SFace): downloaded from a fixed commit, SHA-256 checked.
-      - name: Add hand and face models
+      # Hand, face and segmentation models (OpenCV Zoo: MediaPipe Hands, YuNet, SFace; MediaPipe Selfie Segmentation):
+      # downloaded from fixed commits, SHA-256 checked.
+      - name: Add hand, face and segmentation models
         shell: pwsh
         run: ./get-models.ps1 -Destination ../out/HitCam/models
       - name: Check models and licenses
@@ -62,7 +63,7 @@ jobs:
         run: |
           foreach ($file in "models/rfdetr-nano.onnx", "models/rfdetr-nano.labels.json", "models/hands/palm_detection_mediapipe_2023feb.onnx",
                             "models/hands/handpose_estimation_mediapipe_2023feb.onnx", "models/faces/face_detection_yunet_2023mar.onnx",
-                            "models/faces/face_recognition_sface_2021dec.onnx", "onnxruntime.dll", "DirectML.dll",
+                            "models/faces/face_recognition_sface_2021dec.onnx", "models/segment/selfie_segmentation.onnx", "onnxruntime.dll", "DirectML.dll",
                             "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "licenses/onnxruntime-LICENSE.txt", "licenses/DirectML-LICENSE.txt") {
             if (-not (Test-Path "../out/HitCam/$file")) { throw "$file is missing from the published app" }
           }

@@ -70,12 +70,12 @@ try {
         Write-Host "  python export_default.py --out $installDir\models   (see vision\README.md)"
     }
 
-    # Hand and face models: from vision\output if there, otherwise downloaded (checked by SHA-256).
+    # Hand, face and segmentation models: from vision\output if there, otherwise downloaded (checked by SHA-256).
     try {
         & (Join-Path $PSScriptRoot "get-models.ps1") -Destination (Join-Path $installDir "models")
     }
     catch {
-        Write-Host "Hand and face models could not be downloaded ($($_.Exception.Message)); those features stay off."
+        Write-Host "Hand, face and segmentation models could not be downloaded ($($_.Exception.Message)); those features stay off."
         Write-Host "  Run windows\get-models.ps1 -Destination $installDir\models later to add them."
     }
 }
