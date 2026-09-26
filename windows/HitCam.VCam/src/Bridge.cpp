@@ -307,8 +307,11 @@ struct FrameSink {
 
     void ClearSignal() {
         shots.Clear();
-        writer.ClearSignal();
-        dshow::ClearSignal();
+        // A preview-only bridge (debug instance, --port) must not touch the camera the running HitCam feeds.
+        if (!previewOnly) {
+            writer.ClearSignal();
+            dshow::ClearSignal();
+        }
         gpu.Reset();
     }
 };
@@ -538,7 +541,11 @@ __declspec(dllexport) void __stdcall HitCam_BridgeClearSignal(void* handle) {
 // True once frames can reach the camera (an app has opened it at least once since the service started).
 __declspec(dllexport) BOOL __stdcall HitCam_BridgeIsLinked(void* handle) {
     BOOL linked = FALSE;
-    if (handle) hitcam::Quietly([&] { linked = hitcam::dshow::IsActive() || static_cast<hitcam::Bridge*>(handle)->sink.writer.IsMapped(); });
+    if (handle) hitcam::Quietly([&] {
+        auto& sink = static_cast<hitcam::Bridge*>(handle)->sink;
+        // Preview-only: never linked, and mapping the section here would restrict it and stamp it for another writer.
+        linked = !sink.previewOnly && (hitcam::dshow::IsActive() || sink.writer.IsMapped());
+    });
     return linked;
 }
 

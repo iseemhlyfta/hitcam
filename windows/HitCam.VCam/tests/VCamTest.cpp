@@ -57,6 +57,7 @@ extern "C" HRESULT __stdcall HitCam_BridgeCreate(void** handle);
 extern "C" HRESULT __stdcall HitCam_BridgeDecode(void* handle, const uint8_t* data, uint32_t length, int64_t timestamp);
 extern "C" void __stdcall HitCam_BridgeDestroy(void* handle);
 extern "C" void __stdcall HitCam_BridgeClearSignal(void* handle);
+extern "C" BOOL __stdcall HitCam_BridgeIsLinked(void* handle);
 extern "C" HRESULT __stdcall HitCam_DShowStart();
 extern "C" void __stdcall HitCam_DShowStop();
 extern "C" void __stdcall HitCam_DShowConvert(const uint8_t* nv12, uint32_t width, uint32_t height, uint8_t* bgr);
@@ -571,6 +572,17 @@ void CheckSharedFrames() {
         InterlockedIncrement64(&header->sequence);
         hr = RequestLuma(stream.Get(), 640, 360, &luma);
         Check(SUCCEEDED(hr) && std::abs(luma - 32) < 1, "cleared: no signal", luma, 32);
+
+        // The writer died mid-frame (odd sequence) while the camera kept the section: a new writer evens it out.
+        InterlockedIncrement64(&header->sequence);
+        HANDLE again = nullptr;
+        hitcam::SharedHeader* restarted = hitcam::MapSharedFrames(&again, hitcam::SharedAccess::Write);
+        Check(restarted && (restarted->sequence & 1) == 0, "new writer after a crash mid-frame: sequence even again",
+              restarted ? static_cast<double>(restarted->sequence & 1) : -1, 0);
+        hitcam::UnmapSharedFrames(restarted, again);
+        Publish(header, 1280, 720, 150);
+        hr = RequestLuma(stream.Get(), 640, 360, &luma);
+        Check(SUCCEEDED(hr) && std::abs(luma - 150) < 4, "frames flow again after the crashed writer", luma, 150);
     }
     if (source) source->Shutdown();
     stream.Reset();

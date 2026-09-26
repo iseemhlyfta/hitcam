@@ -492,6 +492,10 @@ void CheckDecodedPath() {
     char what[128];
     std::snprintf(what, sizeof(what), "decoded H.264, saturation -1: preview gray (largest B/R-G difference %d), GPU %.2f ms", maxSpread, gpu);
     Check(decoded && maxSpread <= 2 && gpu >= 0, what);
+    // A preview-only bridge (the app's --port debug instance) never reaches the camera: asking whether it is linked
+    // and clearing the signal must not open the section the running HitCam writes (that stamped and cleared it).
+    HitCam_BridgeClearSignal(bridge);
+    Check(!HitCam_BridgeIsLinked(bridge), "preview-only bridge: not linked to the camera, clearing leaves the camera alone");
     HitCam_BridgeDestroy(bridge);
 }
 

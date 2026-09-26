@@ -116,6 +116,9 @@ SharedHeader* MapForWriting(HANDLE* mapping) {
         return nullptr;
     }
     Stamp(header);
+    // A writer that died between BeginWrite and EndWrite left the sequence odd. This one is the only writer now, so
+    // it brings the sequence back to "idle"; otherwise every later frame would look busy or torn to the reader.
+    if (header->sequence & 1) InterlockedIncrement64(&header->sequence);
     *mapping = handle;
     return header;
 }
