@@ -7,7 +7,8 @@ namespace HitCam.Desktop.Services;
 /// <summary>
 /// Announces this PC on the local network as <c>_hitcam._tcp</c> (mDNS / DNS-SD, "Bonjour"), so phones find it without
 /// typing an address. Uses Windows' own mDNS responder (dnsapi, Windows 10 1809+), which the firewall already allows.
-/// TXT: <c>id</c> (server id), <c>name</c>, <c>v</c> (protocol version). The id is only a claim: anyone on the network
+/// TXT: <c>id</c> (server id), <c>name</c>, <c>v</c> (protocol version), <c>port</c>, <c>addr</c> (the PC's IPv4
+/// addresses, comma-separated: an iPhone browsing gets no address otherwise without connecting). The id is only a claim: anyone on the network
 /// can announce any id, so phones still pair by PIN (or QR) before they trust it.
 /// </summary>
 public sealed class NetworkDiscovery : IDisposable
@@ -20,7 +21,7 @@ public sealed class NetworkDiscovery : IDisposable
 
     public string InstanceName { get; }
 
-    public NetworkDiscovery(string serverName, string serverId, int port)
+    public NetworkDiscovery(string serverName, string serverId, int port, IReadOnlyList<System.Net.IPAddress>? addresses = null)
     {
         InstanceName = $"{Sanitize(serverName)}.{ProtocolInfo.BonjourServiceType}.local";
         if (!OperatingSystem.IsWindowsVersionAtLeast(10, 0, 17763))
@@ -28,7 +29,9 @@ public sealed class NetworkDiscovery : IDisposable
         try
         {
             _instance = DnsServiceConstructInstance(InstanceName, $"{Sanitize(Environment.MachineName)}.local", IntPtr.Zero, IntPtr.Zero,
-                (ushort)port, 0, 0, 3, ["id", "name", "v"], [serverId, serverName, ProtocolInfo.Version.ToString()]);
+                (ushort)port, 0, 0, 5, ["id", "name", "v", "port", "addr"],
+                [serverId, serverName, ProtocolInfo.Version.ToString(), port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                 string.Join(",", (addresses ?? []).Where(a => a.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork))]);
             if (_instance == IntPtr.Zero)
                 return;
             _request = new DnsServiceRegisterRequest

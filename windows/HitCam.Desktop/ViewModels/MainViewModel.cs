@@ -579,9 +579,6 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         try
         {
             _server.Start();
-            // Phones find this PC without typing the address; not a debug instance (--port), which phones should not see.
-            if (Program.PortOverride is null)
-                _discovery = new NetworkDiscovery(Environment.MachineName, _settings.ServerId, _server.Port);
         }
         catch (SocketException ex)
         {
@@ -606,6 +603,12 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private void RefreshAddresses()
     {
         var addresses = LanAddresses.Get();
+        // Phones find this PC without typing the address, at its current addresses (announced again when they change);
+        // not a debug instance (--port), which phones should not see.
+        _discovery?.Dispose();
+        _discovery = _server.IsRunning && Program.PortOverride is null
+            ? new NetworkDiscovery(Environment.MachineName, _settings.ServerId, _server.Port, addresses)
+            : null;
         if (addresses.Count == 0)
         {
             PrimaryAddress = Loc.NoNetwork;
