@@ -8,8 +8,8 @@ public sealed record FaceResult(IReadOnlyList<TrackedFace> Faces, VisionStats St
 
 /// <summary>
 /// Runs face tracking on its own thread, like <see cref="Hands.HandEngine"/>: frames are pulled only when the previous
-/// one is done. Clicks come in through <see cref="Toggle"/> and are applied before the next frame. The uncovered
-/// people outlive stopping and starting (models unloaded), until the app closes. Results and status changes are raised
+/// one is done. Clicks come in through <see cref="Toggle"/> and are applied before the next frame. The people
+/// clicked outlive stopping and starting (models unloaded), until the app closes. Results and status changes are raised
 /// on the engine thread.
 /// </summary>
 public sealed class FaceEngine : IDisposable
@@ -116,7 +116,26 @@ public sealed class FaceEngine : IDisposable
         _wake.Set();
     }
 
-    /// <summary>Hides everyone again: forgets all uncovered people.</summary>
+    /// <summary>A face nobody clicked is hidden (true) or shown (false); any thread, applied before the next frame.</summary>
+    public bool HideNewFaces
+    {
+        get => _hideNewFaces;
+        set
+        {
+            _hideNewFaces = value;
+            _wake.Set();
+        }
+    }
+
+    private volatile bool _hideNewFaces;
+
+    /// <summary>
+    /// Some face must stay hidden (new faces are, or someone was hidden on purpose): while the faces are not found yet,
+    /// the whole picture has to be covered. Any thread.
+    /// </summary>
+    public bool AnyoneHidden => _hideNewFaces || _people.AnyHidden;
+
+    /// <summary>Forgets everyone clicked: every face is back to <see cref="HideNewFaces"/>.</summary>
     public void ForgetPeople()
     {
         _commands.Enqueue(t => t.ForgetPeople());
@@ -186,6 +205,7 @@ public sealed class FaceEngine : IDisposable
                     tracker.Reset();
                     fps.Reset();
                 }
+                tracker.HideNewFaces = _hideNewFaces;
                 while (_commands.TryDequeue(out var command))
                     command(tracker);
 

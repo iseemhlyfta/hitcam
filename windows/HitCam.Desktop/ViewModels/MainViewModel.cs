@@ -691,14 +691,15 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     }
 
     /// <summary>
-    /// Pool thread, every 200 ms while faces are hidden in the camera: the whole picture until the first result, the
-    /// last regions again when results are late (the DLL would drop them after a second and show the faces).
+    /// Pool thread, every 200 ms while faces are hidden in the camera: the whole picture until the first result (when
+    /// someone must stay hidden), the last regions again when results are late (the DLL would drop them after a second
+    /// and show the faces).
     /// </summary>
     private void GuardFaces()
     {
         if (_facesToCamera is not { CameraEffect: true } settings)
             return;
-        if (_faceGuard.Due(settings) is { } regions)
+        if (_faceGuard.Due(settings, _faces.AnyoneHidden) is { } regions)
         {
             _pipeline.SetFaceRegions(regions);
             _faceRegionsSent = true;
@@ -721,6 +722,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _facesToCamera = active ? Faces.Settings : null;
         if (!active)
             _pipeline.SetFaceRegions([]);
+        _faces.HideNewFaces = Faces.Settings.NewFacesHidden;
         _faces.Paused = !active;
         if (enabled)
             _faces.Start();
@@ -779,9 +781,10 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             return;
         var settings = Faces.Settings;
         var picture = new Span<byte>((void*)pixels, stride * height);
-        if (_faceGuard.CoversAll)
+        if (_faceGuard.CoversAll && _faces.AnyoneHidden)
         {
-            // Faces not found yet (models loading, a new stream, a failure): the whole preview, like the camera.
+            // Faces not found yet (models loading, a new stream, a failure) and someone must stay hidden: the whole
+            // preview, like the camera.
             FaceEffects.Apply(picture, width, height, stride, new System.Drawing.RectangleF(0, 0, 1, 1), settings.Effect,
                 settings.Strength / 100f, HandSettings.ParseColor(settings.FillColor));
             return;

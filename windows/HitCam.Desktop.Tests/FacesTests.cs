@@ -52,8 +52,25 @@ public sealed class FacesTests : IDisposable
         Assert.Equal(FaceSettings.DefaultStrength, faces.Strength);
         Assert.True(faces.CameraEffect);
         Assert.False(faces.CameraFrame);
+        // Click to hide: a false detection (on a hand) does not blur the picture.
+        Assert.False(faces.NewFacesHidden);
+        Assert.True(AppSettings.Parse("""{"faces":{"newFacesHidden":true}}"""u8)!.Faces.NewFacesHidden);
         Assert.Equal(new FaceSettings(), AppSettings.Parse("""{"faces":null}"""u8)!.Faces);
         Assert.Equal(FaceEffectKind.Blur, AppSettings.Parse("""{"faces":{"effect":"blur"}}"""u8)!.Faces.Effect);
+    }
+
+    [Fact]
+    public void The_new_faces_switch_is_applied_and_the_texts_follow_it()
+    {
+        var faces = CreateViewModel();
+        Assert.Equal(Loc.FacesShowEveryone, faces.ForgetPeopleText);
+        Assert.Equal(Loc.FacesClickToHideHint, faces.ClickHintText);
+
+        faces.NewFacesHidden = true;
+
+        Assert.True(_applied[^1].NewFacesHidden);
+        Assert.Equal(Loc.FacesHideEveryone, faces.ForgetPeopleText);
+        Assert.Equal(Loc.FacesClickHint, faces.ClickHintText);
     }
 
     [Fact]

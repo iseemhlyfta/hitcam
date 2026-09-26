@@ -26,6 +26,12 @@
         </Border>
 
         <StackPanel Spacing="14" IsVisible="{Binding HasModels}">
+            <DockPanel ToolTip.Tip="{x:Static svc:Loc.FacesNewHiddenHint}">
+                <ToggleSwitch Margin="12,0,0,0" DockPanel.Dock="Right" Classes="bare" IsChecked="{Binding NewFacesHidden}"
+                              AutomationProperties.Name="{x:Static svc:Loc.FacesNewHidden}" />
+                <TextBlock VerticalAlignment="Center" Classes="strong" Text="{x:Static svc:Loc.FacesNewHidden}" TextWrapping="Wrap" />
+            </DockPanel>
+
             <StackPanel Spacing="6">
                 <TextBlock Classes="muted" Text="{x:Static svc:Loc.FacesEffect}" />
                 <ListBox Classes="segmented" ItemsSource="{Binding Effects}" SelectedItem="{Binding SelectedEffect}"
@@ -65,8 +71,8 @@
 
             <DockPanel>
                 <Button DockPanel.Dock="Right" Classes="secondary" Height="28" Padding="10,0" FontSize="12" VerticalAlignment="Top"
-                        Content="{x:Static svc:Loc.FacesHideEveryone}" Command="{Binding HideEveryoneCommand}" />
-                <TextBlock Classes="muted" FontSize="12" Text="{x:Static svc:Loc.FacesClickHint}" TextWrapping="Wrap" />
+                        Content="{Binding ForgetPeopleText}" Command="{Binding HideEveryoneCommand}" />
+                <TextBlock Classes="muted" FontSize="12" Text="{Binding ClickHintText}" TextWrapping="Wrap" />
             </DockPanel>
 
             <!--  What runs and how fast; why it does not  -->

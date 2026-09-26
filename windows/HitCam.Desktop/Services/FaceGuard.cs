@@ -45,15 +45,16 @@ public sealed class FaceGuard(TimeProvider? time = null)
     }
 
     /// <summary>
-    /// What to send to the camera now, or null for nothing: the whole picture before the first result, the last regions
-    /// again once they are <see cref="Refresh"/> old.
+    /// What to send to the camera now, or null for nothing: the whole picture before the first result (if
+    /// <paramref name="anyoneHidden"/>: new faces are hidden, or someone was hidden on purpose; otherwise there is
+    /// nothing to protect), the last regions again once they are <see cref="Refresh"/> old.
     /// </summary>
-    public HitCamFaceRegion[]? Due(FaceSettings settings)
+    public HitCamFaceRegion[]? Due(FaceSettings settings, bool anyoneHidden = true)
     {
         lock (_lock)
         {
             if (_last is null)
-                return [CoverAll(settings)];
+                return anyoneHidden ? [CoverAll(settings)] : null;
             if (_last.Length == 0 || _time.GetElapsedTime(_sentAt) < Refresh)
                 return null;
             _sentAt = _time.GetTimestamp();

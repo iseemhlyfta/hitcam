@@ -172,7 +172,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 80, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
 
         var face = Assert.Single(tracker.Update(Frame, At(0)));
         Assert.True(face.Hidden);
@@ -180,11 +180,11 @@ public sealed class FaceTrackerTests
 
         tracker.Toggle(face.Id);
         Assert.False(Assert.Single(tracker.Update(Frame, At(0.03))).Hidden);
-        Assert.Equal(1, tracker.UncoveredPeople);
+        Assert.Equal(1, tracker.RememberedPeople);
 
         tracker.Toggle(face.Id);
         Assert.True(Assert.Single(tracker.Update(Frame, At(0.06))).Hidden);
-        Assert.Equal(0, tracker.UncoveredPeople);
+        Assert.Equal(0, tracker.RememberedPeople);
     }
 
     [Fact]
@@ -204,7 +204,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         var seen = Assert.Single(tracker.Update(Frame, At(0)));
 
         models.Faces.Clear();
@@ -221,7 +221,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
 
         // Gone for two seconds, then back elsewhere: a new track, recognized.
@@ -242,7 +242,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         for (var i = 0; i < 30; i++)
             tracker.Update(Frame, At(i / 30.0));   // one second
         Assert.Equal(1, models.Fingerprints);
@@ -255,7 +255,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
         Assert.False(Assert.Single(tracker.Update(Frame, At(0.03))).Hidden);
 
@@ -271,7 +271,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
 
         // Lost for a moment, found again in profile (the fingerprint does not match): hidden, the safe side...
@@ -291,7 +291,7 @@ public sealed class FaceTrackerTests
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
 
         // Heads cross: the track keeps being matched, but now it is person 2.
@@ -304,12 +304,87 @@ public sealed class FaceTrackerTests
         Assert.False(Assert.Single(tracker.Update(Frame, At(2.1))).Hidden);
     }
 
+    // Click to hide (the default): new faces are shown.
+
+    [Fact]
+    public void By_default_a_new_face_is_shown_and_a_click_hides_it()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 80, 100), 1));
+        var tracker = new FaceTracker(models);
+
+        var face = Assert.Single(tracker.Update(Frame, At(0)));
+        Assert.False(face.Hidden);
+        Assert.Equal(0, tracker.RememberedPeople);
+
+        tracker.Toggle(face.Id);
+        Assert.True(Assert.Single(tracker.Update(Frame, At(0.03))).Hidden);
+        Assert.Equal(1, tracker.RememberedPeople);
+
+        // Shown again: back to the default, nobody to remember.
+        tracker.Toggle(face.Id);
+        Assert.False(Assert.Single(tracker.Update(Frame, At(0.06))).Hidden);
+        Assert.Equal(0, tracker.RememberedPeople);
+    }
+
+    [Fact]
+    public void A_hidden_person_who_comes_back_stays_hidden_and_others_stay_shown()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models);
+        tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
+
+        models.Faces.Clear();
+        tracker.Update(Frame, At(0.1));
+        tracker.Update(Frame, At(2));
+        models.Faces.Add((new RectangleF(600, 200, 100, 100), 1));
+        models.Faces.Add((new RectangleF(300, 200, 100, 100), 2));
+        var faces = tracker.Update(Frame, At(2.1));
+
+        Assert.True(faces.Single(f => f.Box.X > 0.5f).Hidden);    // person 1, recognized at once
+        Assert.False(faces.Single(f => f.Box.X < 0.5f).Hidden);   // someone else
+    }
+
+    [Fact]
+    public void A_hidden_person_who_turns_away_stays_hidden()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models);
+        tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
+
+        // Profile: the fingerprint no longer matches, but hidden on purpose means hidden until it is clearly over.
+        models.Faces[0] = (new RectangleF(100, 100, 100, 100), 2);
+        Assert.True(Assert.Single(tracker.Update(Frame, At(1.05))).Hidden);
+        Assert.True(Assert.Single(tracker.Update(Frame, At(1.3))).Hidden);
+        models.Faces.Clear();
+        tracker.Update(Frame, At(1.4));
+        Assert.True(Assert.Single(tracker.Update(Frame, At(1.6))).Hidden);   // held, still covered
+    }
+
+    [Fact]
+    public void Someone_hidden_on_purpose_is_known_to_any_thread()
+    {
+        var people = new FacePeople();
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models, people);
+        var face = Assert.Single(tracker.Update(Frame, At(0)));
+        Assert.False(people.AnyHidden);
+
+        tracker.Toggle(face.Id);
+        Assert.True(people.AnyHidden);
+        tracker.ForgetPeople();
+        Assert.False(people.AnyHidden);
+    }
+
     [Fact]
     public void Forgetting_people_hides_everyone_again()
     {
         var models = new FakeFaceModels();
         models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        var tracker = new FaceTracker(models);
+        var tracker = new FaceTracker(models) { HideNewFaces = true };
         tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
         tracker.ForgetPeople();
         Assert.True(Assert.Single(tracker.Update(Frame, At(0.03))).Hidden);
@@ -347,7 +422,7 @@ public sealed class FaceEngineTests
             m.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
             return m;
         }
-        using var engine = new FaceEngine(camera.Grab, NewModels);
+        using var engine = new FaceEngine(camera.Grab, NewModels) { HideNewFaces = true };
         var results = new BlockingCollection<FaceResult>();
         engine.ResultReady += results.Add;
 
@@ -379,7 +454,7 @@ public sealed class FaceEngineTests
         broken.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
         var fallback = new FakeFaceModels();
         fallback.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
-        using var engine = new FaceEngine(camera.Grab, () => broken, fallbackFactory: () => fallback);
+        using var engine = new FaceEngine(camera.Grab, () => broken, fallbackFactory: () => fallback) { HideNewFaces = true };
         var results = new BlockingCollection<FaceResult>();
         engine.ResultReady += results.Add;
         var states = new ConcurrentQueue<VisionState>();

@@ -41,7 +41,7 @@ public sealed class FacesViewModel : ReactiveObject
     /// <param name="apply">Reconfigures face hiding; called on every change.</param>
     /// <param name="save">Persists the settings; called <see cref="SaveDelay"/> after the last change.</param>
     /// <param name="toggle">Uncovers or hides a face (by its id).</param>
-    /// <param name="forgetPeople">Hides everyone again.</param>
+    /// <param name="forgetPeople">Forgets everyone clicked.</param>
     public FacesViewModel(FaceSettings initial, Func<bool> modelsFound, Action<FaceSettings> apply, Action<FaceSettings> save,
         Action<int> toggle, Action forgetPeople, IScheduler ui)
     {
@@ -64,7 +64,7 @@ public sealed class FacesViewModel : ReactiveObject
     /// <summary>Uncovers a hidden face or hides an uncovered one; the parameter is the face's id.</summary>
     public ReactiveCommand<int, Unit> ToggleCommand { get; }
 
-    /// <summary>Forgets who was uncovered: every face is hidden again.</summary>
+    /// <summary>Forgets everyone clicked: every face is back to the default (hidden or shown).</summary>
     public ReactiveCommand<Unit, Unit> HideEveryoneCommand { get; }
 
     public bool IsEnabled
@@ -114,6 +114,14 @@ public sealed class FacesViewModel : ReactiveObject
         get => Color.Parse(_settings.FillColor);
         set => Update(_settings with { FillColor = $"#{value.R:X2}{value.G:X2}{value.B:X2}" });
     }
+
+    /// <summary>New faces hidden until clicked; off: shown until clicked.</summary>
+    public bool NewFacesHidden { get => _settings.NewFacesHidden; set => Update(_settings with { NewFacesHidden = value }); }
+
+    /// <summary>"Hide everyone" or "Show everyone": forgetting the clicks brings every face back to the default.</summary>
+    public string ForgetPeopleText => _settings.NewFacesHidden ? Loc.FacesHideEveryone : Loc.FacesShowEveryone;
+
+    public string ClickHintText => _settings.NewFacesHidden ? Loc.FacesClickHint : Loc.FacesClickToHideHint;
 
     public bool CameraEffect { get => _settings.CameraEffect; set => Update(_settings with { CameraEffect = value }); }
 
@@ -238,6 +246,7 @@ public sealed class FacesViewModel : ReactiveObject
     private static readonly string[] AllProperties =
     [
         nameof(IsEnabled), nameof(SelectedEffect), nameof(IsFill), nameof(HasStrength), nameof(Strength), nameof(StrengthText),
-        nameof(FillColor), nameof(CameraEffect), nameof(CameraFrame), nameof(Settings),
+        nameof(FillColor), nameof(CameraEffect), nameof(CameraFrame), nameof(Settings), nameof(NewFacesHidden),
+        nameof(ForgetPeopleText), nameof(ClickHintText),
     ];
 }

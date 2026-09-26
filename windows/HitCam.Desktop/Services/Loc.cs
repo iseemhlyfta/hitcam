@@ -244,8 +244,16 @@ public static class Loc
     // Faces
     public static string Faces => Russian ? "Скрытие лиц" : "Face hiding";
     public static string FacesHint => Russian
-        ? "Находит лица и закрывает их. Новое лицо сразу скрыто; кого открыли, узнаётся по лицу, пока программа открыта. Работает на этом ПК"
-        : "Finds faces and covers them. A new face is hidden at once; whoever you uncover is recognized by their face while the app is open. Runs on this PC";
+        ? "Находит лица и закрывает те, по которым кликнули в превью; кого скрыли, узнаётся по лицу, пока программа открыта. Работает на этом ПК"
+        : "Finds faces and covers the ones you click in the preview; whoever you hide is recognized by their face while the app is open. Runs on this PC";
+    public static string FacesNewHidden => Russian ? "Новые лица скрыты" : "New faces hidden";
+    public static string FacesNewHiddenHint => Russian
+        ? "Включено — каждое новое лицо сразу закрыто, клик открывает. Выключено — лица видны, клик скрывает (ложные срабатывания, например на руках, картинку не портят)"
+        : "On: every new face is covered at once and a click uncovers it. Off: faces are visible and a click hides one (false detections, e.g. on hands, leave the picture alone)";
+    public static string FacesShowEveryone => Russian ? "Открыть всех" : "Show everyone";
+    public static string FacesClickToHideHint => Russian
+        ? "Кликните по лицу в превью, чтобы скрыть его; ещё раз — снова открыть"
+        : "Click a face in the preview to hide it; click again to show it";
     public static string FacesEffect => Russian ? "Чем закрывать" : "Cover with";
     public static string FacesMosaic => Russian ? "Мозаика" : "Mosaic";
     public static string FacesBlur => Russian ? "Размытие" : "Blur";

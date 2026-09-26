@@ -20,6 +20,12 @@ public sealed record FaceSettings
 
     public bool Enabled { get; set; }
 
+    /// <summary>
+    /// A new face is hidden until clicked (privacy first). Off (the default): faces are shown and a click hides one,
+    /// so a false detection (on a hand, say) does not blur the picture.
+    /// </summary>
+    public bool NewFacesHidden { get; set; }
+
     public FaceEffectKind Effect
     {
         get => _effect;

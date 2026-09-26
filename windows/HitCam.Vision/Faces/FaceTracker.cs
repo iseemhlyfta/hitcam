@@ -45,50 +45,63 @@ public sealed record FaceTrackerOptions
 }
 
 /// <summary>
-/// Follows faces, and remembers the people the user uncovered: a new face is hidden unless its fingerprint matches
-/// someone uncovered before, so a person who leaves and comes back keeps their choice. The remembered people live only
-/// in memory. <see cref="Toggle"/> uncovers or hides a face. Not thread-safe.
+/// Follows faces, and remembers the people the user clicked: a new face is shown or hidden as
+/// <see cref="HideNewFaces"/> says, unless its fingerprint matches someone clicked before, so a person who leaves and
+/// comes back keeps their choice. The remembered people live only in memory. <see cref="Toggle"/> uncovers or hides a
+/// face. Not thread-safe.
 /// </summary>
 public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, FaceTrackerOptions? options = null)
 {
     private readonly FaceTrackerOptions _options = options ?? new FaceTrackerOptions();
     private readonly List<State> _faces = [];
-    // People the user uncovered: shared with the engine, so they outlive this tracker (models reloaded).
-    private readonly List<FacePeople.Person> _uncovered = (people ?? new FacePeople()).Uncovered;
+    // People the user clicked: shared with the engine, so they outlive this tracker (models reloaded).
+    private readonly FacePeople _people = people ?? new FacePeople();
     private int _nextId = 1;
     private TimeSpan _lastUpdate = TimeSpan.MinValue;
 
-    /// <summary>People uncovered so far (they stay until the app closes).</summary>
-    public int UncoveredPeople => _uncovered.Count;
+    /// <summary>
+    /// A face nobody clicked is hidden (privacy first) or shown (only the faces clicked are hidden; false detections,
+    /// e.g. on hands, then cost nothing).
+    /// </summary>
+    public bool HideNewFaces { get; set; }
 
-    /// <summary>Forgets the faces in the picture (camera switched); the uncovered people are kept.</summary>
+    /// <summary>People clicked so far (they stay until the app closes).</summary>
+    public int RememberedPeople => _people.Count;
+
+    /// <summary>Forgets the faces in the picture (camera switched); the remembered people are kept.</summary>
     public void Reset() => _faces.Clear();
 
-    /// <summary>Forgets the uncovered people too: every face is hidden again.</summary>
+    /// <summary>Forgets the remembered people too: every face is back to <see cref="HideNewFaces"/>.</summary>
     public void ForgetPeople()
     {
-        _uncovered.Clear();
+        _people.Clear();
         foreach (var face in _faces)
             face.Person = null;
     }
 
-    /// <summary>Uncovers a hidden face (remembering the person) or hides an uncovered one (forgetting them).</summary>
+    /// <summary>Hides a shown face or uncovers a hidden one; the person is remembered unless that is the default again.</summary>
     public void Toggle(int id)
     {
         var face = _faces.FirstOrDefault(f => f.Id == id);
         if (face is null)
             return;
+        var hide = !(face.Person?.Hidden ?? HideNewFaces);
         if (face.Person is { } person)
         {
-            _uncovered.Remove(person);
-            foreach (var other in _faces.Where(f => f.Person == person))
-                other.Person = null;
+            if (hide == HideNewFaces)
+            {
+                _people.Remove(person);
+                foreach (var other in _faces.Where(f => f.Person == person))
+                    other.Person = null;
+            }
+            else
+            {
+                _people.SetHidden(person, hide);
+            }
         }
         else if (face.Fingerprint is { } fingerprint)
         {
-            var uncovered = new FacePeople.Person(fingerprint);
-            _uncovered.Add(uncovered);
-            face.Person = uncovered;
+            face.Person = _people.Add(fingerprint, hide);
         }
     }
 
@@ -132,7 +145,7 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
         }
 
         _lastUpdate = now;
-        return [.. _faces.Select(f => f.ToTrackedFace(frame.Width, frame.Height, matchedFaces.Contains(f) || f.LastSeen == now, _options))];
+        return [.. _faces.Select(f => f.ToTrackedFace(frame.Width, frame.Height, matchedFaces.Contains(f) || f.LastSeen == now, _options, HideNewFaces))];
     }
 
     /// <summary>Takes a fresh fingerprint: averaged into the face's (and its person's), and matched against the people.</summary>
@@ -148,36 +161,33 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             return;
         }
         face.FingerprintTime = now;
-        var lost = false;
-        var wasUncovered = face.Person is not null;
-        // Someone else on this track (heads crossed, a stranger sat down where a held face was): a stranger again,
-        // hidden until recognized. An uncovered person's fingerprint only learns from faces that are them.
+        // Someone else on this track (heads crossed, a stranger sat down where a held face was), or the same person
+        // no longer recognizable (a turned head): the track's own fingerprint starts over.
         if (face.Fingerprint is { } own && FaceRecognizer.Similarity(own, fresh) < FaceRecognizer.SameFace)
-        {
             face.Fingerprint = null;
-            face.Person = null;
-            lost = true;
-        }
         face.Fingerprint = face.Fingerprint is null ? fresh : Average(face.Fingerprint, fresh);
         if (face.Person is { } person)
         {
+            // A person's fingerprint only learns from faces that are them.
             if (FaceRecognizer.Similarity(person.Fingerprint, fresh) >= FaceRecognizer.SameFace)
             {
                 person.Fingerprint = Average(person.Fingerprint, fresh);
                 return;
             }
+            // Not them now. Look again soon, not a refresh later: most likely a turned head.
+            face.FingerprintTime = now - _options.Refresh + _options.Recheck;
+            // Someone hidden on purpose stays hidden meanwhile (the safe side); someone uncovered is covered again,
+            // or goes back to the default.
+            if (person.Hidden)
+                return;
             face.Person = null;
-            lost = true;
         }
-        var best = _uncovered.Select(p => (Person: p, Score: FaceRecognizer.Similarity(p.Fingerprint, fresh)))
+        var best = _people.All.Select(p => (Person: p, Score: FaceRecognizer.Similarity(p.Fingerprint, fresh)))
             .Where(p => p.Score >= FaceRecognizer.SameFace)
             .OrderByDescending(p => p.Score)
             .FirstOrDefault();
         if (best.Person is not null)
             face.Person = best.Person;
-        // Hidden only because it did not match (a turned head, most likely): look again soon, not a refresh later.
-        else if (lost && wasUncovered)
-            face.FingerprintTime = now - _options.Refresh + _options.Recheck;
     }
 
     /// <summary>Running average of unit vectors, normalized again (older and newer weigh 3:1).</summary>
@@ -212,7 +222,7 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
 
         public TimeSpan FingerprintTime { get; set; } = TimeSpan.MinValue;
 
-        /// <summary>The uncovered person this face is; null: hidden.</summary>
+        /// <summary>The remembered person this face is; null: nobody clicked, the default applies.</summary>
         public FacePeople.Person? Person { get; set; }
 
         public void Update(DetectedFace detection, TimeSpan now, float smoothing)
@@ -224,26 +234,65 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             LastSeen = now;
         }
 
-        public TrackedFace ToTrackedFace(int width, int height, bool seen, FaceTrackerOptions options)
+        public TrackedFace ToTrackedFace(int width, int height, bool seen, FaceTrackerOptions options, bool hideNewFaces)
         {
             var side = Math.Max(Raw.Width, Raw.Height) * options.Margin * (seen ? 1 : options.HeldGrowth);
             var cx = Raw.X + Raw.Width / 2;
             var cy = Raw.Y + Raw.Height / 2;
             var box = new RectangleF((cx - side / 2) / width, (cy - side / 2) / height, side / width, side / height);
-            return new TrackedFace(Id, box, Person is null, seen);
+            return new TrackedFace(Id, box, Person?.Hidden ?? hideNewFaces, seen);
         }
     }
 }
 
-/// <summary>The people the user uncovered (an averaged fingerprint each); kept in memory only, until the app closes.</summary>
+/// <summary>
+/// The people the user clicked (an averaged fingerprint each, hidden or uncovered); kept in memory only, until the app
+/// closes. Changed on the tracker's thread; <see cref="AnyHidden"/> may be read from any thread.
+/// </summary>
 public sealed class FacePeople
 {
-    internal List<Person> Uncovered { get; } = [];
+    private readonly List<Person> _people = [];
+    private volatile bool _anyHidden;
 
-    public int Count => Uncovered.Count;
+    public int Count => _people.Count;
+
+    /// <summary>Someone was hidden on purpose: they must not show while the faces are not found yet.</summary>
+    public bool AnyHidden => _anyHidden;
+
+    internal IReadOnlyList<Person> All => _people;
+
+    internal Person Add(float[] fingerprint, bool hidden)
+    {
+        var person = new Person(fingerprint) { Hidden = hidden };
+        _people.Add(person);
+        Recount();
+        return person;
+    }
+
+    internal void Remove(Person person)
+    {
+        _people.Remove(person);
+        Recount();
+    }
+
+    internal void SetHidden(Person person, bool hidden)
+    {
+        person.Hidden = hidden;
+        Recount();
+    }
+
+    internal void Clear()
+    {
+        _people.Clear();
+        Recount();
+    }
+
+    private void Recount() => _anyHidden = _people.Exists(p => p.Hidden);
 
     internal sealed class Person(float[] fingerprint)
     {
         public float[] Fingerprint { get; set; } = fingerprint;
+
+        public bool Hidden { get; set; }
     }
 }

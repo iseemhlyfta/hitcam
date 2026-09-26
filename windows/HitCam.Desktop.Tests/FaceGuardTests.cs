@@ -32,6 +32,15 @@ public sealed class FaceGuardTests
     }
 
     [Fact]
+    public void With_nobody_to_hide_nothing_is_covered_before_the_first_result()
+    {
+        var guard = new FaceGuard(new ManualTime());
+
+        Assert.Null(guard.Due(Settings, anyoneHidden: false));
+        Assert.Single(guard.Due(Settings, anyoneHidden: true)!);
+    }
+
+    [Fact]
     public void Late_results_are_bridged_by_sending_the_last_regions_again()
     {
         var time = new ManualTime();
