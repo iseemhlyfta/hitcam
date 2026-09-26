@@ -79,17 +79,40 @@ public sealed class FaceOverlay : Control, ICustomHitTest
     // Only the squares take the pointer: the rest of the preview keeps its double-click (full screen).
     public bool HitTest(Point point) => IsVisible && FaceAt(point) is not null;
 
+    /// <summary>
+    /// How long a click on a square waits for a second one; null: the system's double-click time. A double click
+    /// (full screen) must not uncover a hidden face, in the preview and in the camera alike.
+    /// </summary>
+    public TimeSpan? ToggleDelay { get; set; }
+
     protected override void OnPointerPressed(PointerPressedEventArgs e)
     {
         base.OnPointerPressed(e);
-        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed || e.ClickCount > 1)
+        if (!e.GetCurrentPoint(this).Properties.IsLeftButtonPressed)
             return;
+        if (e.ClickCount > 1)
+        {
+            // The second click of a double click: the first one does not count either.
+            _pendingToggle?.Dispose();
+            _pendingToggle = null;
+            return;
+        }
         if (FaceAt(e.GetPosition(this)) is { } face && ToggleCommand is { } command && command.CanExecute(face.Id))
         {
-            command.Execute(face.Id);
+            var id = face.Id;
+            var delay = ToggleDelay ?? Avalonia.VisualTree.VisualExtensions.GetPlatformSettings(this)?.GetDoubleTapTime(e.Pointer.Type) ?? TimeSpan.FromMilliseconds(500);
+            _pendingToggle?.Dispose();
+            _pendingToggle = Avalonia.Threading.DispatcherTimer.RunOnce(() =>
+            {
+                _pendingToggle = null;
+                if (command.CanExecute(id))
+                    command.Execute(id);
+            }, delay);
             e.Handled = true;
         }
     }
+
+    private IDisposable? _pendingToggle;
 
     public override void Render(DrawingContext context)
     {

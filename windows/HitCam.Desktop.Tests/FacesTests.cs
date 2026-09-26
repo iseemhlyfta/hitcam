@@ -235,6 +235,43 @@ public sealed class FacesTests : IDisposable
         }, CancellationToken.None);
     }
 
+    [Fact]
+    public async Task A_click_toggles_a_face_but_a_double_click_for_full_screen_does_not()
+    {
+        await ShotOverlayTests.Session.Value.Dispatch(async () =>
+        {
+            var toggled = new List<int>();
+            var overlay = new FaceOverlay
+            {
+                Source = new WriteableBitmap(new AvaloniaSize(640, 360), new AvaloniaVector(96, 96), PixelFormat.Bgra8888, AlphaFormat.Premul),
+                Faces = [Face(7, true, 0.1f, 0.1f, 0.3f)],
+                ToggleCommand = ReactiveUI.ReactiveCommand.Create<int>(toggled.Add),
+                ToggleDelay = TimeSpan.FromMilliseconds(100),
+            };
+            var window = new Window { Width = 640, Height = 360, Content = overlay };
+            window.Show();
+            Dispatcher.UIThread.RunJobs();
+            var square = new AvaloniaPoint(100, 50);
+
+            window.MouseDown(square, Avalonia.Input.MouseButton.Left);
+            window.MouseUp(square, Avalonia.Input.MouseButton.Left);
+            window.MouseDown(square, Avalonia.Input.MouseButton.Left);
+            window.MouseUp(square, Avalonia.Input.MouseButton.Left);
+            await Settle();
+            Assert.Empty(toggled);
+
+            window.MouseDown(square, Avalonia.Input.MouseButton.Left);
+            window.MouseUp(square, Avalonia.Input.MouseButton.Left);
+            await Settle();
+            Assert.Equal([7], toggled);
+            window.Close();
+            return true;
+        }, CancellationToken.None);
+
+        // Past the toggle delay and the double-click time, so the next click is a single one.
+        static Task Settle() => Task.Delay(800);
+    }
+
     // Object labels
 
     [Fact]
