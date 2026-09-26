@@ -37,6 +37,8 @@ public sealed class VirtualCameraTests
         Assert.Contains($"'{other}'", script, StringComparison.Ordinal);
         // The 32-bit camera is registered for 32-bit apps.
         Assert.Contains(@"SysWOW64\regsvr32.exe", script, StringComparison.Ordinal);
+        // A camera already in place is not copied again: a DLL an app has loaded cannot be replaced.
+        Assert.Contains("(Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq $camera.Hash", script, StringComparison.Ordinal);
         Assert.DoesNotContain("@", script.Replace("@(", "", StringComparison.Ordinal).Replace("@{", "", StringComparison.Ordinal), StringComparison.Ordinal);
     }
 

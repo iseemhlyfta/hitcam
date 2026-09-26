@@ -26,6 +26,15 @@ public sealed record ProcessingSettings
     /// <summary>NVIDIA RTX compression artifact reduction: 0 off, 1 gentle, 2 strong.</summary>
     public int ArtifactReduction { get; set; }
 
+    /// <summary>The strength artifact removal comes back with when switched on again (kept across restarts while off).</summary>
+    public int ArtifactLevel
+    {
+        get => _artifactLevel;
+        set => _artifactLevel = value == ArtifactReductionStrong ? ArtifactReductionStrong : ArtifactReductionGentle;
+    }
+
+    private int _artifactLevel = ArtifactReductionGentle;
+
     public int Brightness { get; set; }
     public int Contrast { get; set; }
     public int Saturation { get; set; }

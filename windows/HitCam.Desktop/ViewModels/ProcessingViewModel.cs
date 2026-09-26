@@ -44,7 +44,7 @@ public sealed class ProcessingViewModel : ReactiveObject
 
         _artifactLevel = initial.ArtifactReduction != ProcessingSettings.ArtifactReductionOff
             ? initial.ArtifactReduction
-            : ProcessingSettings.ArtifactReductionGentle;
+            : initial.ArtifactLevel;
         ArtifactReductionOptions =
         [
             new(ProcessingSettings.ArtifactReductionGentle, Loc.ArtifactReductionGentle),
@@ -99,10 +99,12 @@ public sealed class ProcessingViewModel : ReactiveObject
             if (value is null || value.Level == _artifactLevel)
                 return;
             _artifactLevel = value.Level;
-            if (IsArtifactReductionOn)
-                Update(_settings with { ArtifactReduction = value.Level });
-            else
-                this.RaisePropertyChanged();
+            // Saved while off too, so the next start comes back with it.
+            Update(_settings with
+            {
+                ArtifactLevel = value.Level,
+                ArtifactReduction = IsArtifactReductionOn ? value.Level : ProcessingSettings.ArtifactReductionOff,
+            });
         }
     }
 
@@ -110,7 +112,11 @@ public sealed class ProcessingViewModel : ReactiveObject
     public bool IsArtifactReductionOn
     {
         get => _settings.ArtifactReduction != ProcessingSettings.ArtifactReductionOff;
-        set => Update(_settings with { ArtifactReduction = value ? _artifactLevel : ProcessingSettings.ArtifactReductionOff });
+        set => Update(_settings with
+        {
+            ArtifactLevel = _artifactLevel,
+            ArtifactReduction = value ? _artifactLevel : ProcessingSettings.ArtifactReductionOff,
+        });
     }
 
     // Colour and sharpness: -100..100 (0 neutral), sharpness 0..100.

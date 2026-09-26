@@ -176,6 +176,33 @@ public sealed class ProcessingTests
     }
 
     [Fact]
+    public void The_artifact_strength_survives_a_restart_while_it_is_off()
+    {
+        var processing = Create(new ProcessingSettings());
+        processing.IsArtifactReductionAvailable = true;
+        processing.IsArtifactReductionOn = true;
+        processing.SelectedArtifactReduction = processing.ArtifactReductionOptions[1];
+        processing.IsArtifactReductionOn = false;
+
+        // The file as saved, read back by the next start.
+        var path = Path.Combine(Path.GetTempPath(), $"HitCam.Tests.{Guid.NewGuid():N}.json");
+        try
+        {
+            new AppSettings { Processing = processing.Settings }.Save(path);
+            processing = Create(AppSettings.Load(path).Processing);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+        var restarted = processing;
+        restarted.IsArtifactReductionAvailable = true;
+        Assert.Equal(ProcessingSettings.ArtifactReductionStrong, restarted.SelectedArtifactReduction.Level);
+        restarted.IsArtifactReductionOn = true;
+        Assert.Equal(2, _applied[^1].ArtifactReduction);
+    }
+
+    [Fact]
     public void Stats_show_the_gpu_time_and_artifact_time_and_error_only_when_it_is_on()
     {
         var processing = Create(new ProcessingSettings { ArtifactReduction = ProcessingSettings.ArtifactReductionGentle });

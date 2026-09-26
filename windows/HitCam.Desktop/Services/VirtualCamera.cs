@@ -325,12 +325,16 @@ public sealed partial class VirtualCamera : IDisposable
             foreach ($camera in $cameras) {
                 $target = Join-Path $dir ($camera.Name + '-' + $camera.Hash.Substring(0, 16) + '.dll')
                 $staged = $target + '.new'
-                Copy-Item -LiteralPath $camera.Source -Destination $staged -Force
-                if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $camera.Hash) {
-                    Remove-Item -LiteralPath $staged -Force
-                    exit 2
+                # Already there (e.g. only the 32-bit one is outdated): a DLL an app has loaded cannot be replaced.
+                $current = (Test-Path -LiteralPath $target) -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash -eq $camera.Hash
+                if (-not $current) {
+                    Copy-Item -LiteralPath $camera.Source -Destination $staged -Force
+                    if ((Get-FileHash -LiteralPath $staged -Algorithm SHA256).Hash -ne $camera.Hash) {
+                        Remove-Item -LiteralPath $staged -Force
+                        exit 2
+                    }
+                    Move-Item -LiteralPath $staged -Destination $target -Force
                 }
-                Move-Item -LiteralPath $staged -Destination $target -Force
                 $staged = $null
                 $p = Start-Process -FilePath $camera.Regsvr32 -ArgumentList '/s', ('"' + $target + '"') -Wait -PassThru
                 if ($p.ExitCode -ne 0) { exit $p.ExitCode }
