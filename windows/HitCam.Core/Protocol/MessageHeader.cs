@@ -2,13 +2,17 @@ using System.Buffers.Binary;
 
 namespace HitCam.Core.Protocol;
 
-/// <summary>Message types of HitCam protocol v1. See docs/protocol.md.</summary>
+/// <summary>Message types of HitCam protocol v2 (v1 lacks PairReveal and PairConfirm). See docs/protocol.md.</summary>
 public enum MessageType : byte
 {
     Hello = 0x01,
     HelloAck = 0x02,
     PairRequest = 0x03,
     PairResult = 0x04,
+    /// <summary>v2 pairing: the PC opens its PIN commitment (see PinProof).</summary>
+    PairReveal = 0x05,
+    /// <summary>v2 pairing: the phone opens its PIN commitment.</summary>
+    PairConfirm = 0x06,
     StreamConfig = 0x10,
     VideoFrame = 0x11,
     RequestKeyframe = 0x12,
@@ -76,7 +80,7 @@ public readonly record struct MessageHeader(MessageType Type, MessageFlags Flags
 /// </summary>
 public static class PayloadLimits
 {
-    /// <summary>Hello and PairRequest, before the session is established.</summary>
+    /// <summary>Hello and the pairing messages, before the session is established.</summary>
     public const int Handshake = 4 * 1024;
     /// <summary>JSON and other small messages of an established session.</summary>
     public const int Json = 64 * 1024;

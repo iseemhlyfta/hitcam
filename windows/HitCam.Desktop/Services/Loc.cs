@@ -32,6 +32,17 @@ public static class Loc
 
     // Streaming
     public static string DeviceSubtitle => Russian ? "Wi-Fi · сопряжён" : "Wi-Fi · paired";
+    public static string DeviceSubtitleUnencrypted => Russian
+        ? "Без шифрования · обновите HitCam на телефоне"
+        : "Not encrypted · update HitCam on the phone";
+    public static string RefuseUnencrypted => Russian ? "Не пускать без шифрования" : "Refuse unencrypted";
+    public static string RefuseUnencryptedHint => Russian
+        ? "Приложение на телефоне старое (0.3.0 или раньше) и передаёт видео открыто. Запретить такие подключения — телефону придётся обновиться"
+        : "The phone app is old (0.3.0 or earlier) and sends video in the clear. Refuse such connections: the phone will have to update";
+    public static string UnencryptedRefused => Russian
+        ? "Старые приложения без шифрования не подключаются"
+        : "Old phone apps without encryption cannot connect";
+    public static string AllowUnencrypted => Russian ? "Разрешить" : "Allow";
     public static string SectionExpand => Russian ? "Показать или скрыть настройки" : "Show or hide the settings";
     public static string CameraLiveBadge => Russian ? "Камера «HitCam» в эфире" : "“HitCam” camera is live";
     public static string Disconnect => Russian ? "Отключить" : "Disconnect";

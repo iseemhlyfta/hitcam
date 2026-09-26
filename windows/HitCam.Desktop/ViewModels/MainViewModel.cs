@@ -9,6 +9,7 @@ using Avalonia.Platform;
 using Avalonia.Threading;
 using HitCam.Core.Pairing;
 using HitCam.Core.Protocol;
+using HitCam.Core.Security;
 using HitCam.Core.Server;
 using HitCam.Desktop.Services;
 using HitCam.Vision;
@@ -25,6 +26,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 {
     private AppSettings _settings = AppSettings.Load();
     private readonly HitCamServer _server;
+    // TLS identity phones pin; null if it could not be made (then only old phone apps connect).
+    private readonly ServerIdentity? _identity = IdentityFile.LoadOrCreate(AppPaths.Identity);
+    private bool _isUnencrypted;
     private readonly DispatcherTimer _statsTimer;
     private readonly DispatcherTimer _previewTimer;
     // Network changes come in bursts (an adapter going up raises several); addresses are read once it settles.
@@ -231,7 +235,13 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         Faces.HideEveryoneCommand.ThrownExceptions.Subscribe(ex => Trace.TraceWarning($"Hide everyone: {ex.Message}"));
 
         _server = new HitCamServer(
-            new HitCamServerOptions { Port = Program.PortOverride ?? _settings.Port, ServerId = _settings.ServerId },
+            new HitCamServerOptions
+            {
+                Port = Program.PortOverride ?? _settings.Port,
+                ServerId = _settings.ServerId,
+                Identity = _identity,
+                AllowPlaintext = _settings.AllowUnencryptedPhones,
+            },
             new FilePairingStore(AppPaths.PairedDevices));
 
         _server.PairingStarted += p => Dispatcher.UIThread.Post(() =>
@@ -244,7 +254,8 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         {
             DeviceName = d.DeviceName;
             // The address stays off the screen: it would show in screen shares and streams.
-            DeviceSubtitle = Loc.DeviceSubtitle;
+            DeviceSubtitle = d.Encrypted ? Loc.DeviceSubtitle : Loc.DeviceSubtitleUnencrypted;
+            IsUnencrypted = !d.Encrypted;
             // Frames decoded before this connection belong to the previous one.
             _lastPreviewFrame = _pipeline.PreviewInfo().Frame;
             _lastShownFrame = _pipeline.PreviewInfo(shown: true).Frame;
@@ -263,6 +274,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
             IsConnected = false;
+            IsUnencrypted = false;
             IsFullScreen = false;
             _previewTimer!.Stop();
             Preview = null;
@@ -355,6 +367,24 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     /// Master switch of the experimental features: NVIDIA noise removal, object analysis, hands. Off, none of them
     /// runs; their own switches keep their positions, so switching back on restores what was on. Saved.
     /// </summary>
+    /// <summary>Old phone apps (up to 0.3.0) connect without encryption; off: they are told their version is not supported.</summary>
+    public bool AllowUnencryptedPhones
+    {
+        get => _settings.AllowUnencryptedPhones;
+        set
+        {
+            if (value == _settings.AllowUnencryptedPhones)
+                return;
+            _settings = _settings with { AllowUnencryptedPhones = value };
+            _settings.Save();
+            _server.AllowPlaintext = value;
+            this.RaisePropertyChanged();
+            // The phone on the screen now is one of them: out it goes.
+            if (!value && IsUnencrypted)
+                _server.Kick();
+        }
+    }
+
     public bool ExperimentsEnabled
     {
         get => _settings.Experiments;
@@ -511,6 +541,9 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
 
     public string DeviceSubtitle { get => _deviceSubtitle; private set => this.RaiseAndSetIfChanged(ref _deviceSubtitle, value); }
 
+    /// <summary>The connected phone runs an old app without encryption (protocol v1).</summary>
+    public bool IsUnencrypted { get => _isUnencrypted; private set => this.RaiseAndSetIfChanged(ref _isUnencrypted, value); }
+
     public string LiveText { get => _liveText; private set => this.RaiseAndSetIfChanged(ref _liveText, value); }
 
     public string StreamText { get => _streamText; private set => this.RaiseAndSetIfChanged(ref _streamText, value); }
@@ -621,7 +654,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             ? Loc.OtherAddresses(string.Join(", ", addresses.Skip(1).Select(a => $"{a}:{_server.Port}")))
             : "";
         var name = Uri.EscapeDataString(Environment.MachineName);
-        ReplaceQrCode(QrImage.Create($"{ProtocolInfo.UriScheme}://{addresses[0]}:{_server.Port}?id={_settings.ServerId}&name={name}"));
+        ReplaceQrCode(QrImage.Create($"{ProtocolInfo.UriScheme}://{addresses[0]}:{_server.Port}?id={_settings.ServerId}&name={name}{(_identity is null ? "" : $"&fp={_identity.FingerprintHex}")}"));
     }
 
     private void ReplaceQrCode(Bitmap? qrCode)
@@ -1058,6 +1091,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
         await _server.DisposeAsync().ConfigureAwait(false);
+        _identity?.Dispose();
         _discovery?.Dispose();
         await _faceGuardTimer.DisposeAsync().ConfigureAwait(false);
         await _framingTimer.DisposeAsync().ConfigureAwait(false);

@@ -13,6 +13,9 @@ public static class AppPaths
     public static string PairedDevices => Path.Combine(DataDirectory, "devices.json");
 
     public static string Settings => Path.Combine(DataDirectory, "settings.json");
+
+    /// <summary>The PC's TLS identity (see <see cref="IdentityFile"/>).</summary>
+    public static string Identity => Path.Combine(DataDirectory, "identity.bin");
 }
 
 public sealed partial record AppSettings
@@ -29,6 +32,9 @@ public sealed partial record AppSettings
     }
 
     private int _port = Core.Protocol.ProtocolInfo.DefaultPort;
+
+    /// <summary>Phone apps up to 0.3.0 connect without encryption (protocol v1); the PC warns while one is connected.</summary>
+    public bool AllowUnencryptedPhones { get; set; } = true;
 
     // Set when the file exists but could not be read: saving these defaults over it would lose every setting and the
     // identity paired phones know this PC by. Copied along by "with".

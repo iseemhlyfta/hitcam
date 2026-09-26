@@ -66,6 +66,12 @@
                         </StackPanel>
                     </StackPanel>
                     <TextBlock Classes="muted" Text="{Binding StatusText}" IsVisible="{Binding StatusText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                    <!--  Turned off from the streaming screen; a way back  -->
+                    <StackPanel Orientation="Horizontal" Spacing="10" IsVisible="{Binding !AllowUnencryptedPhones}">
+                        <TextBlock VerticalAlignment="Center" Classes="muted" Text="{x:Static svc:Loc.UnencryptedRefused}" />
+                        <ToggleSwitch VerticalAlignment="Center" MinWidth="0" OnContent="" OffContent="" IsChecked="{Binding AllowUnencryptedPhones}"
+                                      ToolTip.Tip="{x:Static svc:Loc.AllowUnencrypted}" AutomationProperties.Name="{x:Static svc:Loc.AllowUnencrypted}" />
+                    </StackPanel>
                 </StackPanel>
             </Grid>
         </Border>

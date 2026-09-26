@@ -1,9 +1,13 @@
 using System.Diagnostics;
 using System.Net;
+using System.Net.Security;
 using System.Net.Sockets;
 using System.Runtime.CompilerServices;
+using System.Security.Authentication;
+using System.Security.Cryptography;
 using HitCam.Core.Pairing;
 using HitCam.Core.Protocol;
+using HitCam.Core.Security;
 
 namespace HitCam.Core.Server;
 
@@ -25,9 +29,14 @@ public sealed record HitCamServerOptions
     public int MaxConnections { get; init; } = 8;
     /// <summary>Unfinished handshakes (including pairing) per remote address; more are closed right away.</summary>
     public int MaxHandshakesPerAddress { get; init; } = 2;
+    /// <summary>TLS identity for protocol v2; null: plain v1 only.</summary>
+    public ServerIdentity? Identity { get; init; }
+    /// <summary>Accept phone apps up to 0.3.0 over plain TCP (protocol v1).</summary>
+    public bool AllowPlaintext { get; init; } = true;
 }
 
-public sealed record ConnectedDevice(string DeviceId, string DeviceName, string? Model, IPEndPoint RemoteEndPoint);
+/// <param name="Encrypted">Over TLS (protocol v2); false for an old phone app on plain TCP.</param>
+public sealed record ConnectedDevice(string DeviceId, string DeviceName, string? Model, IPEndPoint RemoteEndPoint, bool Encrypted = false);
 
 public sealed record PairingPrompt(string DeviceName, IPEndPoint RemoteEndPoint, string Pin);
 
@@ -58,6 +67,7 @@ public sealed class HitCamServer : IAsyncDisposable
     private TcpListener? _listener;
     private Task? _acceptLoop;
     private Connection? _owner;
+    private bool _allowPlaintext;
 
     public HitCamServer(HitCamServerOptions options, IPairingStore pairingStore, TimeProvider? timeProvider = null)
     {
@@ -65,6 +75,7 @@ public sealed class HitCamServer : IAsyncDisposable
         _pairingStore = pairingStore;
         _time = timeProvider ?? TimeProvider.System;
         _pins = new PinGuard(_time);
+        _allowPlaintext = options.AllowPlaintext;
     }
 
     public event Action<PairingPrompt>? PairingStarted;
@@ -81,6 +92,13 @@ public sealed class HitCamServer : IAsyncDisposable
     public int Port { get; private set; }
 
     public bool IsRunning => _listener is not null;
+
+    /// <summary>Accept old phone apps over plain TCP (v1); starts as <see cref="HitCamServerOptions.AllowPlaintext"/>.</summary>
+    public bool AllowPlaintext
+    {
+        get => Volatile.Read(ref _allowPlaintext);
+        set => Volatile.Write(ref _allowPlaintext, value);
+    }
 
     public ConnectedDevice? CurrentDevice => Volatile.Read(ref _owner)?.Device;
 
@@ -248,18 +266,24 @@ public sealed class HitCamServer : IAsyncDisposable
         {
             using var tcp = client;
             client.NoDelay = true;
-            await using var stream = new MessageStream(client.GetStream());
             using var connectionCts = CancellationTokenSource.CreateLinkedTokenSource(serverToken);
             var token = connectionCts.Token;
+            var transport = await OpenTransportAsync(client, token).ConfigureAwait(false);
+            if (transport is null)
+                return;
+            var encrypted = transport is SslStream;
+            await using var stream = new MessageStream(transport);
             try
             {
                 var hello = await ReadHelloAsync(stream, token).ConfigureAwait(false);
                 if (hello is null)
                     return;
 
-                if (hello.ProtocolVersion != ProtocolInfo.Version)
+                // v2 only over TLS, v1 only in plain TCP and only if allowed: no downgrade either way.
+                var version = encrypted ? ProtocolInfo.Version : ProtocolInfo.LegacyVersion;
+                if (hello.ProtocolVersion != version || (!encrypted && !AllowPlaintext && _options.Identity is not null))
                 {
-                    await SendAckAsync(stream, HelloStatus.VersionMismatch, token).ConfigureAwait(false);
+                    await SendAckAsync(stream, version, HelloStatus.VersionMismatch, token).ConfigureAwait(false);
                     return;
                 }
 
@@ -268,23 +292,25 @@ public sealed class HitCamServer : IAsyncDisposable
                 if (!await ClaimAsync(connection, paired, token).ConfigureAwait(false))
                 {
                     connection = null;
-                    await SendAckAsync(stream, HelloStatus.Busy, token).ConfigureAwait(false);
+                    await SendAckAsync(stream, version, HelloStatus.Busy, token).ConfigureAwait(false);
                     return;
                 }
 
                 if (paired)
                 {
                     _pairingStore.Touch(hello.DeviceId);
-                    await SendAckAsync(stream, HelloStatus.Accepted, token).ConfigureAwait(false);
+                    await SendAckAsync(stream, version, HelloStatus.Accepted, token).ConfigureAwait(false);
                 }
-                else if (!await PairAsync(connection, hello, remote, token).ConfigureAwait(false))
+                else if (!await (encrypted
+                             ? PairOverTlsAsync(connection, hello, remote, token)
+                             : PairAsync(connection, hello, remote, token)).ConfigureAwait(false))
                 {
                     return;
                 }
 
                 handshaking = false;
                 EndHandshake(address);
-                var device = new ConnectedDevice(hello.DeviceId, hello.DeviceName, hello.Model, remote);
+                var device = new ConnectedDevice(hello.DeviceId, hello.DeviceName, hello.Model, remote, encrypted);
                 await RunSessionAsync(connection, device, serverToken).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is IOException or SocketException or ProtocolException
@@ -313,6 +339,42 @@ public sealed class HitCamServer : IAsyncDisposable
         {
             if (handshaking)
                 EndHandshake(address);
+        }
+    }
+
+    /// <summary>
+    /// TLS if the phone starts with a TLS record (0x16, a ClientHello) and the server has an identity, otherwise the
+    /// plain stream (a v1 Hello starts with 0x01). Null if the phone left or TLS failed within the Hello timeout.
+    /// </summary>
+    private async Task<Stream?> OpenTransportAsync(TcpClient client, CancellationToken cancellationToken)
+    {
+        using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeout.CancelAfter(_options.HelloTimeout);
+        SslStream? tls = null;
+        try
+        {
+            var first = new byte[1];
+            if (await client.Client.ReceiveAsync(first, SocketFlags.Peek, timeout.Token).ConfigureAwait(false) == 0)
+                return null;
+            if (first[0] != 0x16 || _options.Identity is not { } identity)
+                return client.GetStream();
+
+            tls = new SslStream(client.GetStream(), leaveInnerStreamOpen: false);
+            await tls.AuthenticateAsServerAsync(new SslServerAuthenticationOptions
+            {
+                ServerCertificate = identity.Certificate,
+                // 1.2 as well: Windows 10 cannot serve TLS 1.3.
+                EnabledSslProtocols = SslProtocols.Tls12 | SslProtocols.Tls13,
+                ClientCertificateRequired = false,
+            }, timeout.Token).ConfigureAwait(false);
+            return tls;
+        }
+        catch (Exception ex) when (ex is IOException or SocketException or AuthenticationException
+                                       or OperationCanceledException or ObjectDisposedException)
+        {
+            if (tls is not null)
+                await tls.DisposeAsync().ConfigureAwait(false);
+            return null;
         }
     }
 
@@ -399,7 +461,7 @@ public sealed class HitCamServer : IAsyncDisposable
         var pin = _pins.Begin();
         if (pin is null)
         {
-            await SendAckAsync(stream, HelloStatus.PairingLocked, cancellationToken).ConfigureAwait(false);
+            await SendAckAsync(stream, ProtocolInfo.LegacyVersion, HelloStatus.PairingLocked, cancellationToken).ConfigureAwait(false);
             return false;
         }
 
@@ -407,7 +469,7 @@ public sealed class HitCamServer : IAsyncDisposable
         var paired = false;
         try
         {
-            await SendAckAsync(stream, HelloStatus.PairingRequired, cancellationToken).ConfigureAwait(false);
+            await SendAckAsync(stream, ProtocolInfo.LegacyVersion, HelloStatus.PairingRequired, cancellationToken).ConfigureAwait(false);
             started = true;
             Raise(PairingStarted, new PairingPrompt(hello.DeviceName, remote, pin));
 
@@ -450,6 +512,91 @@ public sealed class HitCamServer : IAsyncDisposable
             if (started)
                 Raise(PairingEnded);
         }
+    }
+
+    /// <summary>
+    /// Pairing over TLS (v2): the PIN shown on the PC is proven through commitments bound to the certificate (see
+    /// <see cref="PinProof"/>), so a middleman with its own certificate can neither pass nor learn the PIN in time.
+    /// One PIN per connection: once the PC has opened its commitment the PIN is used up, right or wrong.
+    /// </summary>
+    private async Task<bool> PairOverTlsAsync(Connection connection, Hello hello, IPEndPoint remote, CancellationToken cancellationToken)
+    {
+        var stream = connection.Stream;
+        var fingerprint = _options.Identity!.Fingerprint;
+        var pin = _pins.Begin();
+        if (pin is null)
+        {
+            await SendAckAsync(stream, ProtocolInfo.Version, HelloStatus.PairingLocked, cancellationToken).ConfigureAwait(false);
+            return false;
+        }
+
+        var started = false;
+        var paired = false;
+        var revealed = false;
+        var checkedPin = false;
+        var nonce = PinProof.NewNonce();
+        try
+        {
+            var commit = PinProof.Commit(PinProof.PcLabel, fingerprint, pin, nonce);
+            await SendAckAsync(stream, ProtocolInfo.Version, HelloStatus.PairingRequired, cancellationToken, Convert.ToHexStringLower(commit))
+                .ConfigureAwait(false);
+            started = true;
+            Raise(PairingStarted, new PairingPrompt(hello.DeviceName, remote, pin));
+
+            using var timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeout.CancelAfter(_options.PairingTimeout);
+            var request = await ReadPairingAsync(stream, MessageType.PairRequest, timeout.Token).ConfigureAwait(false);
+            var phoneCommit = PinProof.FromHex(request?.ReadJson(ProtocolJson.Default.PairRequest).Commit, 32);
+            if (phoneCommit is null)
+                return false;
+
+            // The phone is bound now; open ours. From here on the PIN is used up.
+            revealed = true;
+            await stream.WriteAsync(Message.Json(MessageType.PairReveal, new PairNonce(Convert.ToHexStringLower(nonce)),
+                ProtocolJson.Default.PairNonce, Now()), timeout.Token).ConfigureAwait(false);
+
+            var confirm = await ReadPairingAsync(stream, MessageType.PairConfirm, timeout.Token).ConfigureAwait(false);
+            var phoneNonce = PinProof.FromHex(confirm?.ReadJson(ProtocolJson.Default.PairNonce).Nonce, PinProof.NonceSize);
+            if (phoneNonce is null)
+                return false;
+
+            checkedPin = true;
+            var result = _pins.Check(candidate => CryptographicOperations.FixedTimeEquals(
+                phoneCommit, PinProof.Commit(PinProof.PhoneLabel, fingerprint, candidate, phoneNonce)));
+            if (result != PinCheckResult.Ok)
+            {
+                await SendPairResultAsync(stream, new PairResult(false, null, result == PinCheckResult.Wrong ? _pins.AttemptsLeft : 0),
+                    timeout.Token).ConfigureAwait(false);
+                return false;
+            }
+            if (!TryFinishPairing(connection))
+                return false;
+            var token = _pairingStore.Pair(hello.DeviceId, hello.DeviceName);
+            await SendPairResultAsync(stream, new PairResult(true, token, _pins.AttemptsLeft), timeout.Token).ConfigureAwait(false);
+            paired = true;
+            return true;
+        }
+        finally
+        {
+            // A phone that saw our nonce and left without confirming (a mistyped PIN, a middleman) used up a PIN: it
+            // counts as a wrong one, or opening commitments would be free guesses.
+            if (revealed && !checkedPin)
+                _pins.Check(static _ => false);
+            _pins.Cancel();
+            if (!paired)
+                Release(connection);
+            if (started)
+                Raise(PairingEnded);
+        }
+    }
+
+    /// <summary>The next pairing message of the given type; null if the phone closed; anything else is an error.</summary>
+    private static async Task<Message?> ReadPairingAsync(MessageStream stream, MessageType type, CancellationToken cancellationToken)
+    {
+        var message = await stream.ReadAsync(HandshakeLimit, cancellationToken).ConfigureAwait(false);
+        if (message is not null && message.Type != type)
+            throw new ProtocolException($"Expected {type}, got {message.Type}.");
+        return message;
     }
 
     private async Task RunSessionAsync(Connection connection, ConnectedDevice device, CancellationToken serverToken)
@@ -595,10 +742,10 @@ public sealed class HitCamServer : IAsyncDisposable
     private static void TraceHandlerFailure(string name, Exception ex) =>
         Trace.TraceError($"HitCam: {name} handler threw: {ex}");
 
-    private Task SendAckAsync(MessageStream stream, string status, CancellationToken cancellationToken) =>
+    private Task SendAckAsync(MessageStream stream, int version, string status, CancellationToken cancellationToken, string? pinCommit = null) =>
         stream.WriteAsync(Message.Json(
             MessageType.HelloAck,
-            new HelloAck(ProtocolInfo.Version, status, _options.ServerName, _options.ServerId),
+            new HelloAck(version, status, _options.ServerName, _options.ServerId, pinCommit),
             ProtocolJson.Default.HelloAck,
             Now()), cancellationToken).AsTask();
 

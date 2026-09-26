@@ -60,15 +60,19 @@ public sealed class PinGuard(TimeProvider? timeProvider = null)
         }
     }
 
-    public PinCheckResult Check(string? candidate)
+    public PinCheckResult Check(string? candidate) =>
+        Check(pin => candidate is { Length: 6 } && CryptographicOperations.FixedTimeEquals(
+            Encoding.UTF8.GetBytes(candidate), Encoding.UTF8.GetBytes(pin)));
+
+    /// <summary>Checks the current PIN with <paramref name="matches"/> (v2: against the phone's commitment).</summary>
+    public PinCheckResult Check(Func<string, bool> matches)
     {
         lock (_gate)
         {
             if (_pin is null)
                 return PinCheckResult.Exhausted;
 
-            if (candidate is { Length: 6 } && CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(candidate), Encoding.UTF8.GetBytes(_pin)))
+            if (matches(_pin))
             {
                 _pin = null;
                 _failures = 0;

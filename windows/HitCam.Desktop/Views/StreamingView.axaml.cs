@@ -36,6 +36,12 @@ public partial class StreamingView : UserControl
         }
     }
 
+    private void OnRefuseUnencrypted(object? sender, Avalonia.Interactivity.RoutedEventArgs e)
+    {
+        if (DataContext is MainViewModel viewModel)
+            viewModel.AllowUnencryptedPhones = false;
+    }
+
     private void OnPreviewDoubleTapped(object? sender, TappedEventArgs e)
     {
         // A double click is for full screen only: its first click must not uncover or hide a face.

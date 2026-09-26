@@ -4,7 +4,10 @@ namespace HitCam.Core.Protocol;
 
 public static class ProtocolInfo
 {
-    public const int Version = 1;
+    /// <summary>Over TLS (app 0.3.1+).</summary>
+    public const int Version = 2;
+    /// <summary>Plain TCP, apps up to 0.3.0; accepted unless the user turned it off.</summary>
+    public const int LegacyVersion = 1;
     public const int DefaultPort = 47800;
     public const string BonjourServiceType = "_hitcam._tcp";
     public const string UriScheme = "hitcam";
@@ -28,9 +31,15 @@ public sealed record Hello(
     string? AppVersion = null,
     string? Token = null);
 
-public sealed record HelloAck(int ProtocolVersion, string Status, string ServerName, string ServerId);
+/// <param name="PinCommit">v2 pairingRequired: the PCs PIN commitment, hex (see PinProof).</param>
+public sealed record HelloAck(int ProtocolVersion, string Status, string ServerName, string ServerId, string? PinCommit = null);
 
-public sealed record PairRequest(string Pin);
+/// <param name="Pin">v1: the PIN as typed.</param>
+/// <param name="Commit">v2: the phones PIN commitment, hex (see PinProof).</param>
+public sealed record PairRequest(string? Pin = null, string? Commit = null);
+
+/// <summary>v2 pairing, both ways: the nonce that opens a PIN commitment, hex.</summary>
+public sealed record PairNonce(string Nonce);
 
 // Token is omitted from the JSON when null, so readers must treat it as optional.
 public sealed record PairResult(bool Ok, string? Token = null, int AttemptsLeft = 0);
@@ -180,6 +189,7 @@ public sealed record Bye(string? Reason = null);
 [JsonSerializable(typeof(HelloAck))]
 [JsonSerializable(typeof(PairRequest))]
 [JsonSerializable(typeof(PairResult))]
+[JsonSerializable(typeof(PairNonce))]
 [JsonSerializable(typeof(StreamConfig))]
 [JsonSerializable(typeof(Capabilities))]
 [JsonSerializable(typeof(CameraState))]

@@ -1,12 +1,16 @@
 // Development tool: pretends to be the phone app so the PC side can be tested without a phone.
-// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30] [--video file.h264 --size 1280x720] [--fps 30]
+// Usage: HitCam.FakePhone [host] [port] [--pin 123456 | --pin-file path] [--seconds 30] [--video file.h264 --size 1280x720] [--fps 30] [--plain]
 // Frames are dummy (not decodable) H.264-shaped access units at 30 fps, ~8 Mbit/s, or with --video a real H.264
 // Annex B stream played in a loop: each access unit must start with an access unit delimiter (x264: aud=1) and the
 // stream with an IDR frame.
+// Protocol v2 over TLS like the 0.3.1 apps (the PC's fingerprint is pinned on pairing); --plain is an old app (v1).
 
 using System.Diagnostics;
+using System.Net.Security;
 using System.Net.Sockets;
+using System.Security.Cryptography;
 using HitCam.Core.Protocol;
+using HitCam.Core.Security;
 
 var host = args.FirstOrDefault(a => !a.StartsWith("--")) ?? "127.0.0.1";
 var port = args.Where(a => !a.StartsWith("--")).Skip(1).Select(int.Parse).FirstOrDefault(ProtocolInfo.DefaultPort);
@@ -15,44 +19,72 @@ var seconds = int.Parse(Option("--seconds") ?? "30");
 var video = Option("--video") is { } videoPath ? SplitAccessUnits(File.ReadAllBytes(videoPath)) : null;
 var size = (Option("--size") ?? "1920x1080").Split('x').Select(int.Parse).ToArray();
 var fps = int.Parse(Option("--fps") ?? "30");
-var tokenFile = Path.Combine(Path.GetTempPath(), "hitcam-fakephone.token");
+var plain = args.Contains("--plain");
+// "token" (v1) or "fingerprint token" (v2): a token is only sent to the certificate it was issued behind.
+var tokenFile = Path.Combine(Path.GetTempPath(), plain ? "hitcam-fakephone.token" : "hitcam-fakephone-v2.token");
 const string deviceId = "fake-phone-0001";
 
 var clock = Stopwatch.StartNew();
 ulong Now() => (ulong)(clock.Elapsed.Ticks / 10);
 
+var saved = File.Exists(tokenFile) ? File.ReadAllText(tokenFile).Trim().Split(' ') : [];
+var pinned = !plain && saved.Length == 2 ? Convert.FromHexString(saved[0]) : null;
+
 using var tcp = new TcpClient { NoDelay = true };
 await tcp.ConnectAsync(host, port);
-await using var stream = new MessageStream(tcp.GetStream());
-Console.WriteLine($"Connected to {host}:{port}");
+Stream transport = tcp.GetStream();
+byte[]? seen = null;
+if (!plain)
+{
+    var tls = new SslStream(transport, false, (_, certificate, _, _) =>
+    {
+        seen = certificate is null ? null : ServerIdentity.FingerprintOf(certificate);
+        // Paired: exactly that PC. Not yet: any, the PIN commitments check it.
+        return seen is not null && (pinned is null || CryptographicOperations.FixedTimeEquals(seen, pinned));
+    });
+    await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions { TargetHost = "hitcam" });
+    transport = tls;
+}
+await using var stream = new MessageStream(transport);
+Console.WriteLine($"Connected to {host}:{port}{(plain ? " (plain v1)" : " (TLS)")}");
 
-var token = File.Exists(tokenFile) ? File.ReadAllText(tokenFile).Trim() : null;
+string? token = plain ? saved.FirstOrDefault() : pinned is null ? null : saved[1];
+var version = plain ? ProtocolInfo.LegacyVersion : ProtocolInfo.Version;
 await stream.WriteAsync(Message.Json(MessageType.Hello,
-    new Hello(ProtocolInfo.Version, deviceId, "Fake iPhone", "FakePhone1,1", "0.1.0", token), ProtocolJson.Default.Hello, Now()));
+    new Hello(version, deviceId, "Fake iPhone", "FakePhone1,1", "0.3.1", token), ProtocolJson.Default.Hello, Now()));
 
 var ack = (await ReadAsync(MessageType.HelloAck)).ReadJson(ProtocolJson.Default.HelloAck);
 Console.WriteLine($"HelloAck: {ack.Status} from {ack.ServerName}");
 
-if (ack.Status == HelloStatus.PairingRequired)
+if (ack.Status == HelloStatus.PairingRequired && !plain)
+{
+    var pin = ReadPin();
+    var nonce = PinProof.NewNonce();
+    var commit = PinProof.Commit(PinProof.PhoneLabel, seen!, pin, nonce);
+    await stream.WriteAsync(Message.Json(MessageType.PairRequest, new PairRequest(Commit: Convert.ToHexStringLower(commit)), ProtocolJson.Default.PairRequest, Now()));
+    var reveal = (await ReadAsync(MessageType.PairReveal)).ReadJson(ProtocolJson.Default.PairNonce);
+    var expected = PinProof.Commit(PinProof.PcLabel, seen!, pin, Convert.FromHexString(reveal.Nonce));
+    if (Convert.ToHexStringLower(expected) != ack.PinCommit)
+    {
+        Console.WriteLine("The PC's PIN commitment does not match: wrong PIN, or someone in between.");
+        return 1;
+    }
+    await stream.WriteAsync(Message.Json(MessageType.PairConfirm, new PairNonce(Convert.ToHexStringLower(nonce)), ProtocolJson.Default.PairNonce, Now()));
+    var result = (await ReadAsync(MessageType.PairResult)).ReadJson(ProtocolJson.Default.PairResult);
+    if (!result.Ok)
+    {
+        Console.WriteLine($"Pairing refused, {result.AttemptsLeft} attempts left.");
+        return 1;
+    }
+    File.WriteAllText(tokenFile, $"{Convert.ToHexStringLower(seen!)} {result.Token}");
+    Console.WriteLine("Paired.");
+}
+else if (ack.Status == HelloStatus.PairingRequired)
 {
     while (true)
     {
-        var pin = pinArg;
-        if (pin is null && Option("--pin-file") is { } pinFile)
-        {
-            Console.WriteLine($"Waiting for the PIN in {pinFile}...");
-            while (!File.Exists(pinFile))
-                await Task.Delay(200);
-            pin = File.ReadAllText(pinFile).Trim();
-            File.Delete(pinFile);
-        }
-        else if (pin is null)
-        {
-            Console.Write("PIN shown on the PC: ");
-            pin = Console.ReadLine()?.Trim();
-        }
-        pinArg = null;
-        await stream.WriteAsync(Message.Json(MessageType.PairRequest, new PairRequest(pin ?? ""), ProtocolJson.Default.PairRequest, Now()));
+        var pin = ReadPin();
+        await stream.WriteAsync(Message.Json(MessageType.PairRequest, new PairRequest(pin), ProtocolJson.Default.PairRequest, Now()));
         var result = (await ReadAsync(MessageType.PairResult)).ReadJson(ProtocolJson.Default.PairResult);
         if (result.Ok)
         {
@@ -69,7 +101,6 @@ else if (ack.Status != HelloStatus.Accepted)
 {
     return 1;
 }
-
 await stream.WriteAsync(Message.Json(MessageType.StreamConfig, new StreamConfig("h264", size[0], size[1], fps, 8000), ProtocolJson.Default.StreamConfig, Now()));
 await stream.WriteAsync(Message.Json(MessageType.Status, new Status(0.8, true, "nominal", fps, 8000, 0), ProtocolJson.Default.Status, Now()));
 
@@ -216,4 +247,24 @@ static CameraState Apply(CameraState state, Control control)
         Stabilization = control.Stabilization ?? state.Stabilization,
     };
     return next.CameraId != state.CameraId ? next with { Zoom = 1, Torch = false, FocusMode = "continuous" } : next;
+}
+
+string ReadPin()
+{
+    var pin = pinArg;
+    pinArg = null;
+    if (pin is null && Option("--pin-file") is { } pinFile)
+    {
+        Console.WriteLine($"Waiting for the PIN in {pinFile}...");
+        while (!File.Exists(pinFile))
+            Thread.Sleep(200);
+        pin = File.ReadAllText(pinFile).Trim();
+        File.Delete(pinFile);
+    }
+    else if (pin is null)
+    {
+        Console.Write("PIN shown on the PC: ");
+        pin = Console.ReadLine()?.Trim();
+    }
+    return pin is { Length: 6 } ? pin : "000000";
 }
