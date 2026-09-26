@@ -34,7 +34,8 @@
     <string name="version_mismatch">HitCam versions on the PC and the phone don\'t match</string>
     <string name="protocol_error">Unexpected response from the PC</string>
     <string name="other_pc">This is a different PC: scan its QR code again</string>
-    <string name="key_mismatch">The PC\'s key is not the saved one: HitCam was reinstalled there, or someone is intercepting the connection. Scan the QR code on the PC again</string>
+    <string name="key_mismatch">The PC\'s key is not the saved one: HitCam was reinstalled there, it is another PC, or someone is intercepting the connection. Scan the QR code on the PC or, if you are sure it is yours, pair it again</string>
+    <string name="forget_pc">Forget this PC and pair again</string>
     <string name="secure_failed">Could not set up a secure connection. Update HitCam on the PC to 0.3.1 or later</string>
     <string name="closed_by_pc">The PC closed the connection</string>
     <string name="connection_closed">Connection closed</string>

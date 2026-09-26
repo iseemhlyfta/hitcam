@@ -20,6 +20,10 @@ struct ConnectView: View {
                 connectCard
                 if let message = inputError ?? error ?? (cameraDenied ? L10n.cameraDenied : nil) {
                     NoticeBox(text: message)
+                    if inputError == nil, error == L10n.keyMismatch {
+                        Button(L10n.forgetPc) { session.forgetAndPairAgain() }
+                            .buttonStyle(SecondaryButtonStyle())
+                    }
                 }
                 foundCard
                 recentCard

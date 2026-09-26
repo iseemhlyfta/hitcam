@@ -42,6 +42,9 @@ interface SessionEnvironment {
     fun removeToken(key: String)
 
     fun remember(server: ServerAddress)
+
+    /** Drops the recent entry for this host and port. */
+    fun forget(server: ServerAddress)
     var cameraState: CameraState?
 
     /** Battery level 0…1 and whether it is charging. */

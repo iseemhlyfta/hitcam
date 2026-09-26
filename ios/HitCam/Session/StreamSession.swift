@@ -54,7 +54,8 @@ final class StreamSession: ObservableObject {
     enum Phase: Equatable {
         case idle
         case connecting(ServerAddress)
-        case pairing(ServerAddress, attemptsLeft: Int, wrongPin: Bool)
+        /// `window` tells pairing windows apart, so the PIN screen starts over even when nothing else changed.
+        case pairing(ServerAddress, attemptsLeft: Int, wrongPin: Bool, window: Int)
         case streaming(ServerAddress, serverName: String)
         case reconnecting(ServerAddress)
         case failed(String)
@@ -91,6 +92,9 @@ final class StreamSession: ObservableObject {
     private var attemptsLeft = 5
     // PairConfirm went out on this connection: only then may a PairResult be believed.
     private var pinConfirmed = false
+    private var pairingWindow = 0
+    // Armed while a Hello, PairRequest or PairConfirm waits for its answer (not while the user types the PIN).
+    private var replyWork: DispatchWorkItem?
     // New connections after a mismatch that found the PC still busy closing the previous one.
     private var busyRetries = 0
 
@@ -158,6 +162,25 @@ final class StreamSession: ObservableObject {
             self.pinNonce = nonce
             let commit = PinProof.commit(label: PinProof.phoneLabel, fingerprint: seen, pin: pin, nonce: nonce)
             connection.send(.pairRequest, json: PairRequest(pin: nil, commit: commit.hex))
+            self.expectReply()
+        }
+    }
+
+    /// After "the PC's key is not the saved one", on the user's word (HitCam reinstalled on that PC, another PC at that
+    /// address): forget the pairing and the pinned certificate there, and pair again with the PIN, which proves the PC
+    /// anew.
+    func forgetAndPairAgain() {
+        queue.async {
+            guard let old = self.address else { return }
+            for key in self.tokenKeys() { TokenStore.remove(for: key) }
+            LocalStore.forget(old)
+            self.userStopped = false
+            self.address = ServerAddress(host: old.host, port: old.port, serverId: nil, name: nil)
+            self.claimedServerId = nil
+            self.pinRejected = false
+            self.attemptsLeft = 5
+            self.busyRetries = 0
+            self.openConnection(reconnecting: false)
         }
     }
 
@@ -269,12 +292,33 @@ final class StreamSession: ObservableObject {
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
             token: token)
         connection?.send(.hello, json: hello)
+        expectReply()
+    }
+
+    /// The PC must answer within 10 s; one that accepted TLS but hangs would otherwise keep the phone waiting. Handled
+    /// like a dropped connection.
+    private func expectReply() {
+        replyWork?.cancel()
+        let id = connectionId
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.connectionId == id else { return }
+            self.replyWork = nil
+            self.connection?.cancel()
+        }
+        replyWork = work
+        queue.asyncAfter(deadline: .now() + 10, execute: work)
+    }
+
+    private func cancelReply() {
+        replyWork?.cancel()
+        replyWork = nil
     }
 
     private func handleMessage(_ header: MessageHeader, _ payload: Data) {
         let decoder = JSONDecoder()
         switch header.type {
         case .helloAck:
+            cancelReply()
             guard let ack = try? decoder.decode(HelloAck.self, from: payload) else { return fail(L10n.protocolError) }
             if let expected = address?.serverId ?? claimedServerId, expected != ack.serverId {
                 // The QR code, an earlier session or the previous connection named another PC: stop here and send nothing more.
@@ -294,14 +338,23 @@ final class StreamSession: ObservableObject {
                 pinCommit = commit
                 let wrong = pinRejected
                 pinRejected = false
-                if let address { setPhase(.pairing(address, attemptsLeft: attemptsLeft, wrongPin: wrong)) }
+                busyRetries = 0
+                pairingWindow += 1
+                if let address { setPhase(.pairing(address, attemptsLeft: attemptsLeft, wrongPin: wrong, window: pairingWindow)) }
             case HelloStatus.busy:
                 if pinRejected, busyRetries < 5 {
                     // The PC is still closing the connection whose PIN did not match: try again shortly.
                     busyRetries += 1
                     connectionId = nil
                     teardown()
-                    scheduleReconnect()
+                    // Not the streaming reconnect loop: if this attempt fails, it fails.
+                    let work = DispatchWorkItem { [weak self] in
+                        guard let self, !self.userStopped else { return }
+                        self.reconnectWork = nil
+                        self.openConnection(reconnecting: false)
+                    }
+                    reconnectWork = work
+                    queue.asyncAfter(deadline: .now() + 0.5, execute: work)
                 } else {
                     fail(L10n.busy)
                 }
@@ -311,6 +364,7 @@ final class StreamSession: ObservableObject {
                 fail(L10n.versionMismatch)
             }
         case .pairReveal:
+            cancelReply()
             guard case .pairing = currentPhase, let pin = typedPin, let nonce = pinNonce, let commit = pinCommit,
                   let seen = connection?.seenFingerprint else { return }
             guard let theirs = (try? decoder.decode(PairNonce.self, from: payload)).flatMap({ Data(hex: $0.nonce, size: PinProof.nonceSize) }) else {
@@ -325,7 +379,9 @@ final class StreamSession: ObservableObject {
             }
             connection?.send(.pairConfirm, json: PairNonce(nonce: nonce.hex))
             pinConfirmed = true
+            expectReply()
         case .pairResult:
+            cancelReply()
             // Only after the PC proved the PIN it showed and we opened ours: a result before that is not from the PC.
             guard pinConfirmed else { return fail(L10n.protocolError) }
             guard case .pairing = currentPhase,
@@ -547,6 +603,7 @@ final class StreamSession: ObservableObject {
 
     private func teardown() {
         isStreamingFlag = false
+        cancelReply()
         reconnectWork?.cancel()
         reconnectWork = nil
         stopTimers()

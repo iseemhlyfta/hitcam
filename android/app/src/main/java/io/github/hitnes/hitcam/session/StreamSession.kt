@@ -57,7 +57,8 @@ sealed interface SessionError {
 sealed interface Phase {
     data object Idle : Phase
     data class Connecting(val address: ServerAddress) : Phase
-    data class Pairing(val address: ServerAddress, val attemptsLeft: Int, val wrongPin: Boolean) : Phase
+    /** [window] tells pairing windows apart, so the PIN screen starts over even when nothing else changed. */
+    data class Pairing(val address: ServerAddress, val attemptsLeft: Int, val wrongPin: Boolean, val window: Int = 0) : Phase
     data class Streaming(val address: ServerAddress, val serverName: String) : Phase
     data class Reconnecting(val address: ServerAddress) : Phase
     data class Failed(val error: SessionError) : Phase
@@ -166,6 +167,23 @@ class StreamSession(
         val commit = PinProof.commit(PinProof.PHONE_LABEL, seen, pin, nonce)
         connection.send(MessageType.PairRequest, PairRequest.serializer(), PairRequest(commit = commit.toHex()))
         expectReply()
+    }
+
+    /**
+     * After "the PC's key is not the saved one", on the user's word (HitCam reinstalled on that PC, another PC at that
+     * address or on the USB cable): forget the pairing and the pinned certificate there, and pair again with the PIN,
+     * which proves the PC anew.
+     */
+    fun forgetAndPairAgain() = queue.execute {
+        val old = address ?: return@execute
+        tokenKeys().forEach { environment.removeToken(it) }
+        environment.forget(old)
+        userStopped = false
+        address = ServerAddress(old.host, old.port)
+        pinRejected = false
+        attemptsLeft = 5
+        busyRetries = 0
+        openConnection(reconnecting = false)
     }
 
     fun disconnect() = queue.execute {
@@ -339,14 +357,19 @@ class StreamSession(
                         pinCommit = ack.pinCommit?.hexBytes(32) ?: return fail(SessionError.ProtocolError)
                         val wrong = pinRejected
                         pinRejected = false
-                        address?.let { setPhase(Phase.Pairing(it, attemptsLeft, wrongPin = wrong)) }
+                        busyRetries = 0
+                        address?.let { setPhase(Phase.Pairing(it, attemptsLeft, wrongPin = wrong, window = connectionId)) }
                     }
                     HelloStatus.BUSY -> if (pinRejected && busyRetries < 5) {
                         // The PC is still closing the connection whose PIN did not match: try again shortly.
                         busyRetries++
                         connectionId++
                         teardown()
-                        scheduleReconnect()
+                        // Not the streaming reconnect loop: if this attempt fails, it fails.
+                        reconnect = queue.schedule({
+                            reconnect = null
+                            if (!userStopped) openConnection(reconnecting = false)
+                        }, 500, TimeUnit.MILLISECONDS)
                     } else {
                         fail(SessionError.Busy)
                     }

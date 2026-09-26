@@ -108,6 +108,10 @@ class LocalStore(context: Context) {
                 .apply()
         }
 
+    fun forget(server: ServerAddress) {
+        recentServers = recentServers.filter { it.host != server.host || it.port != server.port }
+    }
+
     /** [server] must carry only a trusted serverId (see [recentServers]). */
     fun remember(server: ServerAddress) {
         recentServers = listOf(server) + recentServers.filter { it.host != server.host || it.port != server.port }

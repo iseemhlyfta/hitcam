@@ -29,8 +29,8 @@ struct RootView: View {
             ProgressScreen(title: L10n.connecting, subtitle: address.display)
         case .reconnecting(let address):
             ProgressScreen(title: L10n.reconnecting, subtitle: address.display)
-        case .pairing(let address, let attemptsLeft, let wrongPin):
-            PinView(serverName: address.name ?? address.display, attemptsLeft: attemptsLeft, wrongPin: wrongPin)
+        case .pairing(let address, let attemptsLeft, let wrongPin, let window):
+            PinView(serverName: address.name ?? address.display, attemptsLeft: attemptsLeft, wrongPin: wrongPin, window: window)
         case .streaming(_, let serverName):
             StreamingView(serverName: serverName)
         }

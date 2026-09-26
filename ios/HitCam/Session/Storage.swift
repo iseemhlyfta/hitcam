@@ -72,6 +72,10 @@ enum LocalStore {
         }
     }
 
+    static func forget(_ server: ServerAddress) {
+        recentServers = recentServers.filter { $0.host != server.host || $0.port != server.port }
+    }
+
     static func remember(_ server: ServerAddress) {
         var list = recentServers.filter { $0.host != server.host || $0.port != server.port }
         list.insert(server, at: 0)

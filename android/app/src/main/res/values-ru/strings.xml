@@ -34,7 +34,8 @@
     <string name="version_mismatch">Версии HitCam на ПК и телефоне несовместимы</string>
     <string name="protocol_error">ПК ответил что-то непонятное</string>
     <string name="other_pc">Это другой компьютер: отсканируйте его QR-код заново</string>
-    <string name="key_mismatch">Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен или кто-то подменяет соединение. Отсканируйте QR-код на ПК заново</string>
+    <string name="key_mismatch">Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен, это другой ПК или кто-то подменяет соединение. Отсканируйте QR-код на ПК или, если уверены, что это ваш ПК, сопрягите его заново</string>
+    <string name="forget_pc">Забыть этот ПК и сопрячь заново</string>
     <string name="secure_failed">Не удалось установить защищённое соединение. Обновите HitCam на ПК до версии 0.3.1 или новее</string>
     <string name="closed_by_pc">ПК завершил соединение</string>
     <string name="connection_closed">Соединение закрыто</string>

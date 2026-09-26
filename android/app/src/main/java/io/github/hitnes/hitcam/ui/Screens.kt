@@ -111,7 +111,7 @@ fun Root(app: HitCamApp, phase: Phase) {
             is Phase.Failed -> ConnectScreen(app, phase.error)
             is Phase.Connecting -> ProgressScreen(app, stringResource(R.string.connecting), phase.address.display)
             is Phase.Reconnecting -> ProgressScreen(app, stringResource(R.string.reconnecting), phase.address.display)
-            is Phase.Pairing -> PinScreen(app, phase.address.name ?: phase.address.display, phase.attemptsLeft, phase.wrongPin)
+            is Phase.Pairing -> PinScreen(app, phase.address.name ?: phase.address.display, phase.attemptsLeft, phase.wrongPin, phase.window)
             is Phase.Streaming -> StreamingScreen(app, phase.serverName)
         }
     }
@@ -243,8 +243,8 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
             // Over the cable: the PC runs `adb reverse`, so it is at this phone's own loopback address.
             TextButton(
                 onClick = {
-                    val usb = ServerAddress("127.0.0.1", ProtocolInfo.DEFAULT_PORT)
-                    start(recent.firstOrNull { it.host == usb.host && it.port == usb.port } ?: usb)
+                    // Whichever PC is on the cable: its pairing (if any) is found by host and port.
+                    start(ServerAddress("127.0.0.1", ProtocolInfo.DEFAULT_PORT))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) {
@@ -263,6 +263,9 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
             if (message != null) {
                 Spacer(Modifier.height(16.dp))
                 Text(message, color = MaterialTheme.colorScheme.error)
+                if (error == SessionError.KeyMismatch && inputError == null) {
+                    TextButton(onClick = { app.session.forgetAndPairAgain() }) { Text(stringResource(R.string.forget_pc)) }
+                }
                 if (cameraDenied) {
                     TextButton(onClick = {
                         context.startActivity(
@@ -340,13 +343,13 @@ private fun ProgressScreen(app: HitCamApp, title: String, subtitle: String) {
 }
 
 @Composable
-private fun PinScreen(app: HitCamApp, serverName: String, attemptsLeft: Int, wrongPin: Boolean) {
+private fun PinScreen(app: HitCamApp, serverName: String, attemptsLeft: Int, wrongPin: Boolean, window: Int) {
     var pin by remember { mutableStateOf("") }
     // Set once a PIN is sent; cleared when the PC answers, so one PIN never costs two attempts.
     var awaitingResult by remember { mutableStateOf(false) }
     val focus = remember { FocusRequester() }
 
-    LaunchedEffect(attemptsLeft, wrongPin) {
+    LaunchedEffect(attemptsLeft, wrongPin, window) {
         pin = ""
         awaitingResult = false
     }

@@ -245,6 +245,27 @@ class StreamSessionTest {
     }
 
     @Test
+    fun forgettingAPcWhoseKeyChangedPairsItAgainWithThePin() {
+        // Paired over USB with one PC, now another one (or HitCam reinstalled) is on the cable.
+        environment.tokens["pc-1"] = stored("secret")
+        environment.tokens[hostKey] = stored("secret")
+        presented = ByteArray(32) { 9 }
+        session.connect(address.copy(serverId = "pc-1", fingerprint = PC_FINGERPRINT.toHex()))
+        server.accept().close()
+        waitFor { session.phase.value == Phase.Failed(SessionError.KeyMismatch) }
+
+        session.forgetAndPairAgain()
+        val pc = FakePc(server.accept())
+        // Nothing pinned, nothing sent: the new PC proves itself with its PIN.
+        assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
+        assertTrue(environment.tokens.isEmpty())
+        assertEquals(hostKey, environment.forgotten.single().let { "${it.host}:${it.port}" })
+        pc.offerPairing("123456", fingerprint = presented, id = "pc-2")
+        waitFor { session.phase.value is Phase.Pairing }
+        pc.close()
+    }
+
+    @Test
     fun theFingerprintFromTheQrCodeIsInsistedOn() {
         session.connect(address.copy(serverId = "pc-1", fingerprint = ByteArray(32) { 5 }.toHex()))
         server.accept().use {
@@ -524,6 +545,10 @@ class StreamSessionTest {
         }
         override fun remember(server: ServerAddress) {
             remembered += server
+        }
+        val forgotten = java.util.concurrent.CopyOnWriteArrayList<ServerAddress>()
+        override fun forget(server: ServerAddress) {
+            forgotten += server
         }
         @Volatile override var cameraState: CameraState? = null
         override fun battery() = 0.5 to false

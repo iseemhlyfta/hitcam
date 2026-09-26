@@ -5,6 +5,7 @@ struct PinView: View {
     let serverName: String
     let attemptsLeft: Int
     let wrongPin: Bool
+    let window: Int
 
     @State private var pin = ""
     /// Set once a PIN is sent; cleared when the PC answers, so one PIN never costs two attempts.
@@ -53,7 +54,15 @@ struct PinView: View {
             pin = ""
             awaitingResult = false
         }
-        .onChange(of: wrongPin) { _, _ in awaitingResult = false }
+        .onChange(of: wrongPin) { _, _ in
+            pin = ""
+            awaitingResult = false
+        }
+        // A new pairing window (a new PIN on the PC): start over even if nothing else changed.
+        .onChange(of: window) { _, _ in
+            pin = ""
+            awaitingResult = false
+        }
     }
 
     /// Six boxes like the PC shows; a hidden field takes the typing (and the one-time-code suggestion).

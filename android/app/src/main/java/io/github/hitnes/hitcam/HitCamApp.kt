@@ -44,6 +44,8 @@ private class AndroidEnvironment(private val context: Context, private val store
     override fun removeToken(key: String) = tokens.remove(key)
     override fun remember(server: ServerAddress) = store.remember(server)
 
+    override fun forget(server: ServerAddress) = store.forget(server)
+
     override var cameraState: CameraState?
         get() = store.cameraState
         set(value) {

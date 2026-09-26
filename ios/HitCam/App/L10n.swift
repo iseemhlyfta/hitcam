@@ -44,9 +44,10 @@ enum L10n {
         ru ? "Это другой компьютер: отсканируйте его QR-код заново" : "This is a different PC: scan its QR code again"
     }
     static var keyMismatch: String {
-        ru ? "Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен или кто-то подменяет соединение. Отсканируйте QR-код на ПК заново"
-           : "The PC's key is not the saved one: HitCam was reinstalled there, or someone is intercepting the connection. Scan the QR code on the PC again"
+        ru ? "Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен, это другой ПК или кто-то подменяет соединение. Отсканируйте QR-код на ПК или, если уверены, что это ваш ПК, сопрягите его заново"
+           : "The PC's key is not the saved one: HitCam was reinstalled there, it is another PC, or someone is intercepting the connection. Scan the QR code on the PC or, if you are sure it is yours, pair it again"
     }
+    static var forgetPc: String { ru ? "Забыть этот ПК и сопрячь заново" : "Forget this PC and pair again" }
     static var secureFailed: String {
         ru ? "Не удалось установить защищённое соединение. Обновите HitCam на ПК до версии 0.3.1 или новее"
            : "Could not set up a secure connection. Update HitCam on the PC to 0.3.1 or later"
