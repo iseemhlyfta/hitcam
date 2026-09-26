@@ -12,7 +12,7 @@
     <string name="reconnecting">Связь потеряна, переподключаюсь…</string>
     <string name="cancel">Отмена</string>
     <string name="enter_pin">Введите PIN с экрана ПК</string>
-    <string name="wrong_pin">Неверный PIN, осталось попыток: %1$d</string>
+    <string name="wrong_pin">Код не подошёл. Введите новый код с экрана ПК (осталось попыток: %1$d)</string>
     <string name="pair">Сопрячь</string>
     <string name="disconnect">Отключить</string>
     <string name="dim">Затемнить</string>
@@ -32,6 +32,8 @@
     <string name="version_mismatch">Версии HitCam на ПК и телефоне несовместимы</string>
     <string name="protocol_error">ПК ответил что-то непонятное</string>
     <string name="other_pc">Это другой компьютер: отсканируйте его QR-код заново</string>
+    <string name="key_mismatch">Ключ ПК не совпадает с сохранённым: HitCam на ПК переустановлен или кто-то подменяет соединение. Отсканируйте QR-код на ПК заново</string>
+    <string name="secure_failed">Не удалось установить защищённое соединение. Обновите HitCam на ПК до версии 0.3.1 или новее</string>
     <string name="closed_by_pc">ПК завершил соединение</string>
     <string name="connection_closed">Соединение закрыто</string>
     <string name="connection_failed">Не удалось подключиться: %1$s. Проверьте, что ПК и телефон в одной Wi-Fi сети и HitCam на ПК запущен.</string>

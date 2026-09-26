@@ -2,7 +2,13 @@ package io.github.hitnes.hitcam.session
 
 import io.github.hitnes.hitcam.camera.CameraRules
 import io.github.hitnes.hitcam.camera.OutputSize
+import io.github.hitnes.hitcam.net.FingerprintMismatchException
 import io.github.hitnes.hitcam.net.FramedConnection
+import io.github.hitnes.hitcam.net.PinProof
+import io.github.hitnes.hitcam.net.SocketSecurity
+import io.github.hitnes.hitcam.net.TlsSecurity
+import io.github.hitnes.hitcam.net.hexBytes
+import io.github.hitnes.hitcam.net.toHex
 import io.github.hitnes.hitcam.protocol.Bye
 import io.github.hitnes.hitcam.protocol.CameraState
 import io.github.hitnes.hitcam.protocol.Capabilities
@@ -14,6 +20,7 @@ import io.github.hitnes.hitcam.protocol.HelloStatus
 import io.github.hitnes.hitcam.protocol.MessageFlags
 import io.github.hitnes.hitcam.protocol.MessageHeader
 import io.github.hitnes.hitcam.protocol.MessageType
+import io.github.hitnes.hitcam.protocol.PairNonce
 import io.github.hitnes.hitcam.protocol.PairRequest
 import io.github.hitnes.hitcam.protocol.PairResult
 import io.github.hitnes.hitcam.protocol.ProtocolInfo
@@ -25,6 +32,7 @@ import io.github.hitnes.hitcam.video.EncodedFrame
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.security.MessageDigest
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledFuture
 import java.util.concurrent.TimeUnit
@@ -39,6 +47,10 @@ sealed interface SessionError {
     data object PairingLocked : SessionError
     data object VersionMismatch : SessionError
     data object ClosedByPc : SessionError
+    /** The PC presented another certificate than the one pinned for it: reinstalled, or someone in between. */
+    data object KeyMismatch : SessionError
+    /** No TLS with the PC: most likely HitCam 0.3.0 or older there. */
+    data object SecureFailed : SessionError
     data class CameraFailed(val reason: String) : SessionError
 }
 
@@ -61,6 +73,7 @@ class StreamSession(
     private val reconnectDelayMs: Long = 2_000,
     /** How long to wait for the PC to answer Hello or a PIN before giving up on the connection. */
     private val replyTimeoutMs: Long = 10_000,
+    private val security: SocketSecurity = TlsSecurity,
 ) {
     private val queue = Executors.newSingleThreadScheduledExecutor { Thread(it, "hitcam-session") }
 
@@ -93,6 +106,13 @@ class StreamSession(
     private var cameraPaused = false
     private var needKeyframe = true
     private var sentToken: String? = null
+    // v2 pairing (see PinProof): the PC's commitment from HelloAck, what the user typed and our nonce.
+    private var pinCommit: ByteArray? = null
+    private var typedPin: String? = null
+    private var pinNonce: ByteArray? = null
+    // The last PIN did not match: the next pairing window says so. Attempts as the PC last reported them.
+    private var pinRejected = false
+    private var attemptsLeft = 5
     private var serverName = ""
     private var state: CameraState
     private var outputSize: OutputSize
@@ -128,10 +148,16 @@ class StreamSession(
         openConnection(reconnecting = false)
     }
 
+    /** v2: the PIN itself never leaves the phone, only a commitment to it and the certificate seen (see PinProof). */
     fun submitPin(pin: String) = queue.execute {
-        if (_phase.value !is Phase.Pairing) return@execute
+        if (_phase.value !is Phase.Pairing || pin.length != 6 || typedPin != null) return@execute
         val connection = connection ?: return@execute
-        connection.send(MessageType.PairRequest, PairRequest.serializer(), PairRequest(pin))
+        val seen = connection.seenFingerprint ?: return@execute
+        val nonce = PinProof.newNonce()
+        typedPin = pin
+        pinNonce = nonce
+        val commit = PinProof.commit(PinProof.PHONE_LABEL, seen, pin, nonce)
+        connection.send(MessageType.PairRequest, PairRequest.serializer(), PairRequest(commit = commit.toHex()))
         expectReply()
     }
 
@@ -180,7 +206,12 @@ class StreamSession(
         // Events from an older, cancelled connection must not tear down this one.
         val id = ++connectionId
         claimedServerId = null
-        val connection = FramedConnection(address.host, address.port, queue) { event ->
+        pinCommit = null
+        typedPin = null
+        pinNonce = null
+        // The certificate to insist on: from the QR code, or the one an earlier pairing was made behind.
+        val expected = (address.fingerprint ?: storedPairings().firstOrNull()?.fingerprint)?.hexBytes(32)
+        val connection = FramedConnection(address.host, address.port, queue, security, expected) { event ->
             if (connectionId == id) handle(event)
         }
         this.connection = connection
@@ -198,6 +229,7 @@ class StreamSession(
                 handleMessage(event.header, event.payload)
             }
             is FramedConnection.Event.Closed -> {
+                if (event.error is FingerprintMismatchException) return fail(SessionError.KeyMismatch)
                 val wasStreaming = _phase.value is Phase.Streaming
                 connectionId++
                 teardown()
@@ -212,6 +244,7 @@ class StreamSession(
                     }
                     phase is Phase.Reconnecting -> scheduleReconnect()
                     phase is Phase.Failed -> Unit // Keep the more specific message from the handshake.
+                    event.error is javax.net.ssl.SSLException -> fail(SessionError.SecureFailed)
                     else -> fail(event.error?.let { SessionError.ConnectionFailed(it.message ?: it.javaClass.simpleName) } ?: SessionError.ConnectionClosed)
                 }
             }
@@ -233,8 +266,14 @@ class StreamSession(
         return listOfNotNull(address.serverId, "${address.host}:${address.port}")
     }
 
+    /** Tokens stored for this PC that were issued over TLS (bare v1 tokens are never sent: that PC pairs again once). */
+    private fun storedPairings(): List<StoredPairing> =
+        tokenKeys().mapNotNull { key -> environment.token(key)?.let { StoredPairing.parse(it) } }
+
     private fun sendHello() {
-        val token = tokenKeys().firstNotNullOfOrNull { environment.token(it) }
+        // Only to the certificate the token was issued behind.
+        val seen = connection?.seenFingerprint?.toHex()
+        val token = storedPairings().firstOrNull { it.fingerprint == seen }?.token
         sentToken = token
         val hello = Hello(
             protocolVersion = ProtocolInfo.VERSION,
@@ -287,12 +326,32 @@ class StreamSession(
                     HelloStatus.ACCEPTED -> startStreaming(ack.serverName)
                     HelloStatus.PAIRING_REQUIRED -> {
                         forgetRejectedToken()
-                        address?.let { setPhase(Phase.Pairing(it, attemptsLeft = 5, wrongPin = false)) }
+                        pinCommit = ack.pinCommit?.hexBytes(32) ?: return fail(SessionError.ProtocolError)
+                        val wrong = pinRejected
+                        pinRejected = false
+                        address?.let { setPhase(Phase.Pairing(it, attemptsLeft, wrongPin = wrong)) }
                     }
                     HelloStatus.BUSY -> fail(SessionError.Busy)
                     HelloStatus.PAIRING_LOCKED -> fail(SessionError.PairingLocked)
                     else -> fail(SessionError.VersionMismatch)
                 }
+            }
+            MessageType.PairReveal -> {
+                if (_phase.value !is Phase.Pairing) return
+                cancelReplyDeadline()
+                val pin = typedPin ?: return
+                val nonce = pinNonce ?: return
+                val seen = connection?.seenFingerprint ?: return
+                val theirs = decode<PairNonce>(payload)?.nonce?.hexBytes(PinProof.NONCE_SIZE) ?: return fail(SessionError.ProtocolError)
+                val expected = PinProof.commit(PinProof.PC_LABEL, seen, pin, theirs)
+                if (!MessageDigest.isEqual(expected, pinCommit)) {
+                    // A mistyped PIN, or a certificate that is not the PC's (someone in between): our commitment
+                    // stays closed. The PC counts it as a wrong PIN and shows a new one on the next connection.
+                    attemptsLeft = (attemptsLeft - 1).coerceAtLeast(1)
+                    return retryPairing()
+                }
+                connection?.send(MessageType.PairConfirm, PairNonce.serializer(), PairNonce(nonce.toHex()))
+                expectReply()
             }
             MessageType.PairResult -> {
                 if (_phase.value !is Phase.Pairing) return
@@ -303,12 +362,16 @@ class StreamSession(
                 when {
                     result.ok && token != null -> {
                         // This PC proved itself by pairing: from now on its id is trusted (used for tokens, remembered).
-                        val paired = address.copy(serverId = address.serverId ?: claimedServerId)
+                        val seen = connection?.seenFingerprint?.toHex() ?: return fail(SessionError.ProtocolError)
+                        val paired = address.copy(serverId = address.serverId ?: claimedServerId, fingerprint = seen)
                         this.address = paired
-                        tokenKeys().forEach { environment.saveToken(token, it) }
+                        tokenKeys().forEach { environment.saveToken(StoredPairing(seen, token).encode(), it) }
                         startStreaming(paired.name ?: paired.host)
                     }
-                    result.attemptsLeft > 0 -> setPhase(Phase.Pairing(address, result.attemptsLeft, wrongPin = true))
+                    result.attemptsLeft > 0 -> {
+                        attemptsLeft = result.attemptsLeft
+                        retryPairing()
+                    }
                     else -> fail(SessionError.PairingLocked)
                 }
             }
@@ -324,6 +387,12 @@ class StreamSession(
         }
     }
 
+    /** The PIN is used up: a new connection gets a new pairing window (and a new PIN on the PC). */
+    private fun retryPairing() {
+        pinRejected = true
+        openConnection(reconnecting = false)
+    }
+
     private inline fun <reified T> decode(payload: ByteArray): T? =
         runCatching { ProtocolJson.decodeFromString<T>(payload.decodeToString()) }.getOrNull()
 
@@ -331,7 +400,7 @@ class StreamSession(
     private fun forgetRejectedToken() {
         val sent = sentToken ?: return
         sentToken = null
-        tokenKeys().filter { environment.token(it) == sent }.forEach { environment.removeToken(it) }
+        tokenKeys().filter { key -> environment.token(key)?.let { StoredPairing.parse(it)?.token } == sent }.forEach { environment.removeToken(it) }
     }
 
     // MARK: Streaming (queue)

@@ -7,10 +7,10 @@ import java.net.URLDecoder
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 
-// HitCam protocol v1. Keep in sync with docs/protocol.md, ios/HitCam/Protocol and windows/HitCam.Core/Protocol.
+// HitCam protocol v2 (over TLS). Keep in sync with docs/protocol.md, ios/HitCam/Protocol and windows/HitCam.Core/Protocol.
 
 object ProtocolInfo {
-    const val VERSION = 1
+    const val VERSION = 2
     const val DEFAULT_PORT = 47800
     const val URI_SCHEME = "hitcam"
     // DNS-SD service the PC announces on the local network.
@@ -22,6 +22,9 @@ enum class MessageType(val raw: Int) {
     HelloAck(0x02),
     PairRequest(0x03),
     PairResult(0x04),
+    // v2 pairing: the PC, then the phone, open their PIN commitments (see PinProof).
+    PairReveal(0x05),
+    PairConfirm(0x06),
     StreamConfig(0x10),
     VideoFrame(0x11),
     RequestKeyframe(0x12),
@@ -113,10 +116,26 @@ data class Hello(
 )
 
 @Serializable
-data class HelloAck(val protocolVersion: Int, val status: String, val serverName: String, val serverId: String)
+data class HelloAck(
+    val protocolVersion: Int,
+    val status: String,
+    val serverName: String,
+    val serverId: String,
+    // pairingRequired: the PC's PIN commitment, hex.
+    val pinCommit: String? = null,
+)
 
 @Serializable
-data class PairRequest(val pin: String)
+data class PairRequest(
+    // v1 only: in v2 the PIN never leaves the phone.
+    val pin: String? = null,
+    // v2: the phone's PIN commitment, hex.
+    val commit: String? = null,
+)
+
+/** PairReveal and PairConfirm: the nonce that opens a PIN commitment, hex. */
+@Serializable
+data class PairNonce(val nonce: String)
 
 @Serializable
 data class PairResult(val ok: Boolean, val token: String? = null, val attemptsLeft: Int)
@@ -212,9 +231,18 @@ data class DeviceStatus(
 @Serializable
 data class Bye(val reason: String? = null)
 
-/** Parsed `hitcam://host:port?id=…&name=…` from the QR code on the PC, or a typed "host[:port]". */
+/**
+ * Parsed `hitcam://host:port?id=…&name=…&fp=…` from the QR code on the PC, or a typed "host[:port]". [fingerprint] (of
+ * the PC's certificate, SHA-256 hex) is trusted like [serverId]: from the QR code or a completed pairing only.
+ */
 @Serializable
-data class ServerAddress(val host: String, val port: Int, val serverId: String? = null, val name: String? = null) {
+data class ServerAddress(
+    val host: String,
+    val port: Int,
+    val serverId: String? = null,
+    val name: String? = null,
+    val fingerprint: String? = null,
+) {
     val display: String get() = if (port == ProtocolInfo.DEFAULT_PORT) host else "$host:$port"
 
     companion object {
@@ -251,7 +279,10 @@ data class ServerAddress(val host: String, val port: Int, val serverId: String? 
                 val value = item.substringAfter("=", "")
                 decode(key) to decode(value)
             }
-            return ServerAddress(host.removeSurrounding("[", "]"), port, query["id"], query["name"])
+            // A QR code with a damaged fingerprint is not half trusted: the whole code is rejected.
+            val fingerprint = query["fp"]?.lowercase()
+            if (fingerprint != null && !FINGERPRINT.matches(fingerprint)) return null
+            return ServerAddress(host.removeSurrounding("[", "]"), port, query["id"], query["name"], fingerprint)
         }
 
         // java.net.URI leaves the port at -1 when it does not fit ("host:99999" parses as a registry authority).
@@ -259,5 +290,7 @@ data class ServerAddress(val host: String, val port: Int, val serverId: String? 
             authority != null && Regex(""":\d+$""").containsMatchIn(authority)
 
         private fun decode(value: String): String = URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+
+        private val FINGERPRINT = Regex("[0-9a-f]{64}")
     }
 }

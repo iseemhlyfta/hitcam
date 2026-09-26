@@ -4,6 +4,12 @@ import io.github.hitnes.hitcam.camera.CameraRules
 import io.github.hitnes.hitcam.camera.CameraSnapshot
 import io.github.hitnes.hitcam.camera.CameraUpdate
 import io.github.hitnes.hitcam.camera.OutputSize
+import io.github.hitnes.hitcam.net.FingerprintMismatchException
+import io.github.hitnes.hitcam.net.PinProof
+import io.github.hitnes.hitcam.net.SecuredSocket
+import io.github.hitnes.hitcam.net.SocketSecurity
+import io.github.hitnes.hitcam.net.hexBytes
+import io.github.hitnes.hitcam.net.toHex
 import io.github.hitnes.hitcam.protocol.CameraInfo
 import io.github.hitnes.hitcam.protocol.CameraState
 import io.github.hitnes.hitcam.protocol.Capabilities
@@ -12,6 +18,7 @@ import io.github.hitnes.hitcam.protocol.Hello
 import io.github.hitnes.hitcam.protocol.HelloAck
 import io.github.hitnes.hitcam.protocol.MessageHeader
 import io.github.hitnes.hitcam.protocol.MessageType
+import io.github.hitnes.hitcam.protocol.PairNonce
 import io.github.hitnes.hitcam.protocol.PairRequest
 import io.github.hitnes.hitcam.protocol.PairResult
 import io.github.hitnes.hitcam.protocol.ProtocolJson
@@ -20,10 +27,12 @@ import io.github.hitnes.hitcam.protocol.StreamConfig
 import io.github.hitnes.hitcam.session.Phase
 import io.github.hitnes.hitcam.session.SessionEnvironment
 import io.github.hitnes.hitcam.session.SessionError
+import io.github.hitnes.hitcam.session.StoredPairing
 import io.github.hitnes.hitcam.session.StreamSession
 import io.github.hitnes.hitcam.session.VideoSource
 import io.github.hitnes.hitcam.video.EncodedFrame
 import org.junit.After
+import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -43,7 +52,14 @@ class StreamSessionTest {
     private lateinit var video: FakeVideo
     private lateinit var environment: FakeEnvironment
     private lateinit var session: StreamSession
+    // The certificate the "PC" presents; TLS itself is replaced here (TlsSecurityTest covers it).
+    @Volatile private var presented = PC_FINGERPRINT
+    private val security = SocketSecurity { socket, _, _, expected ->
+        if (expected != null && !expected.contentEquals(presented)) throw FingerprintMismatchException()
+        SecuredSocket(socket, presented)
+    }
     private val address get() = ServerAddress("127.0.0.1", server.localPort)
+    private val hostKey get() = "127.0.0.1:${server.localPort}"
 
     @Before
     fun setUp() {
@@ -51,7 +67,7 @@ class StreamSessionTest {
         server.soTimeout = 5_000
         video = FakeVideo()
         environment = FakeEnvironment()
-        session = StreamSession(video, environment, reconnectDelayMs = 100)
+        session = StreamSession(video, environment, reconnectDelayMs = 100, security = security)
     }
 
     @After
@@ -62,14 +78,15 @@ class StreamSessionTest {
 
     @Test
     fun pairedPhoneStreamsAfterHelloWithItsToken() {
-        environment.tokens["pc-1"] = "secret"
+        environment.tokens["pc-1"] = stored("secret")
         session.connect(address.copy(serverId = "pc-1"))
         val pc = FakePc(server.accept())
 
         val hello = pc.expectJson<Hello>(MessageType.Hello)
+        assertEquals(2, hello.protocolVersion)
         assertEquals("secret", hello.token)
         assertEquals("Test Phone", hello.deviceName)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Test PC", "pc-1"))
+        pc.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "Test PC", "pc-1"))
 
         // Startup order as on the iPhone: StreamConfig, Capabilities, CameraState, then video from a keyframe.
         val config = pc.expectJson<StreamConfig>(MessageType.StreamConfig)
@@ -87,41 +104,64 @@ class StreamSessionTest {
     }
 
     @Test
-    fun pairingWithAWrongThenARightPin() {
-        environment.tokens["127.0.0.1:${server.localPort}"] = "revoked"
+    fun pairingWithAMistypedThenTheRightPin() {
+        environment.tokens[hostKey] = stored("revoked")
         session.connect(address)
         val pc = FakePc(server.accept())
         assertEquals("revoked", pc.expectJson<Hello>(MessageType.Hello).token)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "pairingRequired", "Test PC", "pc-2"))
+        val first = pc.offerPairing("222222", id = "pc-2")
 
         waitFor { session.phase.value is Phase.Pairing }
         // The PC no longer knows that token: it is forgotten.
-        assertNull(environment.tokens["127.0.0.1:${server.localPort}"])
+        assertNull(environment.tokens[hostKey])
 
+        // Mistyped: the PC's commitment does not open to it, so the phone keeps its own closed and starts over.
         session.submitPin("111111")
-        assertEquals("111111", pc.expectJson<PairRequest>(MessageType.PairRequest).pin)
-        pc.sendJson(MessageType.PairResult, PairResult(ok = false, attemptsLeft = 4))
+        pc.revealAfterCommit(first)
+        pc.expectClosed()
+        val next = FakePc(server.accept())
+        next.expect(MessageType.Hello)
+        val second = next.offerPairing("333333", id = "pc-2")
         waitFor { (session.phase.value as? Phase.Pairing)?.wrongPin == true }
-        assertEquals(4, (session.phase.value as Phase.Pairing).attemptsLeft)
 
-        session.submitPin("222222")
-        assertEquals("222222", pc.expectJson<PairRequest>(MessageType.PairRequest).pin)
-        pc.sendJson(MessageType.PairResult, PairResult(ok = true, token = "fresh", attemptsLeft = 5))
-        pc.expect(MessageType.StreamConfig)
+        session.submitPin("333333")
+        val commit = next.revealAfterCommit(second)
+        val nonce = next.expectJson<PairNonce>(MessageType.PairConfirm).nonce.hexBytes(32)!!
+        // What the PC checks: the phone committed to this PIN and the certificate it saw.
+        assertArrayEquals(PinProof.commit(PinProof.PHONE_LABEL, PC_FINGERPRINT, "333333", nonce), commit)
+        next.sendJson(MessageType.PairResult, PairResult(ok = true, token = "fresh", attemptsLeft = 5))
+        next.expect(MessageType.StreamConfig)
         waitFor { session.phase.value is Phase.Streaming }
-        assertEquals("fresh", environment.tokens["pc-2"])
-        assertEquals("fresh", environment.tokens["127.0.0.1:${server.localPort}"])
-        pc.close()
+        assertEquals(stored("fresh"), environment.tokens["pc-2"])
+        assertEquals(stored("fresh"), environment.tokens[hostKey])
+        assertEquals(PC_FINGERPRINT.toHex(), environment.remembered.last().fingerprint)
+        next.close()
+    }
+
+    @Test
+    fun aMiddlemanWithItsOwnCertificateNeverGetsThePhonesCommitmentOpened() {
+        session.connect(address)
+        val pc = FakePc(server.accept())
+        pc.expect(MessageType.Hello)
+        // The real PC committed to its own certificate; the phone sees another one (the middleman's).
+        val reveal = pc.offerPairing("123456", fingerprint = ByteArray(32) { 7 })
+        waitFor { session.phase.value is Phase.Pairing }
+        session.submitPin("123456")
+        pc.revealAfterCommit(reveal)
+        // No PairConfirm: the connection is dropped and pairing starts over.
+        pc.expectClosed()
+        FakePc(server.accept()).close()
+        assertTrue(environment.tokens.isEmpty())
     }
 
     @Test
     fun aServerIdClaimedByATypedAddressIsNotTrusted() {
         // The real PC "pc-1" is paired; someone else at a typed address claims to be it.
-        environment.tokens["pc-1"] = "secret"
+        environment.tokens["pc-1"] = stored("secret")
         session.connect(address)
         val pc = FakePc(server.accept())
         assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Impostor", "pc-1"))
+        pc.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "Impostor", "pc-1"))
         pc.expect(MessageType.StreamConfig)
         waitFor { session.phase.value is Phase.Streaming }
         pc.close()
@@ -140,25 +180,55 @@ class StreamSessionTest {
         session.connect(address)
         val pc = FakePc(server.accept())
         assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "pairingRequired", "Test PC", "pc-3"))
+        val reveal = pc.offerPairing("123456", id = "pc-3")
         waitFor { session.phase.value is Phase.Pairing }
         session.submitPin("123456")
-        pc.expect(MessageType.PairRequest)
+        pc.revealAfterCommit(reveal)
+        pc.expect(MessageType.PairConfirm)
         pc.sendJson(MessageType.PairResult, PairResult(ok = true, token = "fresh", attemptsLeft = 5))
         pc.expect(MessageType.StreamConfig)
         waitFor { session.phase.value is Phase.Streaming }
-        assertEquals("fresh", environment.tokens["pc-3"])
-        assertEquals("fresh", environment.tokens["127.0.0.1:${server.localPort}"])
-        assertEquals(address.copy(serverId = "pc-3", name = "Test PC"), environment.remembered.last())
+        assertEquals(stored("fresh"), environment.tokens["pc-3"])
+        assertEquals(stored("fresh"), environment.tokens[hostKey])
+        assertEquals(address.copy(serverId = "pc-3", name = "Test PC", fingerprint = PC_FINGERPRINT.toHex()), environment.remembered.last())
         pc.close()
 
         waitFor { session.phase.value is Phase.Reconnecting }
         val again = FakePc(server.accept())
         assertEquals("fresh", again.expectJson<Hello>(MessageType.Hello).token)
         // The paired id is now expected: another PC at this address is refused.
-        again.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Other", "someone-else"))
+        again.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "Other", "someone-else"))
         waitFor { session.phase.value == Phase.Failed(SessionError.OtherPc) }
         again.close()
+    }
+
+    @Test
+    fun aPcWithAnotherCertificateThanThePairedOneIsRefusedBeforeAnythingIsSent() {
+        environment.tokens["pc-1"] = stored("secret")
+        presented = ByteArray(32) { 9 }
+        session.connect(address.copy(serverId = "pc-1"))
+        server.accept().use {
+            waitFor { session.phase.value == Phase.Failed(SessionError.KeyMismatch) }
+            assertEquals(-1, it.getInputStream().read())
+        }
+    }
+
+    @Test
+    fun theFingerprintFromTheQrCodeIsInsistedOn() {
+        session.connect(address.copy(serverId = "pc-1", fingerprint = ByteArray(32) { 5 }.toHex()))
+        server.accept().use {
+            waitFor { session.phase.value == Phase.Failed(SessionError.KeyMismatch) }
+        }
+    }
+
+    @Test
+    fun aTokenFromAnOldAppWithoutACertificateIsNotSent() {
+        // Stored bare by app 0.3.0 over plain TCP: this PC is paired again once, with its PIN.
+        environment.tokens["pc-1"] = "old-plain-token"
+        session.connect(address.copy(serverId = "pc-1"))
+        val pc = FakePc(server.accept())
+        assertNull(pc.expectJson<Hello>(MessageType.Hello).token)
+        pc.close()
     }
 
     @Test
@@ -195,7 +265,7 @@ class StreamSessionTest {
         session.connect(address)
         val pc = FakePc(server.accept())
         pc.expect(MessageType.Hello)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "pairingRequired", "Test PC", "pc-4"))
+        pc.offerPairing("123456", id = "pc-4")
         waitFor { session.phase.value is Phase.Pairing }
         // The user takes longer than the reply timeout to type the PIN.
         Thread.sleep(900)
@@ -223,7 +293,7 @@ class StreamSessionTest {
         session.connect(address.copy(serverId = "expected"))
         val pc = FakePc(server.accept())
         pc.expect(MessageType.Hello)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "Other", "someone-else"))
+        pc.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "Other", "someone-else"))
         waitFor { session.phase.value == Phase.Failed(SessionError.OtherPc) }
         assertTrue(video.starts == 0)
         pc.close()
@@ -234,7 +304,7 @@ class StreamSessionTest {
         session.connect(address)
         val pc = FakePc(server.accept())
         pc.expect(MessageType.Hello)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "busy", "PC", "pc"))
+        pc.sendJson(MessageType.HelloAck, HelloAck(2, "busy", "PC", "pc"))
         waitFor { session.phase.value == Phase.Failed(SessionError.Busy) }
         pc.close()
     }
@@ -270,16 +340,18 @@ class StreamSessionTest {
         pc.close()
     }
 
+    private fun stored(token: String) = StoredPairing(PC_FINGERPRINT.toHex(), token).encode()
+
     private fun useReplyTimeout(ms: Long) {
         session.close()
-        session = StreamSession(video, environment, reconnectDelayMs = 100, replyTimeoutMs = ms)
+        session = StreamSession(video, environment, reconnectDelayMs = 100, replyTimeoutMs = ms, security = security)
     }
 
     private fun streamingPc(): FakePc {
         session.connect(address)
         val pc = FakePc(server.accept())
         pc.expect(MessageType.Hello)
-        pc.sendJson(MessageType.HelloAck, HelloAck(1, "accepted", "PC", "pc"))
+        pc.sendJson(MessageType.HelloAck, HelloAck(2, "accepted", "PC", "pc"))
         pc.expect(MessageType.StreamConfig)
         pc.expect(MessageType.Capabilities)
         pc.expect(MessageType.CameraState)
@@ -294,6 +366,10 @@ class StreamSessionTest {
             if (System.currentTimeMillis() > deadline) fail("condition not met; phase = ${session.phase.value}")
             Thread.sleep(10)
         }
+    }
+
+    private companion object {
+        val PC_FINGERPRINT = ByteArray(32) { 1 }
     }
 
     /** The PC side of one connection. Status/Ping messages from the phone are skipped while waiting. */
@@ -326,6 +402,36 @@ class StreamSessionTest {
         }
 
         inline fun <reified T> sendJson(type: MessageType, value: T) = send(type, ProtocolJson.encodeToString(value).toByteArray())
+
+        /** pairingRequired with the PC's commitment to [pin] behind [fingerprint]; returns the nonce to open it. */
+        fun offerPairing(pin: String, fingerprint: ByteArray = PC_FINGERPRINT, id: String = "pc"): ByteArray {
+            val nonce = PinProof.newNonce()
+            sendJson(MessageType.HelloAck, HelloAck(2, "pairingRequired", "Test PC", id, PinProof.commit(PinProof.PC_LABEL, fingerprint, pin, nonce).toHex()))
+            return nonce
+        }
+
+        /** Waits for the phone's commitment (the PIN itself is never sent), then opens the PC's. Returns the commitment. */
+        fun revealAfterCommit(nonce: ByteArray): ByteArray {
+            val request = expectJson<PairRequest>(MessageType.PairRequest)
+            assertNull(request.pin)
+            sendJson(MessageType.PairReveal, PairNonce(nonce.toHex()))
+            return request.commit!!.hexBytes(32)!!
+        }
+
+        /** The phone closes this connection without sending anything but pings. */
+        fun expectClosed() {
+            try {
+                while (true) {
+                    val headerBytes = ByteArray(MessageHeader.SIZE)
+                    input.readFully(headerBytes)
+                    val header = MessageHeader.decode(headerBytes)
+                    input.readFully(ByteArray(header.length))
+                    if (header.type != MessageType.Ping) fail("expected the connection to close, got ${header.type}")
+                }
+            } catch (_: java.io.EOFException) {
+            } catch (_: java.net.SocketException) {
+            }
+        }
 
         fun close() = socket.close()
     }

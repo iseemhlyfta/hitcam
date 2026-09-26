@@ -16,13 +16,16 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * A TCP connection speaking HitCam framing. A reader and a writer thread do the blocking I/O;
+ * A TLS connection (through [security]) speaking HitCam framing. A reader and a writer thread do the blocking I/O;
  * every event is delivered on [events] (the session's single thread), in order.
  */
 class FramedConnection(
     private val host: String,
     private val port: Int,
     private val events: Executor,
+    private val security: SocketSecurity,
+    /** The PCs certificate fingerprint to insist on; null while pairing (see [seenFingerprint]). */
+    private val expectedFingerprint: ByteArray?,
     private val handler: (Event) -> Unit,
 ) {
     sealed interface Event {
@@ -34,6 +37,12 @@ class FramedConnection(
     private class Packet(val bytes: ByteArray, val isVideo: Boolean, val closeAfter: Boolean = false)
 
     private val socket = Socket()
+    // The secured socket once the handshake is done; closing it closes [socket] too.
+    @Volatile private var active: Socket = socket
+
+    /** The certificate fingerprint the PC presented; set before [Event.Ready]. */
+    @Volatile var seenFingerprint: ByteArray? = null
+        private set
     private val outgoing = LinkedBlockingQueue<Packet>()
     private val closed = AtomicBoolean(false)
     private val closing = AtomicBoolean(false)
@@ -55,6 +64,9 @@ class FramedConnection(
             // queueing seconds of video in the socket (the default buffer grows to megabytes).
             socket.sendBufferSize = SEND_BUFFER_BYTES
             socket.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MS)
+            val secured = security.secure(socket, host, port, expectedFingerprint)
+            active = secured.socket
+            seenFingerprint = secured.fingerprint
         } catch (e: Exception) {
             finish(e)
             return
@@ -71,7 +83,7 @@ class FramedConnection(
 
     private fun readLoop() {
         try {
-            val input = DataInputStream(socket.getInputStream().buffered())
+            val input = DataInputStream(active.getInputStream().buffered())
             val headerBytes = ByteArray(MessageHeader.SIZE)
             while (!closed.get()) {
                 input.readFully(headerBytes)
@@ -89,7 +101,7 @@ class FramedConnection(
 
     private fun writeLoop() {
         try {
-            val output = socket.getOutputStream()
+            val output = active.getOutputStream()
             while (true) {
                 val packet = outgoing.take()
                 if (packet.bytes.isNotEmpty()) output.write(packet.bytes)
@@ -153,6 +165,7 @@ class FramedConnection(
 
     private fun closeSocket() {
         try {
+            active.close()
             socket.close()
         } catch (_: IOException) {
         }

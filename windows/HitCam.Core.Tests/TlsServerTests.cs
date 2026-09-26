@@ -135,6 +135,18 @@ public sealed class TlsServerTests : IAsyncLifetime
     }
 
     [Fact]
+    public void Commitments_match_the_vectors_the_phone_apps_test_against()
+    {
+        // Same vectors in android PinProofTest and ios PinProofTests: all three must hash alike.
+        var fp = Enumerable.Repeat((byte)1, 32).ToArray();
+        var nonce = Enumerable.Repeat((byte)2, 32).ToArray();
+        Assert.Equal("cec2d2dd935ef81984f804ae036b0070aebe85dbbb5553d8904ef361c277e7e1",
+            Convert.ToHexStringLower(PinProof.Commit(PinProof.PcLabel, fp, "123456", nonce)));
+        Assert.Equal("09e06dfbc17294fa4b4c4e1789a1c306ff506ac5020569463c2191e782dba7f3",
+            Convert.ToHexStringLower(PinProof.Commit(PinProof.PhoneLabel, fp, "123456", nonce)));
+    }
+
+    [Fact]
     public void Commitments_bind_every_input()
     {
         var fp = SHA256.HashData([1]);

@@ -126,6 +126,8 @@ private fun errorText(error: SessionError): String = when (error) {
     SessionError.PairingLocked -> stringResource(R.string.pairing_locked)
     SessionError.VersionMismatch -> stringResource(R.string.version_mismatch)
     SessionError.ClosedByPc -> stringResource(R.string.closed_by_pc)
+    SessionError.KeyMismatch -> stringResource(R.string.key_mismatch)
+    SessionError.SecureFailed -> stringResource(R.string.secure_failed)
     is SessionError.CameraFailed -> stringResource(R.string.camera_failed, error.reason)
 }
 
