@@ -19,7 +19,7 @@ internal static partial class Program
         DiagnosticLog.Write($"start {typeof(Program).Assembly.GetName().Version} ({Environment.OSVersion}) {string.Join(' ', args)}");
 
         var index = Array.IndexOf(args, "--port");
-        if (index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var port))
+        if (index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var port) && port is >= 1 and <= 65535)
             PortOverride = port;
 
         // One HitCam per user: a second launch (e.g. from the Start menu) brings the running window forward.

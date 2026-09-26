@@ -327,6 +327,18 @@ public sealed class ServerTests : IAsyncLifetime
         await connected.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct);
     }
 
+    [Fact]
+    public async Task A_port_in_use_leaves_the_server_stopped_and_disposable()
+    {
+        var port = _server.Port;
+        var second = new HitCamServer(new HitCamServerOptions { Port = port, BindAddress = IPAddress.Loopback }, _store);
+
+        Assert.Throws<SocketException>(second.Start);
+
+        Assert.False(second.IsRunning);
+        await second.DisposeAsync();
+    }
+
     private HitCamServer StartServer(HitCamServerOptions options, IPairingStore? store = null)
     {
         var server = new HitCamServer(options, store ?? new InMemoryPairingStore());

@@ -91,11 +91,13 @@ public sealed class HitCamServer : IAsyncDisposable
         if (_listener is not null)
             throw new InvalidOperationException("Server is already running.");
 
+        // Fields only once listening: a port in use leaves the server stopped (and disposable), not half started.
+        var listener = new TcpListener(_options.BindAddress, _options.Port);
+        listener.Start();
         _cts = new CancellationTokenSource();
-        _listener = new TcpListener(_options.BindAddress, _options.Port);
-        _listener.Start();
-        Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
-        _acceptLoop = AcceptLoopAsync(_listener, _cts.Token);
+        _listener = listener;
+        Port = ((IPEndPoint)listener.LocalEndpoint).Port;
+        _acceptLoop = AcceptLoopAsync(listener, _cts.Token);
     }
 
     public async Task StopAsync()

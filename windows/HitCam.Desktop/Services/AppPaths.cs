@@ -21,7 +21,18 @@ public sealed partial record AppSettings
     // Plain setters, not init: the JSON source generator fills init-only properties through an object
     // initializer and would overwrite these defaults with zeros for fields an older file does not have.
     public string ServerId { get; set; } = Guid.NewGuid().ToString();
-    public int Port { get; set; } = Core.Protocol.ProtocolInfo.DefaultPort;
+    public int Port
+    {
+        get => _port;
+        // Out of range (a hand-edited file) would make the server throw at every start.
+        set => _port = value is >= 1 and <= 65535 ? value : Core.Protocol.ProtocolInfo.DefaultPort;
+    }
+
+    private int _port = Core.Protocol.ProtocolInfo.DefaultPort;
+
+    // Set when the file exists but could not be read: saving these defaults over it would lose every setting and the
+    // identity paired phones know this PC by. Copied along by "with".
+    private bool _unsaved;
     // Up to 0.2.3 there were also "denoiseEnabled" and "denoiseMode" (NVIDIA AI noise removal, removed): they are
     // ignored when read and dropped on the next save.
 
@@ -86,22 +97,15 @@ public sealed partial record AppSettings
     /// </summary>
     public static AppSettings Load(string path)
     {
-        byte[] json;
-        try
+        if (!File.Exists(path))
         {
-            if (!File.Exists(path))
-            {
-                var created = new AppSettings();
-                created.Save(path);
-                return created;
-            }
-            json = File.ReadAllBytes(path);
+            var created = new AppSettings();
+            created.Save(path);
+            return created;
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
-        {
-            // Unreadable right now (e.g. locked): run with defaults and leave the file alone.
-            return new AppSettings();
-        }
+        // Unreadable (held by an antivirus or a sync tool, no access): run with defaults and leave the file alone.
+        if (ReadAll(path) is not { } json)
+            return new AppSettings { _unsaved = true };
 
         try
         {
@@ -128,8 +132,30 @@ public sealed partial record AppSettings
         return recovered;
     }
 
+    /// <summary>The file's bytes, retried briefly while another process holds it; null if it stays unreadable.</summary>
+    private static byte[]? ReadAll(string path)
+    {
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return File.ReadAllBytes(path);
+            }
+            catch (IOException) when (attempt < 5)
+            {
+                Thread.Sleep(100);
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return null;
+            }
+        }
+    }
+
     /// <summary>Settings written by any earlier version; fields it did not know keep their defaults.</summary>
-    public static AppSettings? Parse(ReadOnlySpan<byte> json) => JsonSerializer.Deserialize(json, SettingsJson.Default.AppSettings);
+    public static AppSettings? Parse(ReadOnlySpan<byte> json) =>
+        // A UTF-8 byte order mark (Windows PowerShell 5.1, old Notepad) is not valid JSON for the reader.
+        JsonSerializer.Deserialize(json.StartsWith((ReadOnlySpan<byte>)[0xEF, 0xBB, 0xBF]) ? json[3..] : json, SettingsJson.Default.AppSettings);
 
     /// <summary>The server id from a file that no longer parses as a whole (e.g. cut short).</summary>
     public static string? RecoverServerId(ReadOnlySpan<byte> json) =>
@@ -140,6 +166,8 @@ public sealed partial record AppSettings
     /// <summary>Writes a temporary file and moves it over the old one, so a crash never leaves half a file.</summary>
     public void Save(string path)
     {
+        if (_unsaved)
+            return;
         var temporary = path + ".tmp";
         try
         {

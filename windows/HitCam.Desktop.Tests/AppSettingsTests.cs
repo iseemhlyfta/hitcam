@@ -112,4 +112,47 @@ public sealed class AppSettingsTests : IDisposable
         Assert.Equal([0, 0, 0, 0], File.ReadAllBytes(SettingsPath + ".bak"));
         Assert.Equal(settings.ServerId, AppSettings.Parse(File.ReadAllBytes(SettingsPath))?.ServerId);
     }
+
+    [Fact]
+    public void A_file_with_a_byte_order_mark_is_read_not_replaced()
+    {
+        Directory.CreateDirectory(_directory);
+        // What Windows PowerShell 5.1 (Set-Content -Encoding UTF8) or an old Notepad writes.
+        File.WriteAllText(SettingsPath, """{ "serverId": "with-bom", "experiments": false }""", new System.Text.UTF8Encoding(true));
+
+        var settings = AppSettings.Load(SettingsPath);
+
+        Assert.Equal("with-bom", settings.ServerId);
+        Assert.False(settings.Experiments);
+        Assert.False(File.Exists(SettingsPath + ".bak"));
+    }
+
+    [Fact]
+    public void A_locked_file_is_never_overwritten_by_the_defaults()
+    {
+        Directory.CreateDirectory(_directory);
+        const string original = """{ "serverId": "paired-pc", "experiments": false }""";
+        File.WriteAllText(SettingsPath, original);
+
+        AppSettings settings;
+        using (new FileStream(SettingsPath, FileMode.Open, FileAccess.Read, FileShare.None))
+            settings = AppSettings.Load(SettingsPath);
+        settings.Experiments = true;
+        settings.Save(SettingsPath);
+        (settings with { Experiments = false }).Save(SettingsPath);
+
+        Assert.Equal(original, File.ReadAllText(SettingsPath));
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    [InlineData(70000)]
+    public void A_port_out_of_range_falls_back_to_the_default(int port)
+    {
+        Directory.CreateDirectory(_directory);
+        File.WriteAllText(SettingsPath, $$"""{ "serverId": "x", "port": {{port}} }""");
+
+        Assert.Equal(Core.Protocol.ProtocolInfo.DefaultPort, AppSettings.Load(SettingsPath).Port);
+    }
 }
