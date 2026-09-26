@@ -13,6 +13,7 @@ using HitCam.Core.Server;
 using HitCam.Desktop.Services;
 using HitCam.Vision;
 using HitCam.Vision.Faces;
+using HitCam.Vision.Framing;
 using HitCam.Vision.Hands;
 using HitCam.Vision.Segmentation;
 using ReactiveUI;
@@ -42,6 +43,13 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     private bool _handSceneSent;
     private bool _threadsWereOn;
     private readonly SegmentEngine _segment;
+    // Auto-framing: faces from the face thread, the controller stepped on the framing timer.
+    private readonly Timer _framingTimer;
+    private volatile IReadOnlyList<System.Drawing.RectangleF> _framingFaces = [];
+    private volatile FramingController? _framingController;
+    private int _framingReset;
+    private int _framingTicks;
+    private System.Drawing.RectangleF? _framingCrop;
     // The picture sent to the DLL for the background, so it is read and sent only when the choice changes.
     private string? _backgroundImagePath;
     private readonly FaceEngine _faces;
@@ -197,8 +205,22 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             Dispatcher.UIThread.Post(() => Faces.ShowStatus(s));
         };
         _faceGuardTimer = new Timer(_ => GuardFaces(), null, TimeSpan.FromMilliseconds(200), TimeSpan.FromMilliseconds(200));
+
+        // Auto-framing: a crop that follows the faces, stepped 30 times a second so it glides between face results.
+        Framing = new FramingViewModel(
+            _settings.Framing,
+            () => FaceModelFiles.Find() is not null,
+            _ => ApplyFraming(),
+            settings =>
+            {
+                _settings = _settings with { Framing = settings };
+                _settings.Save();
+            },
+            AvaloniaScheduler.Instance);
+        _framingTimer = new Timer(_ => StepFraming(), null, TimeSpan.FromMilliseconds(33), TimeSpan.FromMilliseconds(33));
         _faces.ResultReady += r =>
         {
+            _framingFaces = [.. r.Faces.Where(f => f.Seen).Select(f => f.Box)];
             SendFaceRegions(r);
             Dispatcher.UIThread.Post(() => Faces.ShowResult(r));
         };
@@ -233,6 +255,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             ApplyHands();
             ApplyFaces();
             ApplyBackground();
+            ApplyFraming();
         });
         _server.Disconnected += (_, reason) => Dispatcher.UIThread.Post(() =>
         {
@@ -246,6 +269,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             LiveText = "";
             Processing.ClearStats();
             ApplyBackground();
+            ApplyFraming();
             ApplyVision();
             ApplyHands();
             ApplyFaces();
@@ -268,6 +292,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             _vision.ResetTracks();
             _hands.ResetTracks();
             _faces.ResetTracks();
+            Interlocked.Exchange(ref _framingReset, 1);
             _segment.Reset();
             // Results for the old picture would land in the wrong place (a hidden face shown beside its mosaic).
             _faceGuard.Reset();
@@ -374,6 +399,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         this.RaisePropertyChanged(nameof(FacesSectionExpanded));
         this.RaisePropertyChanged(nameof(EnhanceSectionExpanded));
         this.RaisePropertyChanged(nameof(BackgroundSectionExpanded));
+        this.RaisePropertyChanged(nameof(FramingSectionExpanded));
     }
 
     /// <summary>Picture processing on this PC (noise reduction, colour, sharpness).</summary>
@@ -401,6 +427,14 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     public BackgroundViewModel Background { get; }
 
     public bool BackgroundSectionExpanded { get => _settings.Sections.Background; set => SetSections(_settings.Sections with { Background = value }); }
+
+    /// <summary>Auto-framing: settings section.</summary>
+    public FramingViewModel Framing { get; }
+
+    public bool FramingSectionExpanded { get => _settings.Sections.Framing; set => SetSections(_settings.Sections with { Framing = value }); }
+
+    /// <summary>The part of the preview the camera shows while auto-framing runs; null: the whole picture.</summary>
+    public System.Drawing.RectangleF? FramingCrop { get => _framingCrop; private set => this.RaiseAndSetIfChanged(ref _framingCrop, value); }
 
     /// <summary>Squares around faces are drawn over the preview: hiding runs and there is a picture.</summary>
     public bool ShowFaces => Faces.IsActive && HasPreview;
@@ -725,6 +759,50 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     }
 
     /// <summary>
+    /// Auto-framing runs while it is on, the face models are there and a phone is connected; it needs the face engine,
+    /// which ApplyFaces starts for it. A new controller takes the zoom limit.
+    /// </summary>
+    private void ApplyFraming()
+    {
+        var active = Framing.IsOn && Framing.HasModels && IsConnected;
+        if (active)
+        {
+            if (_framingController is null || Math.Abs(_framingZoom - Framing.Settings.MaxZoom) > 0)
+            {
+                _framingZoom = Framing.Settings.MaxZoom;
+                _framingController = new FramingController(new FramingOptions { MaxZoom = Framing.Settings.MaxZoom / 100f });
+            }
+        }
+        else
+        {
+            _framingController = null;
+            _framingFaces = [];
+            _pipeline.SetFraming(HitCamFraming.From(FramingController.Full));
+            FramingCrop = null;
+        }
+        ApplyFaces();
+    }
+
+    private int _framingZoom;
+
+    /// <summary>Framing timer (pool thread, 30 Hz): steps the crop towards the faces and hands it to the camera.</summary>
+    private void StepFraming()
+    {
+        if (_framingController is not { } controller)
+            return;
+        if (Interlocked.Exchange(ref _framingReset, 0) == 1)
+            controller.Reset();
+        var crop = controller.Update(_framingFaces, TimeSpan.FromTicks(Stopwatch.GetTimestamp() * TimeSpan.TicksPerSecond / Stopwatch.Frequency));
+        _pipeline.SetFraming(HitCamFraming.From(crop));
+        // The preview frame, a few times a second: enough to see what the camera shows.
+        if (Interlocked.Increment(ref _framingTicks) % 3 == 0)
+        {
+            System.Drawing.RectangleF? shown = crop == FramingController.Full ? null : crop;
+            Dispatcher.UIThread.Post(() => FramingCrop = _framingController is null ? null : shown);
+        }
+    }
+
+    /// <summary>
     /// The background runs while it is on, the model is there and a phone is connected (the model stays loaded between
     /// connections). It is a camera feature, not an experiment: the experiments switch leaves it alone.
     /// </summary>
@@ -784,8 +862,11 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
     /// </summary>
     private void ApplyFaces()
     {
-        var enabled = ExperimentsEnabled && Faces.IsEnabled && Faces.HasModels;
-        var active = enabled && IsConnected;
+        var hiding = ExperimentsEnabled && Faces.IsEnabled && Faces.HasModels;
+        // Auto-framing follows the faces too: the engine runs for it even with face hiding off.
+        var framing = Framing.IsOn && Framing.HasModels;
+        var enabled = hiding || framing;
+        var active = hiding && IsConnected;
         // Just turned on (or connected): nothing is known about the picture yet.
         if (active && !_facesWereActive)
             _faceGuard.Reset();
@@ -795,7 +876,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         if (!active)
             _pipeline.SetFaceRegions([]);
         _faces.HideNewFaces = Faces.Settings.NewFacesHidden;
-        _faces.Paused = !active;
+        _faces.Paused = !(enabled && IsConnected);
         if (enabled)
             _faces.Start();
         else
@@ -939,6 +1020,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
         Hands.SaveNow();
         Faces.SaveNow();
         Background.SaveNow();
+        Framing.SaveNow();
         if (_networkChanged is not null)
         {
             NetworkChange.NetworkAddressChanged -= _networkChanged;
@@ -953,6 +1035,7 @@ public sealed class MainViewModel : ReactiveObject, IAsyncDisposable
             return;
         await _server.DisposeAsync().ConfigureAwait(false);
         await _faceGuardTimer.DisposeAsync().ConfigureAwait(false);
+        await _framingTimer.DisposeAsync().ConfigureAwait(false);
         // Analysis reads the decoder's preview: it goes first.
         _vision.Dispose();
         _hands.Dispose();

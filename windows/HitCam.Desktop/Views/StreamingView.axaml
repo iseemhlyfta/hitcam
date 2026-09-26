@@ -49,6 +49,8 @@
                     <!--  Finger-gun shots: flash here, kick on the whole panel  -->
                     <views:ShotOverlay Source="{Binding Preview}" Shots="{Binding Hands.Shots}" ShakeTarget="{Binding #PreviewContent}" IsVisible="{Binding ShowHands}" />
                     <!--  Squares around faces (the effect is already in the picture); a click uncovers or hides one  -->
+                    <!--  Auto-framing: what the camera shows, the rest dimmed  -->
+                    <views:FramingOverlay Source="{Binding Preview}" Crop="{Binding FramingCrop}" />
                     <views:FaceOverlay x:Name="FaceSquares" Source="{Binding Preview}" Faces="{Binding Faces.Faces}" ToggleCommand="{Binding Faces.ToggleCommand}"
                                        IsVisible="{Binding ShowFaces}" />
                   </Panel>
@@ -289,6 +291,25 @@
                                     </ListBox>
                                 </StackPanel>
                             </StackPanel>
+
+                            <!--  Auto-framing: the crop follows the faces (face models on this PC, crop on the GPU)  -->
+                            <views:FeatureSection Title="{x:Static svc:Loc.Framing}" Hint="{x:Static svc:Loc.FramingHint}"
+                                                  IsOn="{Binding Framing.IsOn}" IsExpanded="{Binding FramingSectionExpanded}">
+                                <StackPanel Spacing="10" DataContext="{Binding Framing}" x:DataType="vm:FramingViewModel">
+                                    <Border Padding="12" CornerRadius="10" Classes="softAccent" IsVisible="{Binding HasNoModels}">
+                                        <SelectableTextBlock FontSize="12" Text="{Binding NoModelsText}" TextWrapping="Wrap" />
+                                    </Border>
+                                    <StackPanel>
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Right" FontSize="12" FontWeight="SemiBold" Text="{Binding MaxZoomText}" />
+                                            <TextBlock Classes="muted" Text="{x:Static svc:Loc.FramingMaxZoom}" ToolTip.Tip="{x:Static svc:Loc.FramingMaxZoomHint}" />
+                                        </DockPanel>
+                                        <Slider Minimum="110" Maximum="200" SmallChange="10" LargeChange="10" TickFrequency="10" IsSnapToTickEnabled="True"
+                                                Value="{Binding MaxZoom}" ToolTip.Tip="{x:Static svc:Loc.FramingMaxZoomHint}"
+                                                AutomationProperties.Name="{x:Static svc:Loc.FramingMaxZoom}" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </views:FeatureSection>
 
                             <!--  Background: blur or a picture behind the person (segmentation on this PC, compositing on the GPU)  -->
                             <views:FeatureSection Title="{x:Static svc:Loc.Background}" Hint="{x:Static svc:Loc.BackgroundHint}"

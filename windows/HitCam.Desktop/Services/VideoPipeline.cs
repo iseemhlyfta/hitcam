@@ -178,6 +178,29 @@ public sealed class VideoPipeline : IDisposable
         }
     }
 
+    /// <summary>
+    /// Auto-framing: the part of the frame the camera shows. The DLL drops it (whole frame) when not refreshed within a
+    /// second, so call it steadily while framing is on. Any thread.
+    /// </summary>
+    public void SetFraming(in HitCamFraming framing)
+    {
+        if (_backgroundUnsupported)
+            return;
+        lock (_bridgeLock)
+        {
+            if (_bridge == IntPtr.Zero)
+                return;
+            try
+            {
+                NativeMethods.HitCam_BridgeSetFraming(_bridge, in framing);
+            }
+            catch (EntryPointNotFoundException)
+            {
+                _backgroundUnsupported = true;
+            }
+        }
+    }
+
     /// <summary>Milliseconds the background took on the last frame; negative while off.</summary>
     public double CompositeMilliseconds()
     {

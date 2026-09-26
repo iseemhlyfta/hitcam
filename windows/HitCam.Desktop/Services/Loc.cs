@@ -134,6 +134,18 @@ public static class Loc
         ? $"Маска {fps:0} раз/с · {milliseconds:0} мс · {provider}{(compositeMilliseconds >= 0 ? $" · наложение {compositeMilliseconds:0.0} мс" : "")}"
         : $"Mask {fps:0}/s · {milliseconds:0} ms · {provider}{(compositeMilliseconds >= 0 ? $" · compositing {compositeMilliseconds:0.0} ms" : "")}";
 
+    public static string Framing => Russian ? "Автокадрирование" : "Auto-framing";
+    public static string FramingHint => Russian
+        ? "Кадр плавно следует за вами, как Center Stage: приближает голову и плечи, при нескольких людях берёт всех. В превью рамкой показано, что видно в камере"
+        : "The picture follows you smoothly, like Center Stage: head and shoulders, everyone when there are several people. The preview shows the camera's part in a frame";
+    public static string FramingMaxZoom => Russian ? "Максимальное приближение" : "Closest zoom";
+    public static string FramingMaxZoomHint => Russian
+        ? "Сильнее 1,5–2× картинка 1080p становится мягче"
+        : "Beyond 1.5–2× a 1080p picture gets soft";
+    public static string FramingNoModels(string folder) => Russian
+        ? $"Для автокадрирования нужны модели лиц. Переустановите HitCam или положите их в папку {folder} (windows\\get-models.ps1)"
+        : $"Auto-framing needs the face models. Reinstall HitCam or put them into {folder} (windows\\get-models.ps1)";
+
     public static string Enhance => Russian ? "Улучшение картинки" : "Picture enhancement";
     public static string EnhanceHint => Russian
         ? "Свежая картинка «как с камеры»: чёткие контуры без шума на коже и стенах, объём и живые цвета. Меньше 1 мс на кадр, на любой видеокарте. Лучше всего вместе с шумодавом NVIDIA (вкладка «Эксперименты»)"

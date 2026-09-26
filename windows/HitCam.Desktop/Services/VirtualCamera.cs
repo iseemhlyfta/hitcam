@@ -83,6 +83,9 @@ internal static class NativeMethods
     public static extern double HitCam_BridgeCompositeMs(IntPtr handle);
 
     [DllImport(Library)]
+    public static extern void HitCam_BridgeSetFraming(IntPtr handle, in HitCamFraming framing);
+
+    [DllImport(Library)]
     public static extern void HitCam_BridgeDisplayPreviewInfo(IntPtr handle, out uint width, out uint height, out ulong frame);
 
     [DllImport(Library)]

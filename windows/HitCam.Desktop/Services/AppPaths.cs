@@ -88,6 +88,15 @@ public sealed partial record AppSettings
 
     private BackgroundSettings _background = new();
 
+    /// <summary>Auto-framing; off by default.</summary>
+    public FramingSettings Framing
+    {
+        get => _framing;
+        set => _framing = value ?? new FramingSettings();
+    }
+
+    private FramingSettings _framing = new();
+
     /// <summary>Which features on the experiments tab are expanded; all collapsed by default.</summary>
     public ExperimentSections Sections
     {
@@ -213,6 +222,9 @@ public sealed record ExperimentSections
 
     /// <summary>"Background" on the camera tab.</summary>
     public bool Background { get; set; }
+
+    /// <summary>"Auto-framing" on the camera tab.</summary>
+    public bool Framing { get; set; }
 }
 
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase, WriteIndented = true)]
