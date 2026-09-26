@@ -13,6 +13,8 @@ object ProtocolInfo {
     const val VERSION = 1
     const val DEFAULT_PORT = 47800
     const val URI_SCHEME = "hitcam"
+    // DNS-SD service the PC announces on the local network.
+    const val BONJOUR_TYPE = "_hitcam._tcp"
 }
 
 enum class MessageType(val raw: Int) {

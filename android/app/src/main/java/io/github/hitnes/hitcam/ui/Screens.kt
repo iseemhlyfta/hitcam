@@ -41,6 +41,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -68,6 +69,8 @@ import com.journeyapps.barcodescanner.ScanContract
 import com.journeyapps.barcodescanner.ScanOptions
 import io.github.hitnes.hitcam.HitCamApp
 import io.github.hitnes.hitcam.R
+import io.github.hitnes.hitcam.net.FoundPc
+import io.github.hitnes.hitcam.net.PcBrowser
 import io.github.hitnes.hitcam.protocol.ProtocolInfo
 import io.github.hitnes.hitcam.protocol.ServerAddress
 import io.github.hitnes.hitcam.session.Phase
@@ -136,6 +139,14 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
     var pending by remember { mutableStateOf<ServerAddress?>(null) }
     val invalidAddress = stringResource(R.string.invalid_address)
     val scanPrompt = stringResource(R.string.scan_prompt)
+    // PCs announcing themselves on this network, while this screen is shown.
+    var found by remember { mutableStateOf<List<FoundPc>>(emptyList()) }
+    DisposableEffect(Unit) {
+        val browser = PcBrowser(context)
+        browser.onChange = { found = it }
+        browser.start()
+        onDispose { browser.stop() }
+    }
 
     val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
         cameraDenied = !granted
@@ -237,6 +248,30 @@ private fun ConnectScreen(app: HitCamApp, error: SessionError?) {
                             Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null)),
                         )
                     }) { Text(stringResource(R.string.open_settings)) }
+                }
+            }
+
+            if (found.isNotEmpty()) {
+                Spacer(Modifier.height(28.dp))
+                Text(stringResource(R.string.found), style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Spacer(Modifier.height(8.dp))
+                Surface(color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp)) {
+                    Column {
+                        found.forEachIndexed { index, pc ->
+                            if (index > 0) HorizontalDivider(color = MaterialTheme.colorScheme.outline)
+                            Column(
+                                Modifier
+                                    .fillMaxWidth()
+                                    // Paired at this address: the saved entry (with its token). Otherwise the address alone, and
+                                    // the PC asks for its PIN: the announced id is only a claim.
+                                    .clickable { start(recent.firstOrNull { it.host == pc.host && it.port == pc.port } ?: pc.address) }
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                            ) {
+                                Text(pc.name)
+                                Text(pc.address.display, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
+                    }
                 }
             }
 
