@@ -51,6 +51,17 @@ every `Control` field; all other fields are required and must not be `null`. The
 the connection. Arrays are bounded: `cameras` ≤ 16, `presets` ≤ 16, `presets[].fps` ≤ 8, `stabilizationModes` ≤ 8,
 `noiseReductionModes` ≤ 8, and must not contain `null`.
 
+## Discovery
+
+Since app 0.4 the PC announces itself on the local network by DNS-SD (mDNS, "Bonjour") as `_hitcam._tcp`, instance name
+the PC's name, SRV port the server port. TXT: `id` (server id), `name`, `v` (protocol version), `port`, `addr` (the
+PC's IPv4 addresses, comma-separated, so an iPhone browsing with Network.framework gets an address without connecting).
+The announcement is refreshed when the PC's addresses change; a debug instance (`--port`) does not announce.
+
+The announced `id` is only a claim: anyone on the network can announce any id. A phone connects to a found PC as to a
+typed address: it sends its token only if that host and port are a saved pairing (whose id came from a QR code or a
+completed pairing), otherwise the PC asks for its PIN.
+
 ## Session flow
 
 ```
