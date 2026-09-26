@@ -57,12 +57,13 @@ jobs:
       - name: Add hand and face models
         shell: pwsh
         run: ./get-models.ps1 -Destination ../out/HitCam/models
-      - name: Check vision model
+      - name: Check models and licenses
         shell: pwsh
         run: |
           foreach ($file in "models/rfdetr-nano.onnx", "models/rfdetr-nano.labels.json", "models/hands/palm_detection_mediapipe_2023feb.onnx",
                             "models/hands/handpose_estimation_mediapipe_2023feb.onnx", "models/faces/face_detection_yunet_2023mar.onnx",
-                            "models/faces/face_recognition_sface_2021dec.onnx", "onnxruntime.dll", "DirectML.dll") {
+                            "models/faces/face_recognition_sface_2021dec.onnx", "onnxruntime.dll", "DirectML.dll",
+                            "LICENSE.txt", "THIRD-PARTY-NOTICES.txt", "licenses/onnxruntime-LICENSE.txt", "licenses/DirectML-LICENSE.txt") {
             if (-not (Test-Path "../out/HitCam/$file")) { throw "$file is missing from the published app" }
           }
       - uses: actions/upload-artifact@v4

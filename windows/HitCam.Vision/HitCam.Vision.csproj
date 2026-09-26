@@ -11,7 +11,7 @@
   </ItemGroup>
   <ItemGroup>
     <!-- ONNX Runtime with the DirectML provider (any DirectX 12 GPU); falls back to its CPU provider. -->
-    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" />
+    <PackageReference Include="Microsoft.ML.OnnxRuntime.DirectML" GeneratePathProperty="true" />
     <PackageReference Include="Microsoft.AI.DirectML" GeneratePathProperty="true" />
   </ItemGroup>
   <!--
@@ -22,5 +22,16 @@
   <ItemGroup Condition="'$(PkgMicrosoft_AI_DirectML)' != ''">
     <None Include="$(PkgMicrosoft_AI_DirectML)\bin\x64-win\DirectML.dll" Link="DirectML.dll" Visible="false"
           CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="$(PkgMicrosoft_AI_DirectML)\LICENSE.txt" Link="licenses\DirectML-LICENSE.txt" Visible="false"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="$(PkgMicrosoft_AI_DirectML)\ThirdPartyNotices.txt" Link="licenses\DirectML-ThirdPartyNotices.txt" Visible="false"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+  </ItemGroup>
+  <!-- ONNX Runtime and DirectML ship with the app: their license terms go along (see THIRD-PARTY-NOTICES.txt). -->
+  <ItemGroup Condition="'$(PkgMicrosoft_ML_OnnxRuntime_DirectML)' != ''">
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime_DirectML)\LICENSE" Link="licenses\onnxruntime-LICENSE.txt" Visible="false"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="$(PkgMicrosoft_ML_OnnxRuntime_DirectML)\ThirdPartyNotices.txt" Link="licenses\onnxruntime-ThirdPartyNotices.txt"
+          Visible="false" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 </Project>

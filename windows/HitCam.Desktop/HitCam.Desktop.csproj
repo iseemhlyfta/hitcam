@@ -23,7 +23,14 @@
     <PackageReference Include="ReactiveUI.Avalonia" />
     <PackageReference Include="QRCoder" />
     <!-- Already there through Avalonia; used directly to draw labels into the camera picture. -->
-    <PackageReference Include="SkiaSharp" />
+    <PackageReference Include="SkiaSharp" GeneratePathProperty="true" />
+  </ItemGroup>
+  <!-- Licenses go along with the app (and with the models and DLLs of other projects, see HitCam.Vision). -->
+  <ItemGroup>
+    <None Include="..\..\LICENSE" Link="LICENSE.txt" Visible="false" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="THIRD-PARTY-NOTICES.txt" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="$(PkgSkiaSharp)\LICENSE.txt" Link="licenses\SkiaSharp-LICENSE.txt" Visible="false" Condition="'$(PkgSkiaSharp)' != ''"
+          CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\HitCam.Core\HitCam.Core.csproj" />

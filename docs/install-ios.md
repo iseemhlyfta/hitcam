@@ -4,8 +4,8 @@
 [Sideloadly](https://sideloadly.io/) с Windows, подписывая сборку вашим Apple ID.
 
 1. Установите на ПК **iTunes** или **Apple Devices** из Microsoft Store: нужны драйверы iPhone.
-2. Скачайте `HitCam-unsigned.ipa` из артефактов последнего успешного запуска workflow **iOS**
-   (вкладка *Actions* репозитория) или со страницы *Releases*.
+2. Скачайте `HitCam-ios-unsigned.ipa` со страницы *Releases* (или `HitCam-unsigned.ipa` из артефактов последнего
+   успешного запуска workflow **iOS**, вкладка *Actions* репозитория).
 3. Подключите iPhone кабелем, запустите Sideloadly, перетащите IPA, введите Apple ID и нажмите *Start*.
    Для входа лучше завести отдельный Apple ID: Sideloadly передаёт учётные данные только серверам Apple.
 4. На iPhone: *Настройки → Основные → VPN и управление устройством* → доверьте свой Apple ID.
