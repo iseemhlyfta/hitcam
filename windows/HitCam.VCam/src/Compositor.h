@@ -42,8 +42,8 @@ namespace hitcam {
 class Compositor {
 public:
     static constexpr uint32_t kMaxMaskSide = 512;
-    static constexpr unsigned long long kMaskFreshMs = 150;
-    static constexpr unsigned long long kMaskStaleMs = 500;
+    static constexpr unsigned long long kMaskFreshMs = 200;
+    static constexpr unsigned long long kMaskStaleMs = 800;
 
     Compositor();
     ~Compositor();
@@ -107,6 +107,9 @@ private:
     bool CreatePlane(Plane& plane, uint32_t width, uint32_t height, DXGI_FORMAT format, bool writable);
     bool Run(uint8_t* nv12, uint32_t width, uint32_t height, const Inputs& inputs, bool maskValid, unsigned long long maskAgeMs);
     bool ReadBack(uint8_t* nv12, uint32_t width, uint32_t height);
+    // Without the GPU (lost, out of memory): coarse blocks over the whole frame on the processor, so failClosed still
+    // holds.
+    static void CoverOnCpu(uint8_t* nv12, uint32_t width, uint32_t height);
     void ReleaseFrames();
     void ReleaseDevice();
 

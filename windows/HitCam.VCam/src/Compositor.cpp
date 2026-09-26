@@ -187,19 +187,59 @@ bool Compositor::Composite(uint8_t* nv12, uint32_t width, uint32_t height) {
     if (!maskValid && !inputs.settings.failClosed) return false;
 
     const auto start = std::chrono::steady_clock::now();
-    if (!EnsureDevice()) return false;
+    // Without the GPU the room must not show either (failClosed): coarse blocks on the processor until it is back.
+    auto failed = [&] {
+        if (!inputs.settings.failClosed) return false;
+        CoverOnCpu(nv12, width, height);
+        return true;
+    };
+    if (!EnsureDevice()) return failed();
     if (!EnsureFrames(width, height) || (maskValid && !EnsureMask(inputs)) ||
         (inputs.settings.mode == 2 && !EnsureImage(inputs, width, height))) {
         ReleaseDevice();
-        return false;
+        return failed();
     }
     if (!Run(nv12, width, height, inputs, maskValid, age)) {
-        // Device lost or out of memory: pass through, try again later.
+        // Device lost or out of memory: try again later.
         ReleaseDevice();
-        return false;
+        return failed();
     }
     lastMs_ = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
     return true;
+}
+
+void Compositor::CoverOnCpu(uint8_t* nv12, uint32_t width, uint32_t height) {
+    // Blocks of 1/16 of the width: nothing recognizable, cheap (one pass to sum, one to fill).
+    const uint32_t block = std::max<uint32_t>(16, (width / 16) & ~1u);
+    uint8_t* chroma = nv12 + static_cast<size_t>(width) * height;
+    for (uint32_t by = 0; by < height; by += block) {
+        for (uint32_t bx = 0; bx < width; bx += block) {
+            const uint32_t w = std::min(block, width - bx), h = std::min(block, height - by);
+            uint64_t y = 0, u = 0, v = 0;
+            for (uint32_t row = 0; row < h; ++row) {
+                const uint8_t* line = nv12 + static_cast<size_t>(by + row) * width + bx;
+                for (uint32_t x = 0; x < w; ++x) y += line[x];
+            }
+            for (uint32_t row = 0; row < h / 2; ++row) {
+                const uint8_t* line = chroma + static_cast<size_t>(by / 2 + row) * width + bx;
+                for (uint32_t x = 0; x + 1 < w; x += 2) {
+                    u += line[x];
+                    v += line[x + 1];
+                }
+            }
+            const uint64_t pixels = static_cast<uint64_t>(w) * h, chromaPixels = std::max<uint64_t>(1, static_cast<uint64_t>(w / 2) * (h / 2));
+            const uint8_t meanY = static_cast<uint8_t>(y / pixels), meanU = static_cast<uint8_t>(u / chromaPixels),
+                          meanV = static_cast<uint8_t>(v / chromaPixels);
+            for (uint32_t row = 0; row < h; ++row) std::memset(nv12 + static_cast<size_t>(by + row) * width + bx, meanY, w);
+            for (uint32_t row = 0; row < h / 2; ++row) {
+                uint8_t* line = chroma + static_cast<size_t>(by / 2 + row) * width + bx;
+                for (uint32_t x = 0; x + 1 < w; x += 2) {
+                    line[x] = meanU;
+                    line[x + 1] = meanV;
+                }
+            }
+        }
+    }
 }
 
 bool Compositor::EnsureDevice() {
@@ -212,6 +252,8 @@ bool Compositor::EnsureDevice() {
     char forced[16] = {};
     GetEnvironmentVariableA("HITCAM_GPU", forced, sizeof(forced));
     const bool warpOnly = _stricmp(forced, "warp") == 0;
+    // HitCamVCamTest: no GPU at all, for the processor fallback.
+    if (_stricmp(forced, "none") == 0) return false;
     HRESULT hr = E_FAIL;
     for (const D3D_DRIVER_TYPE type : {D3D_DRIVER_TYPE_HARDWARE, D3D_DRIVER_TYPE_WARP}) {
         if (warpOnly && type == D3D_DRIVER_TYPE_HARDWARE) continue;
@@ -370,9 +412,18 @@ bool Compositor::EnsureImage(const Inputs& inputs, uint32_t width, uint32_t heig
     }
     for (uint32_t y = 0; y < ch; ++y) {
         for (uint32_t x = 0; x < cw; ++x) {
-            const uint8_t* p = sample(x * 2, y * 2);
-            chroma[(static_cast<size_t>(y) * cw + x) * 2] = ClampByte(128 + ((-26 * p[2] - 87 * p[1] + 112 * p[0] + 128) >> 8));
-            chroma[(static_cast<size_t>(y) * cw + x) * 2 + 1] = ClampByte(128 + ((112 * p[2] - 102 * p[1] - 10 * p[0] + 128) >> 8));
+            // The 2x2 pixels a chroma sample covers, averaged (no colour fringes on fine picture detail).
+            int r = 0, g = 0, b = 0;
+            for (uint32_t dy = 0; dy < 2; ++dy) {
+                for (uint32_t dx = 0; dx < 2; ++dx) {
+                    const uint8_t* p = sample(x * 2 + dx, y * 2 + dy);
+                    b += p[0];
+                    g += p[1];
+                    r += p[2];
+                }
+            }
+            chroma[(static_cast<size_t>(y) * cw + x) * 2] = ClampByte(128 + ((-26 * r - 87 * g + 112 * b + 512) >> 10));
+            chroma[(static_cast<size_t>(y) * cw + x) * 2 + 1] = ClampByte(128 + ((112 * r - 102 * g - 10 * b + 512) >> 10));
         }
     }
     context_->UpdateSubresource(imageLuma_.texture.Get(), 0, nullptr, luma.data(), width, 0);
@@ -407,7 +458,7 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     params.maskHigh = std::max(params.maskLow + 0.01f, centre + soft / 2);
     // Taps a texel apart; the strength sets how many passes (see the loop below).
     params.blurStep = 1.0f;
-    const int passes = 1 + static_cast<int>(std::lround(s.strength * 4));
+    const int passes = static_cast<int>(std::lround(s.strength * 4));  // 0: the 1/8 downsample alone, a light blur
     params.mode = static_cast<uint32_t>(s.mode == 2 && inputs.image ? 2 : 1);
     params.maskValid = maskValid ? 1 : 0;
     context_->UpdateSubresource(params_.Get(), 0, nullptr, &params, 0, 0);

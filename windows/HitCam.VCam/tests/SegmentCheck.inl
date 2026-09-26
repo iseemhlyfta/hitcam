@@ -163,12 +163,42 @@ void CheckStale() {
     const HitCamBackground blur = Blur();
     HitCam_BridgeSetBackground(bridge.handle, &blur);
     HitCam_BridgeSetSegmentMask(bridge.handle, mask.data(), kMaskWidth, kMaskHeight);
-    Sleep(700);  // past kMaskStaleMs: the analysis stopped
+    Sleep(1000);  // past kMaskStaleMs: the analysis stopped
     bridge.Publish(source);
     const double before = Texture(source, 20, kWidth / 2 - 60), after = Texture(bridge.out, 20, kWidth / 2 - 60);
     char what[160];
     std::snprintf(what, sizeof(what), "stale mask: the person's side is blurred too (texture %.1f -> %.1f)", before, after);
     Check(after < before / 4, what);
+}
+
+void CheckNoGpu() {
+    // HITCAM_GPU=none: the compositor gets no device, as after a lost GPU.
+    SetEnvironmentVariableA("HITCAM_GPU", "none");
+    {
+        TestBridge bridge;
+        Source source(kWidth, kHeight, kWidth + 64);
+        const auto mask = LeftHalfMask();
+        const HitCamBackground blur = Blur();
+        HitCam_BridgeSetBackground(bridge.handle, &blur);
+        HitCam_BridgeSetSegmentMask(bridge.handle, mask.data(), kMaskWidth, kMaskHeight);
+        bridge.Publish(source);
+        const double before = Texture(source, 20, kWidth - 20), after = Texture(bridge.out, 20, kWidth - 20);
+        char what[160];
+        std::snprintf(what, sizeof(what), "no GPU, fail closed: the whole frame in coarse blocks on the processor (texture %.1f -> %.1f)", before,
+                      after);
+        Check(after < before / 4, what);
+    }
+    {
+        TestBridge bridge;
+        Source source(kWidth, kHeight, kWidth + 64);
+        const auto mask = LeftHalfMask();
+        const HitCamBackground open = Blur(0.5f, 0);
+        HitCam_BridgeSetBackground(bridge.handle, &open);
+        HitCam_BridgeSetSegmentMask(bridge.handle, mask.data(), kMaskWidth, kMaskHeight);
+        bridge.Publish(source);
+        Check(Changed(bridge.out, source, 0, kWidth) == 0, "no GPU, fail open: the frame as is");
+    }
+    SetEnvironmentVariableA("HITCAM_GPU", nullptr);
 }
 
 void CheckSpeed() {
@@ -199,6 +229,7 @@ int Run() {
     CheckReplace();
     CheckNoMask();
     CheckStale();
+    CheckNoGpu();
     CheckSpeed();
     std::printf(g_passed ? "ALL PASSED\n" : "SOME CHECKS FAILED\n");
     return g_passed ? 0 : 1;
