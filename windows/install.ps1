@@ -50,9 +50,10 @@ try {
     if ($LASTEXITCODE) { throw "dotnet publish failed ($LASTEXITCODE)" }
 
     Stop-InstalledApp
-    # Replace the installation as a whole, so files an older version shipped do not linger.
+    # Replace the installation as a whole, so files an older version shipped do not linger. Except the models: a model
+    # exported there by hand would be lost, and without a network the hand and face models could not come back.
     if (Test-Path -LiteralPath $installDir) {
-        Get-ChildItem -LiteralPath $installDir -Force | Remove-Item -Recurse -Force
+        Get-ChildItem -LiteralPath $installDir -Force | Where-Object { $_.Name -ne "models" } | Remove-Item -Recurse -Force
     }
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     Copy-Item -Path (Join-Path $publishDir "*") -Destination $installDir -Recurse -Force
