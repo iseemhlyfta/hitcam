@@ -35,15 +35,15 @@ void DownLuma(uint3 id : SV_DispatchThreadID) {
     const int2 last = int2(lumaSize) - 1;
     const int2 origin = int2(id.xy) * 8;
     float value = 0, weight = 0;
-    [unroll] for (int dy = 0; dy < 8; dy += 2) {
-        [unroll] for (int dx = 0; dx < 8; dx += 2) {
+    [unroll] for (int dy = 0; dy < 8; ++dy) {
+        [unroll] for (int dx = 0; dx < 8; ++dx) {
             const int2 p = min(origin + int2(dx, dy), last);
             const float w = 1 - PersonAt((float2(p) + 0.5) / float2(lumaSize));
             value += downLumaIn[p] * w;
             weight += w;
         }
     }
-    downLumaOut[id.xy] = float4(value, 0, weight, 0) / 16.0;
+    downLumaOut[id.xy] = float4(value, 0, weight, 0) / 64.0;
 }
 
 Texture2D<float2> downChromaIn : register(t0);
@@ -56,18 +56,19 @@ void DownChroma(uint3 id : SV_DispatchThreadID) {
     const int2 origin = int2(id.xy) * 8;
     float2 value = 0;
     float weight = 0;
-    [unroll] for (int dy = 0; dy < 8; dy += 2) {
-        [unroll] for (int dx = 0; dx < 8; dx += 2) {
+    [unroll] for (int dy = 0; dy < 8; ++dy) {
+        [unroll] for (int dx = 0; dx < 8; ++dx) {
             const int2 p = min(origin + int2(dx, dy), last);
             const float w = 1 - PersonAt((float2(p) + 0.5) / float2(chromaSize));
             value += downChromaIn[p] * w;
             weight += w;
         }
     }
-    downChromaOut[id.xy] = float4(value, weight, 0) / 16.0;
+    downChromaOut[id.xy] = float4(value, weight, 0) / 64.0;
 }
 
-// ---- Blur: separable Gaussian over the weighted values (sigma 2.3 taps, spaced blurStep apart, bilinear).
+// ---- Blur: separable Gaussian over the weighted values (sigma 2.3 taps, blurStep apart, bilinear); stronger blur runs
+// more passes rather than spacing the taps out, which leaves a grid.
 Texture2D<float4> blurIn : register(t0);
 RWTexture2D<float4> blurOut : register(u0);
 static const float kGauss[5] = {0.1823, 0.1659, 0.1249, 0.0779, 0.0401};

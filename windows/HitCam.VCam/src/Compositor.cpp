@@ -332,7 +332,9 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     const float soft = 0.04f + 0.4f * s.edge;
     params.maskLow = std::max(0.01f, centre - soft / 2);
     params.maskHigh = std::max(params.maskLow + 0.01f, centre + soft / 2);
-    params.blurStep = 1.0f + 3.0f * s.strength;
+    // Taps a texel apart; the strength sets how many passes (see the loop below).
+    params.blurStep = 1.0f;
+    const int passes = 1 + static_cast<int>(std::lround(s.strength * 4));
     params.mode = static_cast<uint32_t>(s.mode == 2 && inputs.image ? 2 : 1);
     params.maskValid = maskValid ? 1 : 0;
     context_->UpdateSubresource(params_.Get(), 0, nullptr, &params, 0, 0);
@@ -360,11 +362,13 @@ bool Compositor::Run(uint8_t* nv12, uint32_t width, uint32_t height, const Input
     const uint32_t sw = params.smallSize[0], sh = params.smallSize[1];
     const uint32_t scw = params.smallChromaSize[0], sch = params.smallChromaSize[1];
     dispatch(downLuma_.Get(), lumaIn_.srv.Get(), nullptr, nullptr, smallLuma_[0].uav.Get(), sw, sh);
-    dispatch(blurLumaX_.Get(), smallLuma_[0].srv.Get(), nullptr, nullptr, smallLuma_[1].uav.Get(), sw, sh);
-    dispatch(blurLumaY_.Get(), smallLuma_[1].srv.Get(), nullptr, nullptr, smallLuma_[0].uav.Get(), sw, sh);
     dispatch(downChroma_.Get(), chromaIn_.srv.Get(), nullptr, nullptr, smallChroma_[0].uav.Get(), scw, sch);
-    dispatch(blurChromaX_.Get(), smallChroma_[0].srv.Get(), nullptr, nullptr, smallChroma_[1].uav.Get(), scw, sch);
-    dispatch(blurChromaY_.Get(), smallChroma_[1].srv.Get(), nullptr, nullptr, smallChroma_[0].uav.Get(), scw, sch);
+    for (int pass = 0; pass < passes; ++pass) {
+        dispatch(blurLumaX_.Get(), smallLuma_[0].srv.Get(), nullptr, nullptr, smallLuma_[1].uav.Get(), sw, sh);
+        dispatch(blurLumaY_.Get(), smallLuma_[1].srv.Get(), nullptr, nullptr, smallLuma_[0].uav.Get(), sw, sh);
+        dispatch(blurChromaX_.Get(), smallChroma_[0].srv.Get(), nullptr, nullptr, smallChroma_[1].uav.Get(), scw, sch);
+        dispatch(blurChromaY_.Get(), smallChroma_[1].srv.Get(), nullptr, nullptr, smallChroma_[0].uav.Get(), scw, sch);
+    }
     const bool replace = params.mode == 2;
     dispatch(compositeLuma_.Get(), lumaIn_.srv.Get(), smallLuma_[0].srv.Get(), replace ? imageLuma_.srv.Get() : nullptr,
              lumaOut_.uav.Get(), width, height);
