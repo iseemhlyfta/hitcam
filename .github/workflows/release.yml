@@ -10,14 +10,34 @@ permissions:
   contents: read
 
 jobs:
+  # The tag must match the version in all three apps, or the release would ship with the old version inside.
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check versions against the tag
+        run: |
+          want="${GITHUB_REF_NAME#v}"
+          windows=$(sed -n 's:.*<Version>\(.*\)</Version>.*:\1:p' windows/Directory.Build.props)
+          ios=$(sed -n 's/.*MARKETING_VERSION: "\(.*\)".*/\1/p' ios/project.yml)
+          android=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' android/app/build.gradle.kts)
+          echo "tag $want, Windows $windows, iOS $ios, Android $android"
+          if [ "$windows" != "$want" ] || [ "$ios" != "$want" ] || [ "$android" != "$want" ]; then
+            echo "::error::Version mismatch: tag $want, Windows $windows, iOS $ios, Android $android"
+            exit 1
+          fi
+
   windows:
+    needs: version
     uses: ./.github/workflows/windows.yml
 
   ios:
+    needs: version
     uses: ./.github/workflows/ios.yml
 
   # Secrets carry the Android release signing key (see android.yml).
   android:
+    needs: version
     uses: ./.github/workflows/android.yml
     secrets: inherit
 
@@ -59,10 +79,16 @@ jobs:
           Discord, Teams, OBS и браузерах. В Windows 10 её не видят приложение «Камера» и часть приложений Microsoft Store.
 
           **iPhone:** установите `HitCam-ios-unsigned.ipa` через Sideloadly —
-          см. [docs/install-ios.md](https://github.com/${{ github.repository }}/blob/main/docs/install-ios.md).
+          см. [docs/install-ios.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/install-ios.md).
 
           **Android 8.0+:** скачайте `HitCam-android.apk` на телефон и установите —
-          см. [docs/install-android.md](https://github.com/${{ github.repository }}/blob/main/docs/install-android.md).
+          см. [docs/install-android.md](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/install-android.md).
           EOF
-          gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
-            --repo "${{ github.repository }}" --title "HitCam $TAG" --notes-file notes.md --generate-notes
+          # A re-run after a failure past this point replaces the files instead of failing on the existing release.
+          if gh release view "$TAG" --repo "${{ github.repository }}" > /dev/null 2>&1; then
+            gh release upload "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
+              --repo "${{ github.repository }}" --clobber
+          else
+            gh release create "$TAG" HitCam-windows-x64.zip HitCam-ios-unsigned.ipa HitCam-android.apk \
+              --repo "${{ github.repository }}" --title "HitCam $TAG" --notes-file notes.md --generate-notes
+          fi

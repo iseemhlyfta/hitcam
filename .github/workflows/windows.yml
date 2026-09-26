@@ -24,11 +24,13 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: 10.0.x
-      - name: Test
-        run: |
-          dotnet test HitCam.Core.Tests -c Release
-          dotnet test HitCam.Desktop.Tests -c Release
-          dotnet test HitCam.Vision.Tests -c Release
+      # One step per project: in a multi-line pwsh step only the last command's exit code fails the step.
+      - name: Test core
+        run: dotnet test HitCam.Core.Tests -c Release
+      - name: Test desktop
+        run: dotnet test HitCam.Desktop.Tests -c Release
+      - name: Test vision
+        run: dotnet test HitCam.Vision.Tests -c Release
       # Also builds the C++ virtual camera (HitCam.VCam) through build.ps1.
       - name: Publish desktop app
         run: dotnet publish HitCam.Desktop -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o ../out/HitCam
@@ -47,6 +49,7 @@ jobs:
       - name: Export default vision model
         working-directory: vision
         run: |
+          $PSNativeCommandUseErrorActionPreference = $true   # any failing command fails the step, not only the last
           python -m pip install --quiet torch==2.14.0 torchvision==0.29.0 --index-url https://download.pytorch.org/whl/cpu
           python -m pip install --quiet -r requirements-export.txt
           python export_default.py --cpu --out ../out/HitCam/models
