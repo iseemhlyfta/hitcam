@@ -15,7 +15,7 @@ public sealed class PalmDetector : IDisposable
     private static readonly PointF[] Anchors = HandGeometry.PalmAnchors();
 
     private readonly InferenceSession _session;
-    private readonly RunOptions _runOptions = new();
+    private readonly RunOptions _runOptions;
     private readonly float[] _input = new float[InputSize * InputSize * 3];
     private readonly OrtValue _inputValue;
     private readonly string[] _inputNames;
@@ -26,12 +26,14 @@ public sealed class PalmDetector : IDisposable
     {
         _session = session;
         Provider = provider;
-        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, InputSize, InputSize, 3]);
         _inputNames = [session.InputMetadata.Keys.First()];
         // [1, 2016, 18] boxes and keypoints, then [1, 2016, 1] score logits.
         _outputNames = [.. session.OutputMetadata.OrderByDescending(o => o.Value.Dimensions[^1]).Select(o => o.Key)];
         if (_outputNames.Length != 2 || session.OutputMetadata[_outputNames[0]].Dimensions[^1] != Values)
             throw new ModelFormatException("the palm detector must have two outputs (boxes, scores)");
+        // Native objects only once the model is accepted: nothing is left for the finalizer to release off the gate.
+        _runOptions = new RunOptions();
+        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, InputSize, InputSize, 3]);
     }
 
     public string Provider { get; }
@@ -45,7 +47,8 @@ public sealed class PalmDetector : IDisposable
         }
         catch
         {
-            session.Dispose();
+            lock (OnnxGate.Lock)
+                session.Dispose();
             throw;
         }
     }
@@ -78,7 +81,7 @@ public sealed class PalmDetector : IDisposable
         for (var i = 0; i < Anchors.Length; i++)
         {
             var score = 1f / (1f + MathF.Exp(-Math.Clamp(scores[i], -100f, 100f)));
-            if (score < threshold)
+            if (!(score >= threshold)) // NaN too
                 continue;
             var v = raw.Slice(i * Values, Values);
             var anchor = Anchors[i];

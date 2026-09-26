@@ -29,7 +29,7 @@ public sealed class Detector : IObjectDetector
     public const string Cpu = "CPU";
 
     private readonly InferenceSession _session;
-    private readonly RunOptions _runOptions = new();
+    private readonly RunOptions _runOptions;
     private readonly Preprocessor _preprocessor = new();
     private readonly float[] _input;
     private readonly OrtValue _inputValue;
@@ -50,6 +50,8 @@ public sealed class Detector : IObjectDetector
             throw new ModelFormatException($"the model has no outputs \"{model.BoxesOutput}\" and \"{model.LogitsOutput}\"");
 
         _input = new float[3 * model.InputWidth * model.InputHeight];
+        // Native objects only once the model is accepted: nothing is left for the finalizer to release off the gate.
+        _runOptions = new RunOptions();
         _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, 3, model.InputHeight, model.InputWidth]);
         _inputNames = [inputName];
         _outputNames = [model.BoxesOutput, model.LogitsOutput];
@@ -87,7 +89,17 @@ public sealed class Detector : IObjectDetector
                     ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
                     GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
                 };
-                options.AppendExecutionProvider_DML(0);
+                try
+                {
+                    // Adding DirectML creates its device: one ONNX Runtime call at a time (OnnxGate).
+                    lock (OnnxGate.Lock)
+                        options.AppendExecutionProvider_DML(0);
+                }
+                catch
+                {
+                    options.Dispose();
+                    throw;
+                }
                 detector = Create(model, options, DirectML, null);
                 detector.WarmUp();
                 return detector;
@@ -129,12 +141,14 @@ public sealed class Detector : IObjectDetector
         }
         catch
         {
-            session?.Dispose();
+            lock (OnnxGate.Lock)
+                session?.Dispose();
             throw;
         }
         finally
         {
-            options.Dispose();
+            lock (OnnxGate.Lock)
+                options.Dispose();
         }
     }
 

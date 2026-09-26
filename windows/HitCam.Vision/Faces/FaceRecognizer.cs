@@ -25,7 +25,7 @@ public sealed class FaceRecognizer : IDisposable
     ];
 
     private readonly InferenceSession _session;
-    private readonly RunOptions _runOptions = new();
+    private readonly RunOptions _runOptions;
     private readonly float[] _input = new float[3 * InputSize * InputSize];
     private readonly OrtValue _inputValue;
     private readonly string[] _inputNames;
@@ -35,11 +35,13 @@ public sealed class FaceRecognizer : IDisposable
     {
         _session = session;
         Provider = provider;
-        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, 3, InputSize, InputSize]);
         _inputNames = [session.InputMetadata.Keys.First()];
         _outputNames = [session.OutputMetadata.Keys.First()];
         if (session.OutputMetadata.Values.First().Dimensions[^1] != Length)
             throw new ModelFormatException("the face recognizer must output 128 numbers");
+        // Native objects only once the model is accepted: nothing is left for the finalizer to release off the gate.
+        _runOptions = new RunOptions();
+        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, 3, InputSize, InputSize]);
     }
 
     public string Provider { get; }

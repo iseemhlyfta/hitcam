@@ -79,6 +79,8 @@ public sealed class ModelCatalogTests : IDisposable
     [InlineData("""{"format":"rfdetr","resize":"letterbox"}""", "resize")]
     [InlineData("""{"format":"rfdetr","input":[384]}""", "input")]
     [InlineData("""{"format":"rfdetr","input":[16,16]}""", "input")]
+    [InlineData("""{"format":"rfdetr","input":[1e400,384]}""", "input")]
+    [InlineData("""{"format":"rfdetr","input":[384,384],"mean":[0,-1e400,0]}""", "mean")]
     [InlineData("""{"format":"rfdetr","input":[384,384],"mean":[0.5,0.5]}""", "mean")]
     [InlineData("""{"format":"rfdetr","input":[384,384],"mean":[0,0,0],"std":[1,0,1]}""", "std")]
     [InlineData("""{"format":"rfdetr","input":[384,384],"mean":[0,0,0],"std":[1,1,1]}""", "outputs")]

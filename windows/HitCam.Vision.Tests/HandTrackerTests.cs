@@ -142,6 +142,18 @@ public sealed class HandTrackerTests
     }
 
     [Fact]
+    public void A_hand_the_model_scores_as_nan_is_dropped_not_kept_forever()
+    {
+        var models = new FakeHandModels();
+        models.Hands.Add(SyntheticHand.Points(new PointF(300, 250), 150, 0));
+        var tracker = new HandTracker(models);
+        Assert.Single(tracker.Update(Frame, At(0)));
+
+        models.Scores[0] = float.NaN;
+        Assert.Empty(tracker.Update(Frame, At(1)));
+    }
+
+    [Fact]
     public void A_weak_new_hand_is_not_shown()
     {
         var models = new FakeHandModels();

@@ -67,7 +67,7 @@ public sealed class HandTracker(IHandModels models, HandTrackerOptions? options 
         foreach (var hand in _hands)
         {
             var landmarks = models.Landmarks(frame, hand.Roi);
-            if (landmarks.Score < _options.KeepScore)
+            if (!(landmarks.Score >= _options.KeepScore)) // NaN too: such a hand would never be dropped
                 continue;
             hand.Apply(landmarks, now);
             if (kept.Any(k => Geometry.Iou(k.Bounds, hand.Bounds) > _options.DuplicateIou))
@@ -86,7 +86,7 @@ public sealed class HandTracker(IHandModels models, HandTrackerOptions? options 
                 if (_hands.Any(h => Covers(h.Bounds, palm.Box)))
                     continue;
                 var landmarks = models.Landmarks(frame, HandGeometry.FromPalm(palm));
-                if (landmarks.Score < _options.NewHandScore)
+                if (!(landmarks.Score >= _options.NewHandScore))
                     continue;
                 var hand = new State(_nextId++, _options);
                 hand.Apply(landmarks, now);

@@ -14,27 +14,29 @@ internal static class OnnxLoader
 
         if (preference == ProviderPreference.Auto)
         {
-            InferenceSession? session = null;
-            try
+            // All of it under the gate, the failure path too: adding DirectML creates its device, and releasing a
+            // session while another thread runs one is what crashed onnxruntime.dll.
+            lock (OnnxGate.Lock)
             {
-                using var options = new SessionOptions
+                InferenceSession? session = null;
+                try
                 {
-                    // DirectML does not support memory patterns or parallel execution.
-                    EnableMemoryPattern = false,
-                    ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
-                    GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
-                };
-                options.AppendExecutionProvider_DML(0);
-                lock (OnnxGate.Lock)
-                {
+                    using var options = new SessionOptions
+                    {
+                        // DirectML does not support memory patterns or parallel execution.
+                        EnableMemoryPattern = false,
+                        ExecutionMode = ExecutionMode.ORT_SEQUENTIAL,
+                        GraphOptimizationLevel = GraphOptimizationLevel.ORT_ENABLE_ALL,
+                    };
+                    options.AppendExecutionProvider_DML(0);
                     session = new InferenceSession(path, options);
                     warmUp(session);
+                    return (session, Detector.DirectML);
                 }
-                return (session, Detector.DirectML);
-            }
-            catch (Exception ex) when (ex is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
-            {
-                session?.Dispose();
+                catch (Exception ex) when (ex is OnnxRuntimeException or EntryPointNotFoundException or DllNotFoundException)
+                {
+                    session?.Dispose();
+                }
             }
         }
 
@@ -55,7 +57,8 @@ internal static class OnnxLoader
         }
         catch
         {
-            cpu.Dispose();
+            lock (OnnxGate.Lock)
+                cpu.Dispose();
             throw;
         }
     }

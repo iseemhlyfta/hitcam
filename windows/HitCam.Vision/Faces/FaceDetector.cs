@@ -21,7 +21,7 @@ public sealed class FaceDetector : IDisposable
     private static readonly int[] Strides = [8, 16, 32];
 
     private readonly InferenceSession _session;
-    private readonly RunOptions _runOptions = new();
+    private readonly RunOptions _runOptions;
     private readonly float[] _input = new float[3 * InputSize * InputSize];
     private readonly OrtValue _inputValue;
     private readonly string[] _inputNames;
@@ -31,12 +31,14 @@ public sealed class FaceDetector : IDisposable
     {
         _session = session;
         Provider = provider;
-        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, 3, InputSize, InputSize]);
         _inputNames = [session.InputMetadata.Keys.First()];
         // cls, obj, bbox, kps for each stride, in that order.
         _outputNames = [.. new[] { "cls", "obj", "bbox", "kps" }.SelectMany(kind => Strides.Select(s => $"{kind}_{s}"))];
         if (_outputNames.Any(n => !session.OutputMetadata.ContainsKey(n)))
             throw new ModelFormatException("the face detector must have the YuNet outputs cls/obj/bbox/kps_8/16/32");
+        // Native objects only once the model is accepted: nothing is left for the finalizer to release off the gate.
+        _runOptions = new RunOptions();
+        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, 3, InputSize, InputSize]);
     }
 
     public string Provider { get; }
@@ -92,7 +94,7 @@ public sealed class FaceDetector : IDisposable
         for (var i = 0; i < cells; i++)
         {
             var score = MathF.Sqrt(Math.Clamp(cls[i], 0f, 1f) * Math.Clamp(obj[i], 0f, 1f));
-            if (score < threshold)
+            if (!(score >= threshold)) // NaN too
                 continue;
             var row = i / cols;
             var col = i % cols;

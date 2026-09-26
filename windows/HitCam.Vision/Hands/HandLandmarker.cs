@@ -21,7 +21,7 @@ public sealed class HandLandmarker : IDisposable
     public const int PointCount = 21;
 
     private readonly InferenceSession _session;
-    private readonly RunOptions _runOptions = new();
+    private readonly RunOptions _runOptions;
     private readonly float[] _input = new float[InputSize * InputSize * 3];
     private readonly OrtValue _inputValue;
     private readonly string[] _inputNames;
@@ -31,7 +31,6 @@ public sealed class HandLandmarker : IDisposable
     {
         _session = session;
         Provider = provider;
-        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, InputSize, InputSize, 3]);
         _inputNames = [session.InputMetadata.Keys.First()];
         // Landmarks [1, 63], presence score [1, 1], handedness [1, 1] (world landmarks [1, 63] are not used).
         var outputs = session.OutputMetadata.ToList();
@@ -39,6 +38,9 @@ public sealed class HandLandmarker : IDisposable
             || outputs[1].Value.Dimensions[^1] != 1 || outputs[2].Value.Dimensions[^1] != 1)
             throw new ModelFormatException("the hand landmark model must output landmarks, score and handedness");
         _outputNames = [outputs[0].Key, outputs[1].Key, outputs[2].Key];
+        // Native objects only once the model is accepted: nothing is left for the finalizer to release off the gate.
+        _runOptions = new RunOptions();
+        _inputValue = OrtValue.CreateTensorValueFromMemory(_input, [1, InputSize, InputSize, 3]);
     }
 
     public string Provider { get; }
@@ -52,7 +54,8 @@ public sealed class HandLandmarker : IDisposable
         }
         catch
         {
-            session.Dispose();
+            lock (OnnxGate.Lock)
+                session.Dispose();
             throw;
         }
     }
