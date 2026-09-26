@@ -251,6 +251,40 @@ public sealed class FaceTrackerTests
     }
 
     [Fact]
+    public void A_stranger_who_takes_the_place_of_an_uncovered_person_is_hidden_at_once()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models);
+        tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
+        Assert.False(Assert.Single(tracker.Update(Frame, At(0.03))).Hidden);
+
+        // Person 1 steps out, and within the hold someone else sits down in the same place.
+        models.Faces.Clear();
+        tracker.Update(Frame, At(0.1));
+        models.Faces.Add((new RectangleF(105, 100, 100, 100), 2));
+        Assert.True(Assert.Single(tracker.Update(Frame, At(0.3))).Hidden);
+    }
+
+    [Fact]
+    public void A_stranger_who_slides_into_an_uncovered_track_is_hidden_at_the_next_check()
+    {
+        var models = new FakeFaceModels();
+        models.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var tracker = new FaceTracker(models);
+        tracker.Toggle(Assert.Single(tracker.Update(Frame, At(0))).Id);
+
+        // Heads cross: the track keeps being matched, but now it is person 2.
+        models.Faces[0] = (new RectangleF(100, 100, 100, 100), 2);
+        tracker.Update(Frame, At(0.5));
+        Assert.True(Assert.Single(tracker.Update(Frame, At(1.05))).Hidden);
+
+        // Person 1 is still remembered, and uncovered when back.
+        models.Faces[0] = (new RectangleF(100, 100, 100, 100), 1);
+        Assert.False(Assert.Single(tracker.Update(Frame, At(2.1))).Hidden);
+    }
+
+    [Fact]
     public void Forgetting_people_hides_everyone_again()
     {
         var models = new FakeFaceModels();
@@ -315,6 +349,57 @@ public sealed class FaceEngineTests
         camera.Latest = 3;
         Assert.True(results.TryTake(out var third, Wait));
         Assert.False(Assert.Single(third.Faces).Hidden);
+    }
+
+    [Fact]
+    public void Models_that_fail_while_running_are_replaced_by_the_fallback()
+    {
+        var camera = new FakeCamera();
+        var broken = new FailingFaceModels();
+        broken.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        var fallback = new FakeFaceModels();
+        fallback.Faces.Add((new RectangleF(100, 100, 100, 100), 1));
+        using var engine = new FaceEngine(camera.Grab, () => broken, fallbackFactory: () => fallback);
+        var results = new BlockingCollection<FaceResult>();
+        engine.ResultReady += results.Add;
+
+        engine.Start();
+        camera.Latest = 1;
+        Assert.True(results.TryTake(out _, Wait));
+
+        // The GPU goes away (driver reset): the next frames come from the fallback models, hidden as before.
+        broken.Fail = true;
+        FaceResult? recovered = null;
+        for (ulong frame = 2; frame < 100 && recovered is null; frame++)
+        {
+            camera.Latest = frame;
+            if (results.TryTake(out var result, TimeSpan.FromMilliseconds(100)) && result.Stats.Provider == "Fake")
+                recovered = result;
+        }
+        Assert.NotNull(recovered);
+        Assert.True(Assert.Single(recovered.Faces).Hidden);
+        Assert.True(broken.IsDisposed);
+        Assert.Equal(VisionState.Running, engine.Status.State);
+    }
+
+    private sealed class FailingFaceModels : IFaceModels
+    {
+        private readonly FakeFaceModels _inner = new();
+
+        public List<(RectangleF Box, int Person)> Faces => _inner.Faces;
+
+        public volatile bool Fail;
+
+        public bool IsDisposed { get; private set; }
+
+        public string Provider => "DirectML";
+
+        public IReadOnlyList<DetectedFace> Detect(VisionFrame frame) =>
+            Fail ? throw new InvalidOperationException("device removed") : _inner.Detect(frame);
+
+        public float[] Fingerprint(VisionFrame frame, DetectedFace face) => _inner.Fingerprint(frame, face);
+
+        public void Dispose() => IsDisposed = true;
     }
 }
 

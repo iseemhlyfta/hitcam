@@ -59,9 +59,9 @@ public sealed class FaceModels : IFaceModels
     }
 
     /// <summary>Loads the models from the default folders; <see cref="FileNotFoundException"/> if they are missing.</summary>
-    public static FaceModels LoadDefault() =>
+    public static FaceModels LoadDefault(ProviderPreference preference = ProviderPreference.Auto) =>
         FaceModelFiles.Find() is { } files
-            ? Load(files.Detector, files.Recognizer)
+            ? Load(files.Detector, files.Recognizer, preference)
             : throw new FileNotFoundException(
                 $"{FaceModelFiles.DetectorFile} and {FaceModelFiles.RecognizerFile} not found in {string.Join(", ", FaceModelFiles.DefaultDirectories)}");
 

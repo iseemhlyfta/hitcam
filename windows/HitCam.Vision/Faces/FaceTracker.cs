@@ -53,6 +53,7 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
     // People the user uncovered: shared with the engine, so they outlive this tracker (models reloaded).
     private readonly List<FacePeople.Person> _uncovered = (people ?? new FacePeople()).Uncovered;
     private int _nextId = 1;
+    private TimeSpan _lastUpdate = TimeSpan.MinValue;
 
     /// <summary>People uncovered so far (they stay until the app closes).</summary>
     public int UncoveredPeople => _uncovered.Count;
@@ -111,8 +112,10 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
                 continue;
             matchedFaces.Add(face);
             matchedDetections.Add(detection);
+            // Found again after being held: whoever is there now may be someone else, so check at once.
+            var wasHeld = face.LastSeen < _lastUpdate;
             face.Update(detection, now, _options.Smoothing);
-            if (now - face.FingerprintTime >= _options.Refresh)
+            if (wasHeld || now - face.FingerprintTime >= _options.Refresh)
                 Recognize(face, frame, detection, now);
         }
 
@@ -125,6 +128,7 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             Recognize(face, frame, detection, now);
         }
 
+        _lastUpdate = now;
         return [.. _faces.Select(f => f.ToTrackedFace(frame.Width, frame.Height, matchedFaces.Contains(f) || f.LastSeen == now, _options))];
     }
 
@@ -141,11 +145,22 @@ public sealed class FaceTracker(IFaceModels models, FacePeople? people = null, F
             return;
         }
         face.FingerprintTime = now;
+        // Someone else on this track (heads crossed, a stranger sat down where a held face was): a stranger again,
+        // hidden until recognized. An uncovered person's fingerprint only learns from faces that are them.
+        if (face.Fingerprint is { } own && FaceRecognizer.Similarity(own, fresh) < FaceRecognizer.SameFace)
+        {
+            face.Fingerprint = null;
+            face.Person = null;
+        }
         face.Fingerprint = face.Fingerprint is null ? fresh : Average(face.Fingerprint, fresh);
         if (face.Person is { } person)
         {
-            person.Fingerprint = Average(person.Fingerprint, fresh);
-            return;
+            if (FaceRecognizer.Similarity(person.Fingerprint, fresh) >= FaceRecognizer.SameFace)
+            {
+                person.Fingerprint = Average(person.Fingerprint, fresh);
+                return;
+            }
+            face.Person = null;
         }
         var best = _uncovered.Select(p => (Person: p, Score: FaceRecognizer.Similarity(p.Fingerprint, fresh)))
             .Where(p => p.Score >= FaceRecognizer.SameFace)

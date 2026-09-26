@@ -18,6 +18,7 @@ public sealed class FaceEngine : IDisposable
 
     private readonly FrameSource _source;
     private readonly Func<IFaceModels> _modelFactory;
+    private readonly Func<IFaceModels> _fallbackFactory;
     private readonly FaceTrackerOptions? _trackerOptions;
     private readonly TimeProvider _time;
     private readonly Thread _thread;
@@ -32,11 +33,16 @@ public sealed class FaceEngine : IDisposable
     private volatile bool _disposed;
 
     /// <param name="modelFactory">Loads the models; <see cref="FaceModels.LoadDefault"/> by default. May throw.</param>
+    /// <param name="fallbackFactory">
+    /// Loads the models again when they fail while running (a GPU driver reset takes DirectML with it): the processor
+    /// by default. Faces must not stay uncovered until the user switches the feature off and on.
+    /// </param>
     public FaceEngine(FrameSource source, Func<IFaceModels>? modelFactory = null, TimeProvider? time = null,
-        FaceTrackerOptions? trackerOptions = null)
+        FaceTrackerOptions? trackerOptions = null, Func<IFaceModels>? fallbackFactory = null)
     {
         _source = source;
-        _modelFactory = modelFactory ?? FaceModels.LoadDefault;
+        _modelFactory = modelFactory ?? (() => FaceModels.LoadDefault());
+        _fallbackFactory = fallbackFactory ?? (modelFactory is null ? () => FaceModels.LoadDefault(ProviderPreference.Cpu) : _modelFactory);
         _trackerOptions = trackerOptions;
         _time = time ?? TimeProvider.System;
         _thread = new Thread(Run) { IsBackground = true, Name = "HitCam faces" };
@@ -106,6 +112,7 @@ public sealed class FaceEngine : IDisposable
         IFaceModels? models = null;
         FaceTracker? tracker = null;
         var loadedVersion = 0;
+        var onFallback = false;
         var frame = new VisionFrame();
         ulong lastSequence = 0;
         var lastFrameSize = (0, 0);
@@ -125,6 +132,7 @@ public sealed class FaceEngine : IDisposable
                 if (version != loadedVersion)
                 {
                     loadedVersion = version;
+                    onFallback = false;
                     models?.Dispose();
                     models = null;
                     tracker = null;
@@ -198,6 +206,23 @@ public sealed class FaceEngine : IDisposable
                     models.Dispose();
                     models = null;
                     tracker = null;
+                    if (!onFallback)
+                    {
+                        // Once per start: the fallback (the processor) usually survives what took the GPU down.
+                        onFallback = true;
+                        Trace.TraceWarning($"HitCam faces: the models failed ({ex.Message}); loading them again on the fallback");
+                        try
+                        {
+                            models = _fallbackFactory();
+                            tracker = new FaceTracker(models, _people, _trackerOptions);
+                            SetStatus(version, new VisionStatus(VisionState.Running, null, models.Provider, null));
+                            continue;
+                        }
+                        catch (Exception fallbackError)
+                        {
+                            ex = fallbackError;
+                        }
+                    }
                     SetStatus(version, new VisionStatus(VisionState.Failed, null, null, ex.Message));
                     continue;
                 }
